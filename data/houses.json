@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "house_code": "H001",
+    "house_name": "Sunrise Apartments",
+    "house_number": "A4",
+    "notes": "",
+    "created_at": "2026-06-02T10:22:29.138Z",
+    "updated_at": "2026-06-02T10:22:29.139Z"
+  },
+  {
+    "id": 2,
+    "house_code": "H002",
+    "house_name": "Sunrise Apartments",
+    "house_number": "B2",
+    "notes": "",
+    "created_at": "2026-06-02T10:22:29.139Z",
+    "updated_at": "2026-06-02T10:22:29.139Z"
+  }
+]

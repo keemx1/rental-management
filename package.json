@@ -1,0 +1,34 @@
+{
+  "name": "rental-messaging",
+  "version": "1.0.0",
+  "description": "Rental management WhatsApp reminders and rent collection dashboard",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "start:local": "node backend/scripts/kill-port.js 3001 && node backend/server.js",
+    "stop": "node backend/scripts/kill-port.js 3001",
+    "dev": "node --watch backend/server.js",
+    "seed:admin": "node backend/scripts/seed-admin.js",
+    "reset:admin": "node backend/scripts/reset-admin.js",
+    "purge:demo-tenants": "node backend/scripts/purge-demo-tenants.js"
+  },
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.106.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "pg": "^8.13.1",
+    "puppeteer": "^24.0.0",
+    "qrcode": "^1.5.4"
+  }
+}

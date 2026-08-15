@@ -1,0 +1,30 @@
+[
+  {
+    "id": 1,
+    "tenant_code": "T001",
+    "name": "Jane Wanjiku",
+    "phone_number": "254712345678",
+    "property_name": "Sunrise Apartments",
+    "unit_label": "A4",
+    "rent_amount": 15000,
+    "rent_due_date": "2026-06-04",
+    "rent_due_time": "23:59:00",
+    "status": "Active",
+    "created_at": "2026-05-30T22:21:50.815Z",
+    "updated_at": "2026-05-30T22:21:50.815Z"
+  },
+  {
+    "id": 2,
+    "tenant_code": "T002",
+    "name": "Peter Ochieng",
+    "phone_number": "254723456789",
+    "property_name": "Sunrise Apartments",
+    "unit_label": "B2",
+    "rent_amount": 12000,
+    "rent_due_date": "2026-05-28",
+    "rent_due_time": "18:00:00",
+    "status": "Overdue",
+    "created_at": "2026-05-30T22:21:50.815Z",
+    "updated_at": "2026-05-30T22:21:50.815Z"
+  }
+]

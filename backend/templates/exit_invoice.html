@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+    body {
+      font-family: 'Roboto', sans-serif;
+      margin: 0;
+      padding: 22px;
+      color: #333;
+      background: white;
+      font-size: 11px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .header img {
+      width: 90px;
+      max-width: 90px;
+      object-fit: contain;
+    }
+    .header-content {
+      flex: 1;
+      text-align: center;
+      padding-left: 16px;
+    }
+    .company-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a4b8c;
+      margin: 0 0 3px 0;
+    }
+    .company-slogan {
+      font-size: 9px;
+      font-style: italic;
+      color: #666;
+      margin: 0 0 3px 0;
+    }
+    .company-details {
+      font-size: 9px;
+      color: #555;
+    }
+    .separator-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 10px 0;
+      position: relative;
+    }
+    .separator-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .inv-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .inv-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a4b8c;
+    }
+    .inv-date {
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .inv-no-bar {
+      display: inline-block;
+      background: #1a4b8c;
+      color: white;
+      font-weight: 700;
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .status-badge {
+      display: inline-block;
+      font-weight: 700;
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 10px;
+      margin-left: 8px;
+    }
+    .status-Draft { background: #fef3c7; color: #92400e; }
+    .status-Finalized { background: #dcfce7; color: #166534; }
+    .customer-info {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 10px;
+      font-size: 11px;
+      flex-wrap: wrap;
+    }
+    .customer-info div {
+      display: flex;
+      flex-direction: column;
+    }
+    .customer-info .label {
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 12px;
+    }
+    th {
+      background: #1a4b8c;
+      color: white;
+      text-align: left;
+      padding: 5px;
+      font-size: 11px;
+    }
+    td {
+      padding: 5px;
+      border: 1px solid #dee2e6;
+      font-size: 11px;
+    }
+    tr:nth-child(even) td {
+      background: #f8f9fa;
+    }
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #1a4b8c;
+      margin: 8px 0 4px 0;
+      text-transform: uppercase;
+    }
+    .empty-note {
+      text-align: center;
+      color: #888;
+      padding: 8px;
+    }
+    .reason-box {
+      margin-bottom: 12px;
+      padding: 8px;
+      border: 1px solid #e0a800;
+      border-radius: 6px;
+      background: #fffbeb;
+      font-size: 11px;
+      color: #78350f;
+    }
+    .totals-area {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 6px;
+    }
+    .totals-table {
+      width: 360px;
+      border-collapse: collapse;
+    }
+    .totals-table td {
+      padding: 4px 10px;
+      border: none;
+      font-size: 11px;
+    }
+    .totals-table tr td:first-child {
+      text-align: right;
+      font-weight: 700;
+      background: #f8f9fa;
+    }
+    .totals-table tr td:last-child {
+      background: #e9ecef;
+      text-align: right;
+      font-weight: 700;
+    }
+    .totals-table tr.grand td:last-child {
+      background: #1a4b8c;
+      color: white;
+      font-weight: 700;
+    }
+    .note-box {
+      margin-top: 10px;
+      padding: 8px;
+      border: 1px solid #6366f1;
+      border-radius: 6px;
+      background: #f0f0ff;
+      font-size: 10px;
+      color: #4338ca;
+      text-align: center;
+    }
+    .footer-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 12px 0 6px 0;
+      position: relative;
+    }
+    .footer-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .footer-text {
+      text-align: center;
+      font-size: 11px;
+      color: #1a4b8c;
+      font-weight: 700;
+    }
+    .footer-slogan {
+      text-align: center;
+      font-size: 9px;
+      font-style: italic;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="{{logo_base64}}" alt="Logo">
+    <div class="header-content">
+      <h1 class="company-title">GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</h1>
+      <p class="company-slogan">Find a Home. Leave the Management to Us</p>
+      <p class="company-details">Dealers in: Rent management, property and General Consultancy<br>Located in Ruiru, Juja | Tel: +254 702 705 821 | Email: jujaview@gmail.com</p>
+    </div>
+  </div>
+
+  <div class="separator-bar"></div>
+
+  <div class="inv-header">
+    <div class="inv-title">EXIT INVOICE / FINAL SETTLEMENT</div>
+    <div class="inv-date">{{date}}</div>
+  </div>
+
+  <span class="inv-no-bar">EXIT NO: {{exit_number}}</span>
+  <span class="status-badge status-{{status}}">{{status_label}}</span>
+
+  <div class="customer-info">
+    <div style="width: 30px;"><span class="label">To:</span></div>
+    <div>
+      <span class="label">NAME</span>
+      <span>{{tenant_name}}</span>
+    </div>
+    <div>
+      <span class="label">UNIT / HOUSE NO</span>
+      <span>{{unit_label}}</span>
+    </div>
+    <div>
+      <span class="label">PROPERTY</span>
+      <span>{{property_name}}</span>
+    </div>
+    <div>
+      <span class="label">HOUSE ID</span>
+      <span>{{house_paybill}}</span>
+    </div>
+    <div>
+      <span class="label">NATIONAL ID</span>
+      <span>{{national_id}}</span>
+    </div>
+    <div>
+      <span class="label">PHONE</span>
+      <span>{{phone_number}}</span>
+    </div>
+    <div>
+      <span class="label">MOVE IN</span>
+      <span>{{move_in_date}}</span>
+    </div>
+    <div>
+      <span class="label">MOVE OUT</span>
+      <span>{{move_out_date}}</span>
+    </div>
+  </div>
+
+  {{reason_box}}
+
+  {{decision_box}}
+
+  <div class="section-label">Deductions / Charges on Exit</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 60%;">Description</th>
+        <th style="text-align: right;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{lines_html}}
+    </tbody>
+  </table>
+
+  <div class="totals-area">
+    <div>
+      <table class="totals-table">
+        <tr>
+          <td>DEPOSIT PAID</td>
+          <td style="color: #166534;">KES {{deposit_paid}}</td>
+        </tr>
+        <tr>
+          <td>TOTAL DEDUCTIONS</td>
+          <td>KES {{deductions_total}}</td>
+        </tr>
+        <tr>
+          <td>OUTSTANDING BALANCE</td>
+          <td>KES {{outstanding_balance}}</td>
+        </tr>
+        <tr>
+          <td>DEPOSIT REFUND</td>
+          <td style="color: #166534;">KES {{deposit_refund}}</td>
+        </tr>
+        <tr class="grand">
+          <td>FINAL SETTLEMENT</td>
+          <td>KES {{final_settlement}}</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="note-box">
+    Kindly settle the final settlement amount, or collect your deposit refund from the management office. This invoice marks the end of your tenancy.
+  </div>
+
+  <div class="footer-bar"></div>
+  <div class="footer-text">Gutenberg Elite Home & Property Managements</div>
+  <div class="footer-slogan">Find a Home. Leave the Management to Us</div>
+
+</body>
+</html>

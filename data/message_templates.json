@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "key": "gentle_reminder",
+    "name": "Gentle Rent Reminder",
+    "body": "Hello {{client_name}}, this is a gentle reminder from {{house_name}} {{house_number}} that your rent payment is due soon. Please reach out if you need support.",
+    "created_at": "2026-06-02T10:22:29.141Z",
+    "updated_at": "2026-06-02T10:29:00.674Z"
+  },
+  {
+    "id": 2,
+    "key": "maintenance_notice",
+    "name": "Maintenance Notice",
+    "body": "Hello {{client_name}}, kindly note there will be maintenance at {{house_name}} {{house_number}} tomorrow from 9:00 AM to 2:00 PM. Thank you for your cooperation.",
+    "created_at": "2026-06-02T10:22:29.141Z",
+    "updated_at": "2026-06-02T10:22:29.141Z"
+  },
+  {
+    "id": 3,
+    "key": "security_update",
+    "name": "Security Update",
+    "body": "Hello {{client_name}}, this is a security update for residents of {{house_name}} {{house_number}}. Please ensure your doors are locked and report suspicious activity immediately.",
+    "created_at": "2026-06-02T10:22:29.141Z",
+    "updated_at": "2026-06-02T10:22:29.141Z"
+  }
+]

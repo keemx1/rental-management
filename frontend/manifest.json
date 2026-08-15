@@ -1,0 +1,19 @@
+{
+  "name": "Gutenberg Elite Home & Property Managements",
+  "short_name": "Gutenberg Elite",
+  "description": "Rental Messaging & Property Management System",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
+  "orientation": "any",
+  "categories": ["business", "finance"],
+  "icons": [
+    {
+      "src": "/img/logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

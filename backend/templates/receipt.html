@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+    body {
+      font-family: 'Roboto', sans-serif;
+      margin: 0;
+      padding: 24px;
+      color: #333;
+      background: white;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .header img {
+      width: 90px;
+      max-width: 90px;
+      object-fit: contain;
+    }
+    .header-content {
+      flex: 1;
+      text-align: center;
+      padding-left: 16px;
+    }
+    .company-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a4b8c;
+      margin: 0 0 3px 0;
+    }
+    .company-slogan {
+      font-size: 9px;
+      font-style: italic;
+      color: #666;
+      margin: 0 0 3px 0;
+    }
+    .company-details {
+      font-size: 9px;
+      color: #555;
+    }
+    .separator-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 10px 0;
+      position: relative;
+    }
+    .separator-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .receipt-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .receipt-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a4b8c;
+    }
+    .receipt-date {
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .receipt-no-bar {
+      display: inline-block;
+      background: #e31837;
+      color: white;
+      font-weight: 700;
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+    }
+    .customer-info {
+      display: flex;
+      gap: 18px;
+      margin-bottom: 12px;
+      font-size: 12px;
+    }
+    .customer-info div {
+      display: flex;
+      flex-direction: column;
+    }
+    .customer-info .label {
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .grid-2col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 12px;
+      font-size: 12px;
+    }
+    .detail-box {
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .detail-box .label {
+      font-weight: 700;
+      font-size: 10px;
+      color: #666;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+    .detail-box .value {
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .detail-box .value.amount {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a4b8c;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 12px;
+    }
+    th {
+      background: #1a4b8c;
+      color: white;
+      text-align: left;
+      padding: 5px;
+      font-size: 12px;
+    }
+    td {
+      padding: 5px;
+      border: 1px solid #dee2e6;
+      font-size: 12px;
+    }
+    tr:nth-child(even) td {
+      background: #f8f9fa;
+    }
+    .totals-area {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+    }
+    .totals-table {
+      width: 320px;
+      border-collapse: collapse;
+    }
+    .totals-table td {
+      padding: 4px 10px;
+      border: none;
+      font-size: 12px;
+    }
+    .totals-table tr td:first-child {
+      text-align: right;
+      font-weight: 700;
+      background: #f8f9fa;
+    }
+    .totals-table tr td:last-child {
+      background: #e9ecef;
+      text-align: right;
+      font-weight: 700;
+    }
+    .totals-table tr.remaining td:last-child {
+      background: #fff3cd;
+      color: #856404;
+      font-weight: 700;
+    }
+    .totals-table tr.overpaid td:last-child {
+      background: #d4edda;
+      color: #155724;
+      font-weight: 700;
+    }
+    .footer-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 12px 0 6px 0;
+      position: relative;
+    }
+    .footer-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .footer-text {
+      text-align: center;
+      font-size: 11px;
+      color: #1a4b8c;
+      font-weight: 700;
+    }
+    .footer-slogan {
+      text-align: center;
+      font-size: 9px;
+      font-style: italic;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="{{logo_base64}}" alt="Logo">
+    <div class="header-content">
+      <h1 class="company-title">GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</h1>
+      <p class="company-slogan">Find a Home. Leave the Management to Us</p>
+      <p class="company-details">Dealers in: Rent management, property and General Consultancy<br>Located in Ruiru, Juja | Tel: +254 702 705 821 | Email: jujaview@gmail.com</p>
+    </div>
+  </div>
+
+  <div class="separator-bar"></div>
+
+  <div class="receipt-header">
+    <div class="receipt-title">PAYMENT RECEIPT</div>
+    <div class="receipt-date">{{date}}</div>
+  </div>
+
+  <span class="receipt-no-bar">RECEIPT NO: {{receipt_no}}</span>
+
+  <div class="customer-info">
+    <div style="width: 30px;"><span class="label">To:</span></div>
+    <div>
+      <span class="label">NAME</span>
+      <span>{{tenant_name}}</span>
+    </div>
+    <div>
+      <span class="label">UNIT / HOUSE NO</span>
+      <span>{{unit_label}}</span>
+    </div>
+    <div>
+      <span class="label">PROPERTY</span>
+      <span>{{property_name}}</span>
+    </div>
+    <div>
+      <span class="label">HOUSE ID</span>
+      <span>{{house_paybill}}</span>
+    </div>
+  </div>
+
+  <div class="grid-2col">
+    <div class="detail-box">
+      <div class="label">AMOUNT PAID</div>
+      <div class="value amount">KES {{amount_paid}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">PAYMENT TYPE</div>
+      <div class="value">{{payment_type}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">M-PESA REFERENCE</div>
+      <div class="value">{{mpesa_reference}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">TRANSACTION DATE</div>
+      <div class="value">{{date}}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Payment Allocation</th>
+        <th style="text-align: right;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{allocation_html}}
+    </tbody>
+  </table>
+
+  <div class="totals-area">
+    <div class="receipt-no" style="font-size: 12px;">
+      M-PESA Ref: {{mpesa_reference}}<br>
+      Next Rent Due: {{next_due}}
+    </div>
+    <div>
+      <table class="totals-table">
+        <tr class="remaining">
+          <td>REMAINING BALANCE</td>
+          <td>KES {{remaining_balance}}</td>
+        </tr>
+        <tr class="overpaid">
+          <td>CREDIT / OVERPAYMENT</td>
+          <td>KES {{overpayment}}</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <div style="margin-top:10px;padding:8px;border:1px solid #16a34a;border-radius:6px;background:#f0fdf4;font-size:10px;color:#166534;text-align:center;">
+    Thank you for your payment. This receipt is computer-generated and does not require a signature.
+  </div>
+
+  <div class="footer-bar"></div>
+  <div class="footer-text">Gutenberg Elite Home & Property Managements</div>
+  <div class="footer-slogan">Find a Home. Leave the Management to Us</div>
+
+</body>
+</html>

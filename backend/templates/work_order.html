@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+    body {
+      font-family: 'Roboto', sans-serif;
+      margin: 0;
+      padding: 22px;
+      color: #333;
+      background: white;
+      font-size: 11px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .header img {
+      width: 90px;
+      max-width: 90px;
+      object-fit: contain;
+    }
+    .header-content {
+      flex: 1;
+      text-align: center;
+      padding-left: 16px;
+    }
+    .company-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a4b8c;
+      margin: 0 0 3px 0;
+    }
+    .company-slogan {
+      font-size: 9px;
+      font-style: italic;
+      color: #666;
+      margin: 0 0 3px 0;
+    }
+    .company-details {
+      font-size: 9px;
+      color: #555;
+    }
+    .separator-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 10px 0;
+      position: relative;
+    }
+    .separator-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .wo-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .wo-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a4b8c;
+    }
+    .wo-date {
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .wo-no-bar {
+      display: inline-block;
+      background: #1a4b8c;
+      color: white;
+      font-weight: 700;
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .customer-info {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 10px;
+      font-size: 11px;
+    }
+    .customer-info div {
+      display: flex;
+      flex-direction: column;
+    }
+    .customer-info .label {
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .grid-4col {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 12px;
+      font-size: 11px;
+    }
+    .detail-box {
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 7px 9px;
+    }
+    .detail-box .label {
+      font-weight: 700;
+      font-size: 9px;
+      color: #666;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+    .detail-box .value {
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .detail-box .value.warn { color: #e31837; }
+    .detail-box .value.good { color: #166534; }
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #1a4b8c;
+      margin: 8px 0 4px 0;
+      text-transform: uppercase;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 12px;
+    }
+    th {
+      background: #1a4b8c;
+      color: white;
+      text-align: left;
+      padding: 5px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    td {
+      padding: 4px 5px;
+      border: 1px solid #dee2e6;
+      font-size: 10.5px;
+      vertical-align: top;
+    }
+    tr:nth-child(even) td {
+      background: #f8f9fa;
+    }
+    .empty-note {
+      text-align: center;
+      color: #888;
+      padding: 8px;
+    }
+    .totals-area {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+    }
+    .totals-table {
+      width: 320px;
+      border-collapse: collapse;
+    }
+    .totals-table td {
+      padding: 4px 10px;
+      border: none;
+      font-size: 11px;
+    }
+    .totals-table tr td:first-child {
+      text-align: right;
+      font-weight: 700;
+      background: #f8f9fa;
+    }
+    .totals-table tr td:last-child {
+      background: #e9ecef;
+      text-align: right;
+      font-weight: 700;
+    }
+    .totals-table tr.grand td:last-child {
+      background: #1a4b8c;
+      color: white;
+      font-weight: 700;
+    }
+    .note-box {
+      margin-top: 10px;
+      padding: 8px;
+      border: 1px solid #6366f1;
+      border-radius: 6px;
+      background: #f0f0ff;
+      font-size: 10px;
+      color: #4338ca;
+      text-align: center;
+    }
+    .footer-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 12px 0 6px 0;
+      position: relative;
+    }
+    .footer-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .footer-text {
+      text-align: center;
+      font-size: 11px;
+      color: #1a4b8c;
+      font-weight: 700;
+    }
+    .footer-slogan {
+      text-align: center;
+      font-size: 9px;
+      font-style: italic;
+      color: #555;
+    }
+
+    .party-tag {
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .party-tag.tenant   { background: #fef3c7; color: #92400e; }
+    .party-tag.mgmt     { background: #dbeafe; color: #1e40af; }
+    .party-tag.shared   { background: #e0e7ff; color: #3730a3; }
+    .party-tag.pending  { background: #f1f5f9; color: #64748b; }
+    .materials-cell {
+      font-size: 9.5px;
+      color: #555;
+      line-height: 1.4;
+    }
+    .cost-cell {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .status-tag {
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: 500;
+    }
+    .status-tag.completed { background: #d1fae5; color: #065f46; }
+    .status-tag.in-progress { background: #dbeafe; color: #1e40af; }
+    .status-tag.pending   { background: #fef3c7; color: #92400e; }
+    .status-tag.charged   { background: #fce7f3; color: #9d174d; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="{{logo_base64}}" alt="Logo">
+    <div class="header-content">
+      <h1 class="company-title">GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</h1>
+      <p class="company-slogan">Find a Home. Leave the Management to Us</p>
+      <p class="company-details">Dealers in: Rent management, property and General Consultancy<br>Located in Ruiru, Juja | Tel: +254 702 705 821 | Email: jujaview@gmail.com</p>
+    </div>
+  </div>
+
+  <div class="separator-bar"></div>
+
+  <div class="wo-header">
+    <div class="wo-title">MAINTENANCE WORK ORDER</div>
+    <div class="wo-date">{{date}}</div>
+  </div>
+
+  <span class="wo-no-bar">WORK ORDER NO: {{wo_number}}</span>
+
+  <div class="customer-info">
+    <div style="width: 30px;"><span class="label">Property:</span></div>
+    <div>
+      <span class="label">PROPERTY NAME</span>
+      <span>{{property_name}}</span>
+    </div>
+    <div>
+      <span class="label">HOUSE PAYBILL</span>
+      <span>{{house_paybill}}</span>
+    </div>
+    <div>
+      <span class="label">UNIT(S)</span>
+      <span>{{unit_codes}}</span>
+    </div>
+    <div>
+      <span class="label">CARETAKER</span>
+      <span>{{caretaker_name}}</span>
+    </div>
+  </div>
+
+  <div class="grid-4col">
+    <div class="detail-box">
+      <div class="label">DATE REQUESTED</div>
+      <div class="value">{{date_requested}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">WORK STARTED</div>
+      <div class="value">{{date_work_started}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">COMPLETED</div>
+      <div class="value">{{date_completed}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">PRIORITY</div>
+      <div class="value {{priority_class}}">{{priority}}</div>
+    </div>
+  </div>
+
+  <div class="section-label">Assigned Technician</div>
+  <div class="customer-info">
+    <div>
+      <span class="label">TECHNICIAN NAME</span>
+      <span>{{technician_name}}</span>
+    </div>
+    <div>
+      <span class="label">PHONE NO</span>
+      <span>{{technician_phone}}</span>
+    </div>
+    <div>
+      <span class="label">DATE ASSIGNED</span>
+      <span>{{date_assigned}}</span>
+    </div>
+    <div>
+      <span class="label">EXPECTED COMPLETION</span>
+      <span>{{expected_completion}}</span>
+    </div>
+  </div>
+
+  <div class="section-label">Issue Register</div>
+  {{items_register_html}}
+
+  <div class="totals-area">
+    <div style="font-size: 10px; color: #555;">
+      Labour involved: {{labour_involved}}
+    </div>
+    <div>
+      <table class="totals-table">
+        <tr>
+          <td>TOTAL MATERIAL COST</td>
+          <td>KES {{total_material_cost}}</td>
+        </tr>
+        <tr>
+          <td>TOTAL LABOUR COST</td>
+          <td>KES {{total_labour_cost}}</td>
+        </tr>
+        <tr class="grand">
+          <td>TOTAL REPAIR COST</td>
+          <td>KES {{total_cost}}</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  {{notes_html}}
+
+  <div class="note-box">
+    {{payment_instructions}}
+  </div>
+
+  <div class="footer-bar"></div>
+  <div class="footer-text">Gutenberg Elite Home & Property Managements</div>
+  <div class="footer-slogan">Find a Home. Leave the Management to Us</div>
+
+</body>
+</html>

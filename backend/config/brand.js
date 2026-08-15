@@ -1,0 +1,4 @@
+const BRAND_NAME = process.env.BRAND_NAME || 'GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS';
+const MPESA_PAYBILL = process.env.MPESA_PAYBILL || '4186787';
+
+module.exports = { BRAND_NAME, MPESA_PAYBILL };
