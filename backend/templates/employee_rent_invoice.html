@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1e293b; background: #fff; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; border-bottom: 3px solid #14b8a6; padding-bottom: 16px; }
+    .header h1 { font-size: 24px; color: #14b8a6; }
+    .header .meta { text-align: right; font-size: 13px; color: #64748b; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px; }
+    .info-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
+    .info-box .label { font-size: 11px; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .info-box .value { font-size: 15px; font-weight: 600; color: #1e293b; }
+    .amount-section { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+    .amount-box { text-align: center; padding: 16px; border-radius: 8px; }
+    .amount-box.cyan { background: #ecfeff; border: 1px solid #a5f3fc; }
+    .amount-box.green { background: #f0fdf4; border: 1px solid #bbf7d0; }
+    .amount-box.purple { background: #faf5ff; border: 1px solid #e9d5ff; }
+    .amount-box.rose { background: #fff1f2; border: 1px solid #fecdd3; }
+    .amount-box .amt-label { font-size: 11px; text-transform: uppercase; color: #94a3b8; margin-bottom: 4px; }
+    .amount-box .amt-value { font-size: 22px; font-weight: 700; }
+    .amount-box.cyan .amt-value { color: #0891b2; }
+    .amount-box.green .amt-value { color: #16a34a; }
+    .amount-box.purple .amt-value { color: #9333ea; }
+    .amount-box.rose .amt-value { color: #e11d48; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th { background: #f1f5f9; padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; color: #64748b; border-bottom: 2px solid #e2e8f0; }
+    td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+    .status-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-partial { background: #fef3c7; color: #92400e; }
+    .status-full { background: #dcfce7; color: #166534; }
+    .section-title { font-size: 14px; font-weight: 600; color: #334155; margin: 20px 0 10px; }
+    .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Employee Rent Statement</h1>
+      <div style="font-size:13px;color:#64748b;margin-top:4px;">Generated: {{generatedDate}}</div>
+    </div>
+    <div class="meta">
+      <div style="font-weight:600;color:#1e293b;">GEHPM</div>
+      <div>Property Management</div>
+    </div>
+  </div>
+
+  <div class="info-grid">
+    <div class="info-box">
+      <div class="label">Employee Name</div>
+      <div class="value">{{employeeName}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">Property / Unit</div>
+      <div class="value">{{propertyUnit}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">Rent Period</div>
+      <div class="value">{{rentPeriod}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">Rent Due Date</div>
+      <div class="value">{{rentDueDate}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">Monthly Rent</div>
+      <div class="value">{{monthlyRent}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">Previous Balance</div>
+      <div class="value">{{previousBalance}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">Status</div>
+      <div class="value">{{{statusBadge}}}</div>
+    </div>
+  </div>
+
+  <div class="amount-section">
+    <div class="amount-box cyan">
+      <div class="amt-label">Monthly Rent</div>
+      <div class="amt-value">{{monthlyRentVal}}</div>
+    </div>
+    <div class="amount-box green">
+      <div class="amt-label">Paid</div>
+      <div class="amt-value">{{totalPaid}}</div>
+    </div>
+    <div class="amount-box purple">
+      <div class="amt-label">Deducted from Salary</div>
+      <div class="amt-value">{{totalDeducted}}</div>
+    </div>
+    <div class="amount-box rose">
+      <div class="amt-label">Outstanding</div>
+      <div class="amt-value">{{outstanding}}</div>
+    </div>
+  </div>
+
+  <div class="section-title">Payment History</div>
+  {{#if payments.length}}
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Method</th><th>Reference</th><th style="text-align:right">Amount</th></tr>
+    </thead>
+    <tbody>
+      {{#each payments}}
+      <tr>
+        <td>{{paymentDate}}</td>
+        <td>{{paymentMethod}}</td>
+        <td>{{reference}}</td>
+        <td style="text-align:right;font-weight:600;">{{amount}}</td>
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+  {{else}}
+  <p style="color:#94a3b8;font-style:italic;">No payments recorded yet.</p>
+  {{/if}}
+
+  {{#if notes}}
+  <div class="section-title">Notes</div>
+  <p style="font-size:13px;color:#475569;">{{notes}}</p>
+  {{/if}}
+
+  <div class="footer">
+    GEHPM Property Management System — Employee Rent Statement
+  </div>
+</body>
+</html>

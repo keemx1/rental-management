@@ -28,92 +28,206 @@
     <div class="orb orb-cyan"></div>
   </div>
 
-  <div id="app" class="min-h-screen flex flex-col relative z-10">
-    <header id="main-nav"
-      class="hidden sticky top-0 z-40 bg-white/95 md:bg-white/60 md:backdrop-blur-md shadow-sm border-b border-slate-200/50">
-      <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between">
-        <div class="brand-lockup">
-          <img src="/img/logo.png?v=2" alt="Logo" class="brand-logo" width="40" height="40"
+  <div id="app" class="min-h-screen relative z-10">
+
+    <!-- ==================== APP SHELL (desktop grid, mobile block) ==================== -->
+    <div class="app-shell">
+
+    <!-- ==================== DESKTOP SIDEBAR (lg+) ==================== -->
+    <aside id="sidebar" class="hidden lg:flex">
+      <div class="sidebar-inner">
+        <!-- Brand -->
+        <div class="sidebar-brand">
+          <img src="/img/logo.png?v=2" alt="Logo" class="sidebar-logo" width="36" height="36"
             onerror="this.style.display='none'" />
-          <div class="brand-title text-slate-800">
-            RENTAL MESSAGING
-            <span class="hidden sm:block text-slate-500">Property rent reminders &amp; collections</span>
+          <div class="sidebar-brand-text">
+            <span class="sidebar-brand-name">RENTAL</span>
+            <span class="sidebar-brand-name">MESSAGING</span>
           </div>
         </div>
 
-        <button id="mobile-menu-btn" class="md:hidden p-2 text-slate-600 hover:text-slate-900 focus:outline-none">
+        <!-- Toggle button -->
+        <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+          <svg class="sidebar-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+
+        <!-- Scrollable Nav -->
+        <nav class="sidebar-nav">
+          <!-- MAIN -->
+          <div class="sidebar-section-label">Main</div>
+          <a href="#" data-nav="dashboard" class="sidebar-link" title="Dashboard">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span class="sidebar-label">Dashboard</span>
+          </a>
+
+          <!-- PROPERTY MANAGEMENT -->
+          <div class="sidebar-section-label">Property Management</div>
+          <a href="#" data-nav="houses" class="sidebar-link" title="Houses">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span class="sidebar-label">Houses</span>
+          </a>
+          <a href="#" data-nav="tenants" class="sidebar-link" title="Tenants">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span class="sidebar-label">Tenants</span>
+          </a>
+
+          <!-- FINANCIAL -->
+          <div class="sidebar-section-label">Financial</div>
+          <a href="#" data-nav="payments" class="sidebar-link" title="Payments">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <span class="sidebar-label">Payments</span>
+          </a>
+          <a href="#" data-nav="invoices" class="sidebar-link" title="Invoices">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            <span class="sidebar-label">Invoices</span>
+          </a>
+          <a href="#" data-nav="invoice-register" class="sidebar-link" title="Invoice Register">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+            <span class="sidebar-label">Inv. Register</span>
+          </a>
+          <a href="#" data-nav="mgmt-expenses-report" class="sidebar-link" title="Mgmt Expenses">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+            <span class="sidebar-label">Mgmt Expenses</span>
+          </a>
+          <a href="#" data-nav="deposit-refunds" class="sidebar-link" title="Deposit Refunds">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <span class="sidebar-label">Deposit Refunds</span>
+          </a>
+
+          <!-- COMMUNICATIONS -->
+          <div class="sidebar-section-label">Communications</div>
+          <a href="#" data-nav="broadcasts" class="sidebar-link" title="Broadcasts">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span class="sidebar-label">Broadcasts</span>
+          </a>
+
+          <!-- OPERATIONS -->
+          <div class="sidebar-section-label">Operations</div>
+          <a href="#" data-nav="work-orders" class="sidebar-link" title="Work Orders">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <span class="sidebar-label">Work Orders</span>
+          </a>
+
+          <!-- REPORTING -->
+          <div class="sidebar-section-label">Reporting</div>
+          <a href="#" data-nav="reports" class="sidebar-link" title="Reports">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            <span class="sidebar-label">Reports</span>
+          </a>
+          <a href="#" data-nav="monthly-reports" class="sidebar-link" title="Monthly Reports">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span class="sidebar-label">Monthly Reports</span>
+          </a>
+
+          <!-- DOCUMENTATION -->
+          <div class="sidebar-section-label">Documentation</div>
+          <a href="#" data-nav="documents" class="sidebar-link" title="Documents">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+            <span class="sidebar-label">Documents</span>
+          </a>
+
+          <!-- SYSTEM -->
+          <div class="sidebar-section-label">System</div>
+          <a href="#" data-nav="users" class="sidebar-link hidden" id="nav-users-link" title="Users">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
+            <span class="sidebar-label">Users</span>
+          </a>
+          <a href="#" data-nav="archive" class="sidebar-link" title="Archive">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+            <span class="sidebar-label">Archive</span>
+          </a>
+          <a href="#" data-nav="pending-overpayments" class="sidebar-link" title="Pending Overpayments">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span class="sidebar-label">Pending Ov.</span>
+          </a>
+        </nav>
+
+        <!-- User / Sign Out -->
+        <div class="sidebar-user">
+          <div class="sidebar-user-info">
+            <div class="sidebar-avatar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
+            </div>
+            <div class="sidebar-user-details">
+              <div class="sidebar-username" id="nav-username">—</div>
+              <button type="button" id="logout-btn" class="sidebar-signout">Sign Out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ==================== MAIN CONTENT AREA ==================== -->
+    <div class="main-area">
+
+    <!-- ==================== MOBILE HEADER (<lg) ==================== -->
+    <header id="main-nav"
+      class="lg:hidden sticky top-0 z-40 bg-white/95 shadow-sm border-b border-slate-200/50">
+      <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+        <div class="brand-lockup shrink-0">
+          <img src="/img/logo.png?v=2" alt="Logo" class="brand-logo" width="36" height="36"
+            onerror="this.style.display='none'" />
+          <div class="brand-title text-slate-800">
+            RENTAL MESSAGING
+          </div>
+        </div>
+        <button id="mobile-menu-btn" class="ml-auto p-2 text-slate-600 hover:text-slate-900 focus:outline-none">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-
-        <!-- Backdrop for mobile -->
-        <div id="mobile-menu-backdrop"
-          class="fixed top-0 left-0 w-screen h-[100dvh] bg-black/60 z-40 hidden md:hidden transition-opacity"></div>
-
-        <!-- Navigation Drawer -->
-        <div id="nav-container"
-          class="fixed top-0 left-0 h-[100dvh] z-50 w-72 bg-white/95 backdrop-blur-md border-r border-slate-200 shadow-2xl transform -translate-x-full transition-transform duration-300 ease-in-out md:relative md:transform-none md:w-auto md:h-auto md:bg-transparent md:border-r-0 md:shadow-none md:flex flex-col md:flex-row px-6 pb-6 pt-[max(env(safe-area-inset-top),2rem)] md:p-0 overflow-y-auto md:overflow-visible flex">
-
-          <!-- Mobile Sidebar Header -->
-          <div class="flex items-center justify-between mb-8 md:hidden">
-            <span class="font-mono text-xs text-slate-500 tracking-widest uppercase">Navigation</span>
-            <button id="mobile-close-btn" class="text-slate-400 hover:text-slate-800 focus:outline-none p-1">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          <!-- Mobile User Profile -->
-          <div class="mb-8 md:hidden border-b border-slate-200 pb-6">
-            <p class="font-orbitron text-lg text-slate-800" id="nav-username-mobile">—</p>
-            <span class="sys-tag text-[10px] mt-2 inline-block" id="nav-role-mobile">ADMINISTRATOR</span>
-          </div>
-
-          <nav class="flex flex-col md:flex-row gap-2 md:gap-4 w-full md:w-auto mb-8 md:mb-0">
-            <a href="#" data-nav="dashboard"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Dashboard</a>
-            <a href="#" data-nav="houses"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Houses</a>
-            <a href="#" data-nav="tenants"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Tenants</a>
-            <a href="#" data-nav="payments"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Payments</a>
-            <a href="#" data-nav="broadcasts"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Broadcasts</a>
-            <a href="#" data-nav="invoices"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Invoices</a>
-            <a href="#" data-nav="work-orders"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Work Orders</a>
-            <a href="#" data-nav="reports"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Reports</a>
-            <a href="#" data-nav="documents"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Documents</a>
-            <a href="#" data-nav="invoice-register"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Invoice Register</a>
-            <a href="#" data-nav="monthly-reports"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Monthly Reports</a>
-            <a href="#" data-nav="archive"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Archive</a>
-            <a href="#" data-nav="pending-overpayments"
-              class="nav-link block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none">Pending Overpayments</a>
-            <a href="#" data-nav="users" class="nav-link hidden block py-3 md:py-1 px-4 md:px-0 rounded md:rounded-none"
-              id="nav-users-link">Users</a>
-          </nav>
-
-          <!-- Desktop User / Logout -->
-          <div
-            class="flex flex-col md:flex-row items-center md:justify-end gap-3 mt-auto md:mt-0 w-full md:w-auto border-t border-slate-200 pt-6 md:border-t-0 md:pt-0">
-            <p class="font-mono text-xs text-slate-500 hidden md:block" id="nav-username">—</p>
-            <button type="button" id="logout-btn"
-              class="qc-btn qc-btn-danger w-full md:w-auto py-3 md:py-1 text-sm md:text-xs tracking-wider">Logout</button>
-          </div>
-        </div>
       </div>
     </header>
 
-    <main class="flex-1 max-w-[1600px] w-full mx-auto px-4 py-8">
+    <!-- ==================== MOBILE NAVIGATION DRAWER ==================== -->
+    <div id="mobile-menu-backdrop"
+      class="fixed top-0 left-0 w-screen h-[100dvh] bg-black/60 z-40 hidden transition-opacity"></div>
+
+    <div id="nav-container"
+      class="fixed top-0 left-0 h-[100dvh] z-50 w-72 bg-white/95 backdrop-blur-md border-r border-slate-200 shadow-2xl transform -translate-x-full transition-transform duration-300 ease-in-out flex flex-col px-6 pb-6 pt-[max(env(safe-area-inset-top),2rem)] overflow-y-auto">
+
+      <!-- Mobile Sidebar Header -->
+      <div class="flex items-center justify-between mb-8">
+        <span class="font-mono text-xs text-slate-500 tracking-widest uppercase">Navigation</span>
+        <button id="mobile-close-btn" class="text-slate-400 hover:text-slate-800 focus:outline-none p-1">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Mobile User Profile -->
+      <div class="mb-8 border-b border-slate-200 pb-6">
+        <p class="font-orbitron text-lg text-slate-800" id="nav-username-mobile">—</p>
+        <span class="sys-tag text-[10px] mt-2 inline-block" id="nav-role-mobile">ADMINISTRATOR</span>
+      </div>
+
+      <nav class="flex flex-col gap-1 w-full mb-8">
+        <a href="#" data-nav="dashboard" class="nav-link block py-3 px-4 rounded">Dashboard</a>
+        <a href="#" data-nav="houses" class="nav-link block py-3 px-4 rounded">Houses</a>
+        <a href="#" data-nav="tenants" class="nav-link block py-3 px-4 rounded">Tenants</a>
+        <a href="#" data-nav="payments" class="nav-link block py-3 px-4 rounded">Payments</a>
+        <a href="#" data-nav="broadcasts" class="nav-link block py-3 px-4 rounded">Broadcasts</a>
+        <a href="#" data-nav="invoices" class="nav-link block py-3 px-4 rounded">Invoices</a>
+        <a href="#" data-nav="work-orders" class="nav-link block py-3 px-4 rounded">Work Orders</a>
+        <a href="#" data-nav="reports" class="nav-link block py-3 px-4 rounded">Reports</a>
+        <a href="#" data-nav="documents" class="nav-link block py-3 px-4 rounded">Documents</a>
+        <a href="#" data-nav="invoice-register" class="nav-link block py-3 px-4 rounded">Invoice Register</a>
+        <a href="#" data-nav="monthly-reports" class="nav-link block py-3 px-4 rounded">Monthly Reports</a>
+        <a href="#" data-nav="mgmt-expenses-report" class="nav-link block py-3 px-4 rounded">Mgmt Expenses</a>
+        <a href="#" data-nav="deposit-refunds" class="nav-link block py-3 px-4 rounded">Deposit Refunds</a>
+        <a href="#" data-nav="archive" class="nav-link block py-3 px-4 rounded">Archive</a>
+        <a href="#" data-nav="pending-overpayments" class="nav-link block py-3 px-4 rounded">Pending Overpayments</a>
+        <a href="#" data-nav="users" class="nav-link hidden block py-3 px-4 rounded">Users</a>
+      </nav>
+
+      <div class="mt-auto border-t border-slate-200 pt-6">
+        <button type="button" id="logout-btn-mobile"
+          class="qc-btn qc-btn-danger w-full py-3 text-sm tracking-wider">Logout</button>
+      </div>
+    </div>
+
+    <main class="main-content">
       <!-- LOGIN -->
       <section data-view="login" class="login-wrap">
         <div class="login-panel glass-panel p-8 max-w-md mx-auto">
@@ -437,6 +551,37 @@
               <tr><td colspan="6" class="text-center py-8 text-slate-500">Loading...</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Deposit Refund Info (shown when exit invoice exists) -->
+        <div id="td-deposit-refund-section" class="glass-panel p-4 hidden">
+          <span class="sys-tag">[DEPOSIT_REFUND]</span>
+          <h3 class="font-orbitron text-white mt-1 mb-3">Deposit Refund</h3>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 font-mono text-sm">
+            <div>
+              <p class="text-xs text-slate-500">Deposit Paid</p>
+              <p id="td-dr-deposit" class="text-cyan-400 font-bold">KES 0</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500">Deductions</p>
+              <p id="td-dr-deductions" class="text-rose-400 font-bold">KES 0</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500">Refundable</p>
+              <p id="td-dr-refundable" class="text-green-400 font-bold">KES 0</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500">Status</p>
+              <p id="td-dr-status" class="font-bold">—</p>
+            </div>
+          </div>
+          <div class="flex justify-between items-center mt-3">
+            <div class="font-mono text-sm">
+              <span class="text-slate-400">Due: </span><span id="td-dr-due" class="text-amber-400">—</span>
+              <span class="text-slate-400 ml-4">Countdown: </span><span id="td-dr-countdown" class="font-bold">—</span>
+            </div>
+            <button type="button" id="btn-td-view-refund" class="qc-btn qc-btn-primary text-sm">View Refund</button>
+          </div>
         </div>
       </section>
 
@@ -802,8 +947,23 @@
           </button>
           <button type="button" data-invoice-type="maintenance-invoice"
             class="glass-panel p-6 text-left hover:border-emerald-400 transition cursor-pointer">
-            <h3 class="text-lg font-semibold text-white">Maintenance Invoice</h3>
-            <p class="text-sm text-slate-400 mt-2">Managed per-unit maintenance invoices with work items, technicians, statuses and totals.</p>
+            <h3 class="text-lg font-semibold text-white">Management Expenses Invoice</h3>
+            <p class="text-sm text-slate-400 mt-2">Record management expenses: property maintenance, staff reimbursement, petty cash, office purchases, administration.</p>
+          </button>
+          <button type="button" data-invoice-type="salary"
+            class="glass-panel p-6 text-left hover:border-purple-400 transition cursor-pointer">
+            <h3 class="text-lg font-semibold text-white">Salary Management</h3>
+            <p class="text-sm text-slate-400 mt-2">Track employee salaries, partial payments, outstanding balances, and automatic monthly rollover.</p>
+          </button>
+          <button type="button" data-invoice-type="staff-advance"
+            class="glass-panel p-6 text-left hover:border-amber-400 transition cursor-pointer">
+            <h3 class="text-lg font-semibold text-white">Staff Advances</h3>
+            <p class="text-sm text-slate-400 mt-2">Track advances given to employees, recovery from salary, outstanding balances, and rollover.</p>
+          </button>
+          <button type="button" data-invoice-type="employee-rent"
+            class="glass-panel p-6 text-left hover:border-teal-400 transition cursor-pointer">
+            <h3 class="text-lg font-semibold text-white">Employee Rent</h3>
+            <p class="text-sm text-slate-400 mt-2">Manage rent for employees living in managed properties. Track payments, deductions from salary, and outstanding balances.</p>
           </button>
         </div>
 
@@ -1182,100 +1342,59 @@
           <div class="max-w-6xl mx-auto mb-4">
             <button type="button" id="btn-back-maintenance-invoices" class="action-btn">&larr; Choose Invoice Type</button>
           </div>
-          <div class="max-w-6xl mx-auto mb-4">
-            <button type="button" id="btn-new-maintenance-invoice" class="qc-btn qc-btn-primary">+ New Maintenance Invoice</button>
+          <div class="max-w-6xl mx-auto mb-4 flex gap-3">
+            <button type="button" id="btn-new-maintenance-invoice" class="qc-btn qc-btn-primary">+ New Management Expense</button>
+            <button type="button" id="btn-add-wo-expense" class="qc-btn qc-btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-color: #059669; color: #fff;">+ Add Work Order Expense</button>
           </div>
 
           <div id="maintenance-invoices-form-wrap" class="hidden mb-6">
-          <div class="glass-panel p-6 w-full">
-              <form id="maintenance-invoice-form" class="space-y-6">
+            <div class="glass-panel p-6 w-full">
+              <form id="maintenance-invoice-form" class="space-y-4">
                 <input type="hidden" id="mnt-form-id" />
+                <input type="hidden" id="mnt-source-wo-id" value="" />
+                <input type="hidden" id="mnt-source-wo-number" value="" />
+                <input type="hidden" id="mnt-source-issue-nos" value="" />
+
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label class="form-label">Property Name</label>
-                    <input type="text" id="mnt-property" class="cyber-input" placeholder="e.g. BLUE HOUSE" required />
-                  </div>
-                  <div>
-                    <label class="form-label">House Paybill</label>
-                    <input type="text" id="mnt-paybill" class="cyber-input" placeholder="e.g. 13343455" />
-                  </div>
-                  <div>
-                    <label class="form-label">Unit Codes</label>
-                    <input type="text" id="mnt-units" class="cyber-input" placeholder="e.g. B20, B601" />
-                  </div>
-                  <div>
-                    <label class="form-label">Caretaker</label>
-                    <input type="text" id="mnt-caretaker" class="cyber-input" placeholder="Caretaker name" />
-                  </div>
-                  <div>
-                    <label class="form-label">Date Reported</label>
-                    <input type="date" id="mnt-date-reported" class="cyber-input" />
+                    <label class="form-label">Expense Type</label>
+                    <select id="mnt-category" class="cyber-input">
+                      <option value="petty_cash">Petty Cash</option>
+                      <option value="office_purchase">Office Purchase</option>
+                      <option value="administration">Administration</option>
+                      <option value="staff_reimbursement">Staff Reimbursement</option>
+                      <option value="property_maintenance">Property Maintenance</option>
+                      <option value="salary">Salary</option>
+                      <option value="other">Other Management Expense</option>
+                    </select>
                   </div>
                   <div>
                     <label class="form-label">Status</label>
                     <select id="mnt-status" class="cyber-input">
-                      <option>Pending</option>
-                      <option>Approved</option>
-                      <option>Assigned</option>
-                      <option>In Progress</option>
-                      <option>Completed</option>
+                      <option value="Pending" selected>Pending</option>
+                      <option value="Approved">Approved</option>
+                      <option value="Paid">Paid</option>
                     </select>
                   </div>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label class="form-label">Technician Name</label>
-                    <input type="text" id="mnt-technician" class="cyber-input" />
-                  </div>
-                  <div>
-                    <label class="form-label">Technician Phone</label>
-                    <input type="text" id="mnt-technician-phone" class="cyber-input" />
+                    <label class="form-label">Amount (KES)</label>
+                    <input type="number" id="mnt-amount" class="cyber-input" min="0" step="0.01" required />
                   </div>
                 </div>
 
-                <div class="border-t border-slate-700 pt-6">
-                  <div class="flex justify-between items-end mb-4">
-                    <h3 class="text-lg font-semibold text-white">Work Items</h3>
-                    <button type="button" id="btn-add-mnt-item" class="action-btn">+ Add Item</button>
-                  </div>
-                  <div class="overflow-x-auto">
-                    <table class="w-full text-left cyber-table text-sm">
-                      <thead>
-                        <tr>
-                          <th class="w-16">Unit</th>
-                          <th>Problem</th>
-                          <th>Work Required</th>
-                          <th>Work Done</th>
-                          <th>Materials</th>
-                          <th class="w-20">Priority</th>
-                          <th class="w-24">Status</th>
-                          <th class="w-28">Labour (KES)</th>
-                          <th class="w-28">Materials (KES)</th>
-                          <th class="w-16"></th>
-                        </tr>
-                      </thead>
-                      <tbody id="mnt-items-tbody">
-                        <!-- dynamic -->
-                      </tbody>
-                      <tfoot>
-                        <tr>
-                          <td colspan="7" class="text-right font-bold text-slate-300">Grand Total:</td>
-                          <td class="text-right font-mono text-cyan-400" id="mnt-grand-total">KES 0</td>
-                          <td colspan="2"></td>
-                        </tr>
-                      </tfoot>
-                    </table>
+                <div id="mnt-property-row" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div class="md:col-span-2">
+                    <label class="form-label">Property (if applicable)</label>
+                    <input type="text" id="mnt-property" class="cyber-input" placeholder="e.g. Blue House" />
                   </div>
                 </div>
 
-                <div>
-                  <label class="form-label">Notes</label>
-                  <textarea id="mnt-notes" class="cyber-input" rows="2"></textarea>
-                </div>
+                <!-- Dynamic fields container — populated by JS based on category -->
+                <div id="mnt-dynamic-fields" class="space-y-4"></div>
 
                 <div class="flex flex-wrap justify-end gap-3 pt-4 border-t border-slate-800">
                   <button type="button" class="action-btn" id="btn-cancel-mnt-form">Cancel</button>
-                  <button type="submit" class="qc-btn qc-btn-primary">Save Maintenance Invoice</button>
+                  <button type="submit" class="qc-btn qc-btn-primary">Save Expense</button>
                 </div>
                 <p id="mnt-form-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
               </form>
@@ -1287,25 +1406,787 @@
               <table class="w-full text-left cyber-table text-sm">
                 <thead>
                   <tr>
-                    <th>MNT No</th>
+                    <th>Exp No</th>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Description</th>
+                    <th>Source</th>
                     <th>Property</th>
-                    <th>Units</th>
-                    <th>Technician</th>
+                    <th class="text-right">Amount</th>
                     <th>Status</th>
-                    <th class="text-right">Total</th>
-                    <th>Created</th>
                     <th class="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="mnt-list-tbody">
-                  <tr><td colspan="8" class="text-center text-slate-500 py-6">Loading maintenance invoices...</td></tr>
+                  <tr><td colspan="9" class="text-center text-slate-500 py-6">Loading expenses...</td></tr>
                 </tbody>
               </table>
             </div>
             <p id="mnt-list-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
           </div>
+
+          <!-- MANAGEMENT EXPENSES HISTORY -->
+          <div class="glass-panel p-6 max-w-6xl mx-auto mt-6">
+            <h3 class="text-lg font-semibold text-white mb-4">Management Expenses History</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
+              <div>
+                <label class="form-label text-xs">Month</label>
+                <input type="month" id="meh-month" class="cyber-input" />
+              </div>
+              <div>
+                <label class="form-label text-xs">From</label>
+                <input type="date" id="meh-date-from" class="cyber-input" />
+              </div>
+              <div>
+                <label class="form-label text-xs">To</label>
+                <input type="date" id="meh-date-to" class="cyber-input" />
+              </div>
+              <div>
+                <label class="form-label text-xs">Property</label>
+                <select id="meh-property" class="cyber-input">
+                  <option value="">All Properties</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label text-xs">Category</label>
+                <select id="meh-category" class="cyber-input">
+                  <option value="">All Categories</option>
+                  <option value="Property Maintenance">Property Maintenance</option>
+                  <option value="Salary">Salary</option>
+                  <option value="Staff Reimbursement">Staff Reimbursement</option>
+                  <option value="Petty Cash">Petty Cash</option>
+                  <option value="Office Purchase">Office Purchase</option>
+                  <option value="Administration">Administration</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label text-xs">Status</label>
+                <select id="meh-status" class="cyber-input">
+                  <option value="">All Statuses</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Paid">Paid</option>
+                  <option value="Partially Paid">Partially Paid</option>
+                  <option value="Fully Paid">Fully Paid</option>
+                  <option value="Pending Reimbursement">Pending Reimbursement</option>
+                  <option value="Partially Reimbursed">Partially Reimbursed</option>
+                  <option value="Fully Reimbursed">Fully Reimbursed</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label text-xs">Source</label>
+                <select id="meh-source" class="cyber-input">
+                  <option value="">All Sources</option>
+                  <option value="work_order">Work Order</option>
+                  <option value="manual">Manual</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label text-xs">Employee</label>
+                <input type="text" id="meh-employee" class="cyber-input" placeholder="Staff name" />
+              </div>
+              <div>
+                <label class="form-label text-xs">Invoice No.</label>
+                <input type="text" id="meh-invoice" class="cyber-input" placeholder="MNT number" />
+              </div>
+            </div>
+            <div class="flex gap-2 mb-4">
+              <button type="button" id="btn-meh-search" class="qc-btn qc-btn-primary text-sm">Search</button>
+              <button type="button" id="btn-meh-clear" class="action-btn text-sm">Clear Filters</button>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" id="meh-summary-cards" style="display:none;">
+              <div class="bg-slate-800/50 rounded-lg p-3 text-center">
+                <p class="text-xs text-slate-400">Total Incurred</p>
+                <p class="text-lg font-bold text-cyan-400 font-mono" id="meh-total-incurred">KES 0</p>
+              </div>
+              <div class="bg-slate-800/50 rounded-lg p-3 text-center">
+                <p class="text-xs text-slate-400">Total Paid</p>
+                <p class="text-lg font-bold text-green-400 font-mono" id="meh-total-paid">KES 0</p>
+              </div>
+              <div class="bg-slate-800/50 rounded-lg p-3 text-center">
+                <p class="text-xs text-slate-400">Outstanding</p>
+                <p class="text-lg font-bold text-rose-400 font-mono" id="meh-total-outstanding">KES 0</p>
+              </div>
+              <div class="bg-slate-800/50 rounded-lg p-3 text-center">
+                <p class="text-xs text-slate-400">Expenses</p>
+                <p class="text-lg font-bold text-amber-400 font-mono" id="meh-expense-count">0</p>
+              </div>
+            </div>
+
+            <!-- Results Table -->
+            <div class="overflow-x-auto">
+              <table class="w-full text-left cyber-table text-sm">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Invoice #</th>
+                    <th>Category</th>
+                    <th>Description</th>
+                    <th>Property</th>
+                    <th>Source</th>
+                    <th class="text-right">Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="meh-list-tbody">
+                  <tr><td colspan="8" class="text-center text-slate-500 py-6">Click "Search" to load expenses.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- PROPERTY EXPENSE REPORT -->
+          <div class="glass-panel p-6 max-w-6xl mx-auto mt-6">
+            <h3 class="text-lg font-semibold text-white mb-4">Property Expense Report</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              <div>
+                <label class="form-label text-xs">Property Name</label>
+                <input type="text" id="per-property" class="cyber-input" placeholder="e.g. Blue House" />
+              </div>
+              <div>
+                <label class="form-label text-xs">Month</label>
+                <input type="month" id="per-month" class="cyber-input" />
+              </div>
+              <div class="flex items-end">
+                <button type="button" id="btn-per-search" class="qc-btn qc-btn-primary text-sm">Generate Report</button>
+              </div>
+            </div>
+            <div id="per-result" class="text-sm text-slate-400"></div>
+            <div id="per-report" class="hidden mt-4"></div>
+          </div>
         </div>
       </section>
+
+      <!-- EXPENSE PAYMENT MODAL -->
+      <div id="expense-payment-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4" style="display:none;">
+        <div class="glass-panel p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto">
+          <h3 class="text-lg font-semibold text-white mb-2" id="expense-payment-title">Record Payment</h3>
+          <p class="text-sm text-slate-400 mb-4" id="expense-payment-subtitle"></p>
+
+          <form id="expense-payment-form" class="space-y-4">
+            <input type="hidden" id="epm-invoice-id" />
+            <input type="hidden" id="epm-total-amount" />
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="form-label">Amount (KES)</label>
+                <input type="number" id="epm-amount" class="cyber-input" min="0.01" step="0.01" required />
+              </div>
+              <div>
+                <label class="form-label">Payment Date</label>
+                <input type="date" id="epm-date" class="cyber-input" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="form-label">Payment Method</label>
+                <select id="epm-method" class="cyber-input">
+                  <option value="">Select method</option>
+                  <option value="M-PESA">M-PESA</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">Reference (optional)</label>
+                <input type="text" id="epm-reference" class="cyber-input" placeholder="Receipt no, M-PESA code, etc." />
+              </div>
+            </div>
+            <div>
+              <label class="form-label">Notes (optional)</label>
+              <input type="text" id="epm-notes" class="cyber-input" placeholder="Payment notes" />
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button type="button" class="action-btn" id="btn-close-epm-modal">Cancel</button>
+              <button type="submit" class="qc-btn qc-btn-primary">Record Payment</button>
+            </div>
+            <p id="epm-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+          </form>
+
+          <div class="mt-4 pt-4 border-t border-slate-800">
+            <h4 class="text-sm font-semibold text-slate-300 mb-2">Payment History</h4>
+            <div id="epm-payment-history" class="text-sm text-slate-400">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SALARY MANAGEMENT -->
+      <div id="salary-panel" class="hidden">
+        <div class="max-w-6xl mx-auto mb-4 flex gap-3 items-center">
+          <button type="button" id="btn-back-salary" class="action-btn">&larr; Back</button>
+          <h2 class="text-lg font-semibold text-white ml-3">Salary Management</h2>
+          <div class="ml-auto flex gap-2 items-center">
+            <label class="form-label text-xs">Month:</label>
+            <input type="month" id="salary-month-select" class="cyber-input w-40" />
+            <button type="button" id="btn-new-salary" class="qc-btn qc-btn-primary text-sm">+ Add Salary</button>
+            <button type="button" id="btn-salary-rollover" class="qc-btn text-sm" style="background: linear-gradient(135deg, #8b5cf6, #6d28d9); border-color: #6d28d9; color: #fff;">Rollover</button>
+          </div>
+        </div>
+
+        <!-- New Salary Form -->
+        <div id="salary-form-wrap" class="hidden mb-6">
+          <div class="glass-panel p-6 max-w-6xl mx-auto">
+            <form id="salary-form" class="space-y-4">
+              <input type="hidden" id="sal-form-id" />
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label class="form-label">Employee Name</label>
+                  <input type="text" id="sal-employee" class="cyber-input" placeholder="e.g. Peter" required />
+                </div>
+                <div>
+                  <label class="form-label">Salary Month</label>
+                  <input type="month" id="sal-month" class="cyber-input" required />
+                </div>
+                <div>
+                  <label class="form-label">Previous Outstanding (KES)</label>
+                  <input type="number" id="sal-previous-balance" class="cyber-input" min="0" step="0.01" value="0" placeholder="0" />
+                </div>
+                <div>
+                  <label class="form-label">Current Expected Salary (KES)</label>
+                  <input type="number" id="sal-expected" class="cyber-input" min="0" step="0.01" required />
+                </div>
+              </div>
+              <div class="bg-slate-800/50 rounded-lg p-3 text-sm font-mono" id="sal-total-preview">
+                <span class="text-slate-400">Previous Outstanding:</span> <span class="text-amber-400" id="sal-prev-bal-display">KES 0</span>
+                &nbsp;+&nbsp;
+                <span class="text-slate-400">Current Salary:</span> <span class="text-cyan-400" id="sal-cur-display">KES 0</span>
+                &nbsp;=&nbsp;
+                <span class="text-slate-400">Total Payable:</span> <span class="text-white font-bold" id="sal-total-display">KES 0</span>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="form-label">Notes (optional)</label>
+                  <input type="text" id="sal-notes" class="cyber-input" placeholder="Additional notes" />
+                </div>
+                <div></div>
+              </div>
+              <div class="flex flex-wrap justify-end gap-3 pt-4 border-t border-slate-800">
+                <button type="button" class="action-btn" id="btn-cancel-salary-form">Cancel</button>
+                <button type="submit" class="qc-btn qc-btn-primary">Save Salary Record</button>
+              </div>
+              <p id="sal-form-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+            </form>
+          </div>
+        </div>
+
+        <!-- Salary Dashboard -->
+        <div class="glass-panel p-6 max-w-6xl mx-auto mb-4">
+          <h3 class="text-md font-semibold text-white mb-3">Current Month Salary Summary</h3>
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Expected</p>
+              <p class="text-xl font-bold text-cyan-400 font-mono" id="sal-total-expected">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Paid</p>
+              <p class="text-xl font-bold text-green-400 font-mono" id="sal-total-paid">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Outstanding</p>
+              <p class="text-xl font-bold text-rose-400 font-mono" id="sal-total-outstanding">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Employees</p>
+              <p class="text-xl font-bold text-amber-400 font-mono" id="sal-employee-count">0</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Salary Records Table -->
+        <div class="glass-panel p-6 max-w-6xl mx-auto">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left cyber-table text-sm">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Month</th>
+                  <th class="text-right">Prev. Balance</th>
+                  <th class="text-right">Expected</th>
+                  <th class="text-right">Total Payable</th>
+                  <th class="text-right">Paid</th>
+                  <th class="text-right">Outstanding</th>
+                  <th>Status</th>
+                  <th class="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="salary-list-tbody">
+                <tr><td colspan="9" class="text-center text-slate-500 py-6">Loading salary records...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p id="salary-list-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+        </div>
+      </div>
+
+      <!-- SALARY PAYMENT MODAL -->
+      <div id="salary-payment-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4" style="display:none;">
+        <div class="glass-panel p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto">
+          <h3 class="text-lg font-semibold text-white mb-2" id="sal-pay-title">Record Salary Payment</h3>
+          <p class="text-sm text-slate-400 mb-4" id="sal-pay-subtitle"></p>
+          <form id="salary-payment-form" class="space-y-4">
+            <input type="hidden" id="spm-record-id" />
+            <input type="hidden" id="spm-total-obligation" />
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="form-label">Amount (KES)</label>
+                <input type="number" id="spm-amount" class="cyber-input" min="0.01" step="0.01" required />
+              </div>
+              <div>
+                <label class="form-label">Payment Date</label>
+                <input type="date" id="spm-date" class="cyber-input" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="form-label">Payment Method</label>
+                <select id="spm-method" class="cyber-input">
+                  <option value="">Select method</option>
+                  <option value="M-PESA">M-PESA</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">Reference (optional)</label>
+                <input type="text" id="spm-reference" class="cyber-input" placeholder="Receipt no, M-PESA code, etc." />
+              </div>
+            </div>
+            <div>
+              <label class="form-label">Notes (optional)</label>
+              <input type="text" id="spm-notes" class="cyber-input" placeholder="Payment notes" />
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button type="button" class="action-btn" id="btn-close-spm-modal">Cancel</button>
+              <button type="submit" class="qc-btn qc-btn-primary">Record Payment</button>
+            </div>
+            <p id="spm-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+          </form>
+          <div class="mt-4 pt-4 border-t border-slate-800">
+            <h4 class="text-sm font-semibold text-slate-300 mb-2">Payment History</h4>
+            <div id="spm-payment-history" class="text-sm text-slate-400">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SALARY HISTORY MODAL -->
+      <div id="salary-history-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4" style="display:none;">
+        <div class="glass-panel p-6 w-full max-w-3xl max-h-[80vh] overflow-y-auto">
+          <h3 class="text-lg font-semibold text-white mb-2" id="sal-hist-title">Salary History</h3>
+          <div id="sal-hist-content" class="text-sm text-slate-300">Loading...</div>
+          <div class="flex justify-end mt-4 pt-4 border-t border-slate-800">
+            <button type="button" class="action-btn" id="btn-close-sal-hist-modal">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAFF ADVANCES -->
+      <div id="staff-advance-panel" class="hidden">
+        <div class="max-w-6xl mx-auto mb-4 flex gap-3 items-center">
+          <button type="button" id="btn-back-staff-advance" class="action-btn">&larr; Back</button>
+          <h2 class="text-lg font-semibold text-white ml-3">Staff Advances</h2>
+          <div class="ml-auto flex gap-2 items-center">
+            <label class="form-label text-xs">Employee:</label>
+            <select id="sa-employee-filter" class="cyber-input w-44"><option value="">All Employees</option></select>
+            <button type="button" id="btn-new-staff-advance" class="qc-btn qc-btn-primary text-sm">+ New Advance</button>
+          </div>
+        </div>
+
+        <!-- Staff Advance Form -->
+        <div id="sa-form-wrap" class="hidden mb-6">
+          <div class="glass-panel p-6 max-w-6xl mx-auto">
+            <form id="staff-advance-form" class="space-y-4">
+              <input type="hidden" id="sa-form-id" />
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label class="form-label">Employee Name</label>
+                  <input type="text" id="sa-employee" class="cyber-input" placeholder="e.g. Peter" required />
+                </div>
+                <div>
+                  <label class="form-label">Date Advanced</label>
+                  <input type="date" id="sa-date" class="cyber-input" required />
+                </div>
+                <div>
+                  <label class="form-label">Amount (KES)</label>
+                  <input type="number" id="sa-amount" class="cyber-input" min="0.01" step="0.01" required />
+                </div>
+                <div>
+                  <label class="form-label">Recovery Method</label>
+                  <select id="sa-recovery-method" class="cyber-input">
+                    <option value="salary_deduction">Salary Deduction</option>
+                    <option value="cash">Cash Payment</option>
+                    <option value="installment">Installment Plan</option>
+                  </select>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label class="form-label">Reason / Purpose</label>
+                  <input type="text" id="sa-reason" class="cyber-input" placeholder="e.g. Medical emergency" />
+                </div>
+                <div>
+                  <label class="form-label">Property</label>
+                  <select id="sa-property" class="cyber-input"><option value="">None</option></select>
+                </div>
+                <div>
+                  <label class="form-label">Unit (optional)</label>
+                  <input type="text" id="sa-unit" class="cyber-input" placeholder="e.g. B-602" />
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label class="form-label">Expected Recovery Month</label>
+                  <input type="month" id="sa-expected-recovery" class="cyber-input" />
+                </div>
+                <div>
+                  <label class="form-label">Status</label>
+                  <select id="sa-status" class="cyber-input">
+                    <option value="Pending">Pending</option>
+                    <option value="Partially Recovered">Partially Recovered</option>
+                    <option value="Fully Recovered">Fully Recovered</option>
+                    <option value="Written Off">Written Off</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label">Notes (optional)</label>
+                  <input type="text" id="sa-notes" class="cyber-input" placeholder="Additional notes" />
+                </div>
+              </div>
+              <div class="flex flex-wrap justify-end gap-3 pt-4 border-t border-slate-800">
+                <button type="button" class="action-btn" id="btn-cancel-sa-form">Cancel</button>
+                <button type="submit" class="qc-btn qc-btn-primary">Save Staff Advance</button>
+              </div>
+              <p id="sa-form-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+            </form>
+          </div>
+        </div>
+
+        <!-- Staff Advance Summary -->
+        <div class="glass-panel p-6 max-w-6xl mx-auto mb-4">
+          <h3 class="text-md font-semibold text-white mb-3">Staff Advances Summary</h3>
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Advanced</p>
+              <p class="text-xl font-bold text-cyan-400 font-mono" id="sa-total-advanced">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Recovered</p>
+              <p class="text-xl font-bold text-green-400 font-mono" id="sa-total-recovered">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Outstanding</p>
+              <p class="text-xl font-bold text-rose-400 font-mono" id="sa-total-outstanding">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Active Advances</p>
+              <p class="text-xl font-bold text-amber-400 font-mono" id="sa-active-count">0</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Staff Advances Table -->
+        <div class="glass-panel p-6 max-w-6xl mx-auto">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left cyber-table text-sm">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Date</th>
+                  <th>Reason</th>
+                  <th>Property</th>
+                  <th class="text-right">Amount</th>
+                  <th class="text-right">Recovered</th>
+                  <th class="text-right">Outstanding</th>
+                  <th>Status</th>
+                  <th class="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="sa-list-tbody">
+                <tr><td colspan="9" class="text-center text-slate-500 py-6">Loading staff advances...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAFF ADVANCE PAYMENT MODAL -->
+      <div id="sa-payment-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4" style="display:none;">
+        <div class="glass-panel p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto">
+          <h3 class="text-lg font-semibold text-white mb-2" id="sa-pay-title">Record Recovery Payment</h3>
+          <p class="text-sm text-slate-400 mb-4" id="sa-pay-subtitle"></p>
+          <form id="sa-payment-form" class="space-y-4">
+            <input type="hidden" id="sapm-advance-id" />
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="form-label">Amount (KES)</label>
+                <input type="number" id="sapm-amount" class="cyber-input" min="0.01" step="0.01" required />
+              </div>
+              <div>
+                <label class="form-label">Payment Date</label>
+                <input type="date" id="sapm-date" class="cyber-input" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="form-label">Payment Method</label>
+                <select id="sapm-method" class="cyber-input">
+                  <option value="">Select method</option>
+                  <option value="M-PESA">M-PESA</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Salary Deduction">Salary Deduction</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">Reference (optional)</label>
+                <input type="text" id="sapm-reference" class="cyber-input" placeholder="Receipt no, M-PESA code" />
+              </div>
+            </div>
+            <div>
+              <label class="form-label">Notes (optional)</label>
+              <input type="text" id="sapm-notes" class="cyber-input" placeholder="Payment notes" />
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button type="button" class="action-btn" id="btn-close-sapm-modal">Cancel</button>
+              <button type="submit" class="qc-btn qc-btn-primary">Record Payment</button>
+            </div>
+            <p id="sapm-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+          </form>
+          <div class="mt-4 pt-4 border-t border-slate-800">
+            <h4 class="text-sm font-semibold text-slate-300 mb-2">Recovery History</h4>
+            <div id="sapm-payment-history" class="text-sm text-slate-400">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EMPLOYEE RENT -->
+      <div id="employee-rent-panel" class="hidden">
+        <div class="max-w-6xl mx-auto mb-4 flex gap-3 items-center">
+          <button type="button" id="btn-back-employee-rent" class="action-btn">&larr; Back</button>
+          <h2 class="text-lg font-semibold text-white ml-3">Employee Rent</h2>
+          <div class="ml-auto flex gap-2 items-center">
+            <label class="form-label text-xs">Employee:</label>
+            <select id="er-employee-filter" class="cyber-input w-44"><option value="">All Employees</option></select>
+            <label class="form-label text-xs">Period:</label>
+            <input type="month" id="er-period-filter" class="cyber-input w-40" />
+            <button type="button" id="btn-new-employee-rent" class="qc-btn qc-btn-primary text-sm">+ New Rent Record</button>
+          </div>
+        </div>
+
+        <!-- Employee Rent Form -->
+        <div id="er-form-wrap" class="hidden mb-6">
+          <div class="glass-panel p-6 max-w-6xl mx-auto">
+            <form id="employee-rent-form" class="space-y-4">
+              <input type="hidden" id="er-form-id" />
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label class="form-label">Employee Name</label>
+                  <input type="text" id="er-employee" class="cyber-input" placeholder="e.g. Peter" required />
+                </div>
+                <div>
+                  <label class="form-label">Property</label>
+                  <select id="er-property" class="cyber-input" required><option value="">Select property</option></select>
+                </div>
+                <div>
+                  <label class="form-label">Unit Code</label>
+                  <input type="text" id="er-unit" class="cyber-input" placeholder="e.g. B-602" required />
+                </div>
+                <div>
+                  <label class="form-label">Monthly Rent (KES)</label>
+                  <input type="number" id="er-monthly-rent" class="cyber-input" min="0.01" step="0.01" required />
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label class="form-label">Rent Due Day</label>
+                  <input type="number" id="er-due-day" class="cyber-input" min="1" max="31" value="5" required />
+                </div>
+                <div>
+                  <label class="form-label">Rent Period</label>
+                  <input type="month" id="er-period" class="cyber-input" required />
+                </div>
+                <div>
+                  <label class="form-label">Previous Balance (KES)</label>
+                  <input type="number" id="er-previous-balance" class="cyber-input" min="0" step="0.01" value="0" />
+                </div>
+                <div>
+                  <label class="form-label">Notes (optional)</label>
+                  <input type="text" id="er-notes" class="cyber-input" placeholder="Additional notes" />
+                </div>
+              </div>
+              <div class="bg-slate-800/50 rounded-lg p-3 text-sm font-mono" id="er-preview">
+                <span class="text-slate-400">Previous Balance:</span> <span class="text-amber-400" id="er-prev-bal-display">KES 0</span>
+                &nbsp;+&nbsp;
+                <span class="text-slate-400">Monthly Rent:</span> <span class="text-cyan-400" id="er-monthly-display">KES 0</span>
+                &nbsp;=&nbsp;
+                <span class="text-slate-400">Total Rent Due:</span> <span class="text-white font-bold" id="er-total-due-display">KES 0</span>
+              </div>
+              <div class="flex flex-wrap justify-end gap-3 pt-4 border-t border-slate-800">
+                <button type="button" class="action-btn" id="btn-cancel-er-form">Cancel</button>
+                <button type="submit" class="qc-btn qc-btn-primary">Save Rent Record</button>
+              </div>
+              <p id="er-form-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+            </form>
+          </div>
+        </div>
+
+        <!-- Employee Rent Summary -->
+        <div class="glass-panel p-6 max-w-6xl mx-auto mb-4">
+          <h3 class="text-md font-semibold text-white mb-3">Employee Rent Summary</h3>
+          <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Rent Due</p>
+              <p class="text-xl font-bold text-cyan-400 font-mono" id="er-total-due">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Paid</p>
+              <p class="text-xl font-bold text-green-400 font-mono" id="er-total-paid">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Deducted</p>
+              <p class="text-xl font-bold text-purple-400 font-mono" id="er-total-deducted">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Total Outstanding</p>
+              <p class="text-xl font-bold text-rose-400 font-mono" id="er-total-outstanding">KES 0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+              <p class="text-xs text-slate-400 mb-1">Records</p>
+              <p class="text-xl font-bold text-amber-400 font-mono" id="er-record-count">0</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Employee Rent Table -->
+        <div class="glass-panel p-6 max-w-6xl mx-auto">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left cyber-table text-sm">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Property / Unit</th>
+                  <th>Period</th>
+                  <th class="text-right">Monthly Rent</th>
+                  <th class="text-right">Paid</th>
+                  <th class="text-right">Deducted</th>
+                  <th class="text-right">Outstanding</th>
+                  <th>Status</th>
+                  <th class="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="er-list-tbody">
+                <tr><td colspan="9" class="text-center text-slate-500 py-6">Loading employee rent records...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- EMPLOYEE RENT PAYMENT MODAL -->
+      <div id="er-payment-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4" style="display:none;">
+        <div class="glass-panel p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto">
+          <h3 class="text-lg font-semibold text-white mb-2" id="er-pay-title">Record Rent Payment</h3>
+          <p class="text-sm text-slate-400 mb-4" id="er-pay-subtitle"></p>
+          <form id="er-payment-form" class="space-y-4">
+            <input type="hidden" id="erpm-rent-id" />
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="form-label">Amount (KES)</label>
+                <input type="number" id="erpm-amount" class="cyber-input" min="0.01" step="0.01" required />
+              </div>
+              <div>
+                <label class="form-label">Payment Date</label>
+                <input type="date" id="erpm-date" class="cyber-input" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="form-label">Payment Method</label>
+                <select id="erpm-method" class="cyber-input">
+                  <option value="">Select method</option>
+                  <option value="M-PESA">M-PESA</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Salary Deduction">Salary Deduction</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">Reference (optional)</label>
+                <input type="text" id="erpm-reference" class="cyber-input" placeholder="Receipt no, M-PESA code" />
+              </div>
+            </div>
+            <div>
+              <label class="form-label">Notes (optional)</label>
+              <input type="text" id="erpm-notes" class="cyber-input" placeholder="Payment notes" />
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button type="button" class="action-btn" id="btn-close-erpm-modal">Cancel</button>
+              <button type="submit" class="qc-btn qc-btn-primary">Record Payment</button>
+            </div>
+            <p id="erpm-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+          </form>
+          <div class="mt-4 pt-4 border-t border-slate-800">
+            <h4 class="text-sm font-semibold text-slate-300 mb-2">Payment History</h4>
+            <div id="erpm-payment-history" class="text-sm text-slate-400">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RENT DEDUCTION FROM SALARY MODAL -->
+      <div id="er-deduct-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4" style="display:none;">
+        <div class="glass-panel p-6 w-full max-w-lg">
+          <h3 class="text-lg font-semibold text-white mb-2">Deduct Rent from Salary</h3>
+          <p class="text-sm text-slate-400 mb-4" id="er-deduct-subtitle"></p>
+          <form id="er-deduct-form" class="space-y-4">
+            <input type="hidden" id="erd-rent-id" />
+            <input type="hidden" id="erd-rent-outstanding" />
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="form-label">Select Salary Record</label>
+                <select id="erd-salary-record" class="cyber-input" required><option value="">Select salary</option></select>
+              </div>
+              <div>
+                <label class="form-label">Deduction Amount (KES)</label>
+                <input type="number" id="erd-amount" class="cyber-input" min="0.01" step="0.01" required />
+              </div>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-3 text-sm" id="erd-info">
+              <p class="text-slate-400">Rent outstanding: <span class="text-amber-400" id="erd-rent-out">KES 0</span></p>
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button type="button" class="action-btn" id="btn-close-erd-modal">Cancel</button>
+              <button type="submit" class="qc-btn qc-btn-primary">Apply Deduction</button>
+            </div>
+            <p id="erd-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+          </form>
+        </div>
+      </div>
+
+      <!-- WORK ORDER EXPENSE SELECTION MODAL -->
+      <div id="wo-expense-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4" style="display:none;">
+        <div class="glass-panel p-6 w-full max-w-3xl max-h-[80vh] overflow-y-auto">
+          <h3 class="text-lg font-semibold text-white mb-4">Select Work Order Management Expense</h3>
+          <div class="mb-4">
+            <label class="form-label">Filter by Property</label>
+            <select id="wo-expense-filter-house" class="cyber-input">
+              <option value="">All Properties</option>
+            </select>
+          </div>
+          <div id="wo-expense-loading" class="text-center text-slate-400 py-6">Loading eligible expenses...</div>
+          <div id="wo-expense-list" class="hidden"></div>
+          <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-800">
+            <button type="button" class="action-btn" id="btn-close-wo-expense-modal">Cancel</button>
+          </div>
+        </div>
+      </div>
 
       <!-- WORK ORDERS -->
       <section data-view="work-orders" class="hidden space-y-6">
@@ -1784,6 +2665,9 @@
             <select id="mr-month-select" class="cyber-input font-mono">
               <option value="">Select month...</option>
             </select>
+            <select id="mr-property-select" class="cyber-input font-mono">
+              <option value="">All Properties</option>
+            </select>
             <button type="button" id="btn-refresh-report" class="action-btn">Refresh Report</button>
           </div>
 
@@ -1834,10 +2718,241 @@
               <h3 class="text-sm font-semibold text-white mb-2">Summary</h3>
               <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm" id="mr-summary-grid"></div>
             </div>
+
+            <!-- Property Performance -->
+            <div class="mt-6">
+              <h3 class="text-lg font-semibold text-white mb-3">Property / Unit Performance</h3>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="mr-property-grid">
+                <div class="p-3 bg-slate-800/50 rounded border border-slate-700">
+                  <p class="text-xs text-slate-400">Occupied Units</p>
+                  <p id="mr-occupied" class="text-lg font-bold text-white font-orbitron">0</p>
+                </div>
+                <div class="p-3 bg-slate-800/50 rounded border border-slate-700">
+                  <p class="text-xs text-slate-400">Vacant Units</p>
+                  <p id="mr-vacant" class="text-lg font-bold text-amber-400 font-orbitron">0</p>
+                </div>
+                <div class="p-3 bg-slate-800/50 rounded border border-slate-700">
+                  <p class="text-xs text-slate-400">New Tenants</p>
+                  <p id="mr-new-tenants" class="text-lg font-bold text-green-400 font-orbitron">0</p>
+                </div>
+                <div class="p-3 bg-slate-800/50 rounded border border-slate-700">
+                  <p class="text-xs text-slate-400">Exiting Tenants</p>
+                  <p id="mr-exiting" class="text-lg font-bold text-rose-400 font-orbitron">0</p>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-sm" id="mr-collection-grid">
+                <div><span class="text-slate-400">Paid:</span> <span id="mr-paid-count" class="font-mono text-green-400">0</span></div>
+                <div><span class="text-slate-400">Partially Paid:</span> <span id="mr-partial-count" class="font-mono text-amber-400">0</span></div>
+                <div><span class="text-slate-400">Unpaid:</span> <span id="mr-unpaid-count" class="font-mono text-rose-400">0</span></div>
+                <div><span class="text-slate-400">Collection %:</span> <span id="mr-collection-pct" class="font-mono text-cyan-400">0%</span></div>
+              </div>
+            </div>
+
+            <!-- Penalties -->
+            <div class="mt-6">
+              <h3 class="text-lg font-semibold text-white mb-3">Penalty Invoices</h3>
+              <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3 text-sm" id="mr-penalty-summary"></div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left cyber-table text-sm">
+                  <thead>
+                    <tr><th>Tenant</th><th>Description</th><th>Category</th><th class="text-right">Amount</th><th>Status</th></tr>
+                  </thead>
+                  <tbody id="mr-penalties-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Exit Invoices -->
+            <div class="mt-6">
+              <h3 class="text-lg font-semibold text-white mb-3">Exit Invoices</h3>
+              <div id="mr-exit-summary" class="text-sm text-slate-400 mb-2"></div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left cyber-table text-sm">
+                  <thead>
+                    <tr><th>Exit No</th><th>Tenant</th><th>Unit</th><th>Rent Treatment</th><th class="text-right">Deductions</th><th class="text-right">Deposit Refund</th><th class="text-right">Final</th><th>Status</th></tr>
+                  </thead>
+                  <tbody id="mr-exits-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Notices to Vacate -->
+            <div class="mt-6">
+              <h3 class="text-lg font-semibold text-white mb-3">Notices to Vacate</h3>
+              <div id="mr-notices-summary" class="text-sm text-slate-400 mb-2"></div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left cyber-table text-sm">
+                  <thead>
+                    <tr><th>Tenant</th><th>Unit</th><th>Notice Date</th><th>Expected Vacate</th><th>Status</th></tr>
+                  </thead>
+                  <tbody id="mr-notices-tbody"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
 
           <div id="mr-empty" class="text-center text-slate-500 py-12">
             Select a month to view its financial report. Reports are auto-generated during monthly rollover.
+          </div>
+        </div>
+      </section>
+
+      <!-- MANAGEMENT EXPENSES MONTHLY REPORT -->
+      <section data-view="mgmt-expenses-report" class="hidden space-y-6">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <span class="sys-tag">[MGMT_EXPENSES_REPORT]</span>
+            <h2 class="section-title mt-1">Monthly <span class="accent">Management Expenses</span></h2>
+            <p class="section-desc">Track all management expenditures: property maintenance, salaries, reimbursements, petty cash, office purchases, administration</p>
+          </div>
+        </div>
+
+        <div class="glass-panel p-6 max-w-6xl mx-auto">
+          <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
+            <div>
+              <label class="form-label text-xs">Month</label>
+              <input type="month" id="mer-month" class="cyber-input" />
+            </div>
+            <div>
+              <label class="form-label text-xs">From Date</label>
+              <input type="date" id="mer-date-from" class="cyber-input" />
+            </div>
+            <div>
+              <label class="form-label text-xs">To Date</label>
+              <input type="date" id="mer-date-to" class="cyber-input" />
+            </div>
+            <div>
+              <label class="form-label text-xs">Property</label>
+              <select id="mer-property" class="cyber-input">
+                <option value="">All Properties</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label text-xs">Category</label>
+              <select id="mer-category" class="cyber-input">
+                <option value="">All Categories</option>
+                <option value="Petty Cash">Petty Cash</option>
+                <option value="Office Purchase">Office Purchase</option>
+                <option value="Administration">Administration</option>
+                <option value="Staff Reimbursement">Staff Reimbursement</option>
+                <option value="Property Maintenance">Property Maintenance</option>
+                <option value="Salary">Salary</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label text-xs">Status</label>
+              <select id="mer-status" class="cyber-input">
+                <option value="">All Statuses</option>
+                <option value="Pending">Pending</option>
+                <option value="Approved">Approved</option>
+                <option value="Paid">Paid</option>
+                <option value="Partially Paid">Partially Paid</option>
+                <option value="Fully Paid">Fully Paid</option>
+                <option value="Pending Reimbursement">Pending Reimbursement</option>
+                <option value="Partially Reimbursed">Partially Reimbursed</option>
+                <option value="Fully Reimbursed">Fully Reimbursed</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-end gap-2 mb-4">
+            <button type="button" id="btn-mer-generate" class="qc-btn qc-btn-primary">Generate Report</button>
+            <button type="button" id="btn-mer-download" class="action-btn" style="border-color:#8b5cf6;color:#8b5cf6;">Download PDF</button>
+            <button type="button" id="btn-mer-share" class="action-btn" style="border-color:#06b6d4;color:#06b6d4;">Share</button>
+            <button type="button" id="btn-mer-print" class="action-btn">Print</button>
+            <span class="text-xs text-slate-500 ml-2">Tip: Use Month for monthly reports, or From/To for custom date ranges. You can also set just From for a single date.</span>
+          </div>
+
+          <!-- Summary -->
+          <div id="mer-summary" class="hidden">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+                <p class="text-xs text-slate-400 mb-1">Total Incurred</p>
+                <p class="text-xl font-bold text-cyan-400 font-mono" id="mer-total-incurred">KES 0</p>
+              </div>
+              <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+                <p class="text-xs text-slate-400 mb-1">Total Paid</p>
+                <p class="text-xl font-bold text-green-400 font-mono" id="mer-total-paid">KES 0</p>
+              </div>
+              <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+                <p class="text-xs text-slate-400 mb-1">Outstanding</p>
+                <p class="text-xl font-bold text-rose-400 font-mono" id="mer-total-outstanding">KES 0</p>
+              </div>
+              <div class="bg-slate-800/50 rounded-lg p-4 text-center">
+                <p class="text-xs text-slate-400 mb-1">Period</p>
+                <p class="text-lg font-bold text-white font-mono" id="mer-period">—</p>
+              </div>
+            </div>
+
+            <!-- Breakdown: Property vs General -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div class="border border-slate-700 rounded-lg p-4">
+                <h4 class="text-sm font-semibold text-emerald-400 mb-2">Property Management Expenses</h4>
+                <p class="text-2xl font-bold text-white font-mono" id="mer-property-total">KES 0</p>
+              </div>
+              <div class="border border-slate-700 rounded-lg p-4">
+                <h4 class="text-sm font-semibold text-purple-400 mb-2">Office / General Management Expenses</h4>
+                <p class="text-2xl font-bold text-white font-mono" id="mer-general-total">KES 0</p>
+              </div>
+            </div>
+
+            <!-- By Category -->
+            <div class="mb-6">
+              <h4 class="text-sm font-semibold text-white mb-3">Expenses by Category</h4>
+              <div id="mer-by-category" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+            </div>
+
+            <!-- By Source -->
+            <div class="mb-6">
+              <h4 class="text-sm font-semibold text-white mb-3">Expenses by Source</h4>
+              <div id="mer-by-source" class="grid grid-cols-3 gap-3"></div>
+            </div>
+
+            <!-- Salary Details -->
+            <div class="mb-6" id="mer-salary-section" style="display:none;">
+              <h4 class="text-sm font-semibold text-white mb-3">Salary Report</h4>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left cyber-table text-sm">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th class="text-right">Expected</th>
+                      <th class="text-right">Prev. Balance</th>
+                      <th class="text-right">Paid</th>
+                      <th class="text-right">Outstanding</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mer-salary-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Full Expense List -->
+            <div>
+              <h4 class="text-sm font-semibold text-white mb-3">All Expenses</h4>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left cyber-table text-sm">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Invoice #</th>
+                      <th>Category</th>
+                      <th>Description</th>
+                      <th>Property</th>
+                      <th>Source</th>
+                      <th class="text-right">Amount</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mer-expenses-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div id="mer-empty" class="text-center text-slate-500 py-8">
+            Select a month and click "Generate Report" to view management expenses.
           </div>
         </div>
       </section>
@@ -1973,6 +3088,103 @@
         </div>
       </section>
 
+      <!-- DEPOSIT REFUNDS -->
+      <section data-view="deposit-refunds" class="hidden space-y-6">
+        <header class="section-head flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p class="section-num">DEPOSIT REFUNDS</p>
+            <h2 class="section-title text-2xl">Deposit Refunds</h2>
+            <p class="section-desc">Track and manage tenant deposit refunds</p>
+          </div>
+        </header>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div class="metric-card glass-panel p-4 cursor-pointer" data-dr-filter="pending">
+            <p class="text-xs text-slate-500 font-mono">PENDING</p>
+            <p id="dr-sum-pending" class="metric-value text-2xl mt-1 font-orbitron">0</p>
+            <p id="dr-sum-pending-amt" class="text-xs font-mono text-slate-400 mt-1">KES 0</p>
+          </div>
+          <div class="metric-card metric-warn glass-panel p-4 cursor-pointer" data-dr-filter="due_soon">
+            <p class="text-xs text-slate-500 font-mono">DUE SOON</p>
+            <p id="dr-sum-due-soon" class="metric-value text-2xl mt-1 font-orbitron">0</p>
+            <p id="dr-sum-due-soon-amt" class="text-xs font-mono text-slate-400 mt-1">KES 0</p>
+          </div>
+          <div class="metric-card metric-warn glass-panel p-4 cursor-pointer" data-dr-filter="due_today">
+            <p class="text-xs text-slate-500 font-mono">DUE TODAY</p>
+            <p id="dr-sum-due-today" class="metric-value text-2xl mt-1 font-orbitron">0</p>
+            <p id="dr-sum-due-today-amt" class="text-xs font-mono text-slate-400 mt-1">KES 0</p>
+          </div>
+          <div class="metric-card metric-warn glass-panel p-4 cursor-pointer" data-dr-filter="overdue">
+            <p class="text-xs text-slate-500 font-mono">OVERDUE</p>
+            <p id="dr-sum-overdue" class="metric-value text-2xl mt-1 font-orbitron">0</p>
+            <p id="dr-sum-overdue-amt" class="text-xs font-mono text-slate-400 mt-1">KES 0</p>
+          </div>
+          <div class="metric-card metric-green glass-panel p-4 cursor-pointer" data-dr-filter="refunded">
+            <p class="text-xs text-slate-500 font-mono">REFUNDED</p>
+            <p id="dr-sum-refunded" class="metric-value text-2xl mt-1 font-orbitron">0</p>
+            <p id="dr-sum-refunded-amt" class="text-xs font-mono text-slate-400 mt-1">KES 0</p>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="glass-panel p-4">
+          <div class="flex flex-wrap gap-3 items-end">
+            <div class="flex-1 min-w-[200px]">
+              <label class="form-label">Search</label>
+              <input type="text" id="dr-search" class="cyber-input w-full" placeholder="Tenant name, exit invoice, reference..." />
+            </div>
+            <div class="w-40">
+              <label class="form-label">Status</label>
+              <select id="dr-status-filter" class="cyber-input w-full">
+                <option value="all">All</option>
+                <option value="pending">Pending</option>
+                <option value="due_soon">Due Soon</option>
+                <option value="due_today">Due Today</option>
+                <option value="overdue">Overdue</option>
+                <option value="refunded">Refunded</option>
+                <option value="partially_refunded">Partially Refunded</option>
+                <option value="no_refund_due">No Refund Due</option>
+              </select>
+            </div>
+            <div class="w-40">
+              <label class="form-label">Sort By</label>
+              <select id="dr-sort" class="cyber-input w-full">
+                <option value="status">Priority</option>
+                <option value="due_asc">Due Date ↑</option>
+                <option value="due_desc">Due Date ↓</option>
+                <option value="exit_desc">Exit Date ↓</option>
+                <option value="exit_asc">Exit Date ↑</option>
+                <option value="amount_desc">Amount ↓</option>
+                <option value="tenant_asc">Tenant A→Z</option>
+              </select>
+            </div>
+            <button type="button" id="btn-dr-clear" class="qc-btn text-sm">Clear</button>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <div class="glass-panel overflow-x-auto">
+          <table class="data-grid w-full min-w-[700px]">
+            <thead>
+              <tr>
+                <th>Tenant</th>
+                <th>Property</th>
+                <th>Exit Date</th>
+                <th class="text-right">Refundable</th>
+                <th>Due Date</th>
+                <th>Countdown</th>
+                <th>Status</th>
+                <th class="text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="dr-tbody">
+              <tr><td colspan="8" class="text-center py-8 text-slate-500">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- USERS -->
       <section data-view="users" class="hidden space-y-6">
         <div class="flex flex-wrap justify-between items-end gap-4">
@@ -2000,6 +3212,8 @@
         </div>
       </section>
     </main>
+    </div><!-- .main-area -->
+    </div><!-- .app-shell -->
   </div>
 
   <!-- User Modal -->
@@ -2487,6 +3701,17 @@
         </div>
       </div>
 
+      <!-- Deposit Refund Info (shown after finalization) -->
+      <div id="ei-deposit-refund-info" class="hidden glass-panel p-4 mb-4">
+        <span class="sys-tag">[DEPOSIT_REFUND]</span>
+        <div class="mt-2 space-y-1 font-mono text-sm">
+          <div class="flex justify-between"><span class="text-slate-400">Refundable Amount</span><span id="ei-dr-amount" class="text-green-400 font-bold">KES 0</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Due Date</span><span id="ei-dr-due" class="text-amber-400">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Status</span><span id="ei-dr-status">—</span></div>
+        </div>
+        <button type="button" id="btn-ei-view-refund" class="qc-btn qc-btn-primary text-sm mt-3 w-full">View Deposit Refund</button>
+      </div>
+
       <div id="ei-actions-draft" class="flex flex-wrap gap-2 mb-2">
         <button type="button" id="btn-ei-save-draft" class="qc-btn flex-1">💾 Save Draft</button>
         <button type="button" id="btn-ei-finalize" class="qc-btn qc-btn-primary flex-1">🔒 Finalize Invoice</button>
@@ -2520,6 +3745,138 @@
       </div>
       <p id="archive-detail-sub" class="text-slate-400 text-sm mb-4">—</p>
       <div id="archive-detail-body" class="space-y-4"></div>
+    </div>
+  </div>
+
+  <!-- Deposit Refund Detail Modal -->
+  <div id="dr-detail-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+    <div class="glass-panel p-6 w-full max-w-3xl max-h-[92vh] overflow-y-auto">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <h3 class="font-orbitron text-xl text-white">Deposit Refund</h3>
+        <div class="flex items-center gap-2">
+          <span id="dr-detail-status" class="status-badge"></span>
+          <button type="button" id="btn-dr-detail-close" class="qc-btn text-sm">✕ Close</button>
+        </div>
+      </div>
+
+      <!-- Tenant & Exit Info -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div class="glass-panel p-4">
+          <span class="sys-tag">[TENANT]</span>
+          <div class="mt-2 space-y-1 font-mono text-sm">
+            <div class="flex justify-between"><span class="text-slate-400">Name</span><span id="dr-detail-tenant" class="text-white font-semibold">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Phone</span><span id="dr-detail-phone" class="text-slate-300">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Property</span><span id="dr-detail-property" class="text-slate-300">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Unit</span><span id="dr-detail-unit" class="text-purple-300">—</span></div>
+          </div>
+        </div>
+        <div class="glass-panel p-4">
+          <span class="sys-tag">[EXIT_INVOICE]</span>
+          <div class="mt-2 space-y-1 font-mono text-sm">
+            <div class="flex justify-between"><span class="text-slate-400">Exit Invoice</span><span id="dr-detail-exit-number" class="text-cyan-400">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Exit Date</span><span id="dr-detail-exit-date" class="text-slate-300">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Due Date</span><span id="dr-detail-due-date" class="text-amber-400 font-bold">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Countdown</span><span id="dr-detail-countdown" class="font-bold">—</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Financial Breakdown -->
+      <div class="glass-panel p-4 mb-4">
+        <span class="sys-tag">[FINANCIAL_BREAKDOWN]</span>
+        <div class="mt-2 space-y-1 font-mono text-sm">
+          <div class="flex justify-between"><span class="text-slate-400">Deposit Paid</span><span id="dr-detail-deposit-paid" class="text-cyan-400 font-bold">KES 0</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Deposit Applied to Rent</span><span id="dr-detail-dep-rent" class="text-rose-400">KES 0</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Deposit Applied to Deductions</span><span id="dr-detail-dep-ded" class="text-rose-400">KES 0</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Deductions Total</span><span id="dr-detail-deductions" class="text-rose-400">KES 0</span></div>
+          <div class="border-t border-slate-700 pt-2 mt-2 flex justify-between text-white font-bold text-lg">
+            <span>Refundable Amount</span>
+            <span id="dr-detail-refundable" class="text-green-400">KES 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deduction Line Items -->
+      <div id="dr-detail-lines-panel" class="glass-panel overflow-hidden mb-4 hidden">
+        <div class="p-4 border-b border-slate-700">
+          <span class="sys-tag">[DEDUCTION_ITEMS]</span>
+          <h4 class="font-orbitron text-white mt-1">Deduction Line Items</h4>
+        </div>
+        <table class="data-grid w-full">
+          <thead><tr><th>Category</th><th>Description</th><th class="text-right">Amount</th></tr></thead>
+          <tbody id="dr-detail-lines-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Refund Transaction -->
+      <div id="dr-detail-transaction-panel" class="glass-panel p-4 mb-4 hidden">
+        <span class="sys-tag">[REFUND_TRANSACTION]</span>
+        <div class="mt-2 space-y-1 font-mono text-sm">
+          <div class="flex justify-between"><span class="text-slate-400">Amount Refunded</span><span id="dr-detail-amount-refunded" class="text-green-400 font-bold">KES 0</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Remaining</span><span id="dr-detail-remaining" class="text-amber-400">KES 0</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Refund Date</span><span id="dr-detail-refund-date" class="text-slate-300">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Payment Method</span><span id="dr-detail-method" class="text-slate-300">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Transaction Ref</span><span id="dr-detail-ref" class="text-cyan-400">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Recorded By</span><span id="dr-detail-refunded-by" class="text-slate-300">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Remarks</span><span id="dr-detail-remarks" class="text-slate-300">—</span></div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div id="dr-detail-actions" class="flex flex-wrap gap-2">
+        <button type="button" id="btn-dr-view-exit-invoice" class="qc-btn flex-1">📄 View Exit Invoice</button>
+        <button type="button" id="btn-dr-record-refund" class="qc-btn qc-btn-primary flex-1">💰 Record Refund</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Record Refund Modal -->
+  <div id="dr-record-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+    <div class="glass-panel p-6 w-full max-w-md max-h-[92vh] overflow-y-auto">
+      <h3 class="font-orbitron text-xl text-white mb-4">Record Refund</h3>
+      <div id="dr-record-info" class="font-mono text-sm text-slate-400 mb-4 space-y-1">
+        <div class="flex justify-between"><span>Tenant</span><span id="dr-record-tenant" class="text-white">—</span></div>
+        <div class="flex justify-between"><span>Outstanding</span><span id="dr-record-outstanding" class="text-cyan-400 font-bold">KES 0</span></div>
+      </div>
+      <form id="dr-record-form" class="space-y-4">
+        <input type="hidden" id="dr-record-id" />
+        <div>
+          <label class="form-label">Refund Amount (KES)</label>
+          <input type="number" id="dr-record-amount" class="cyber-input w-full" min="0" required />
+        </div>
+        <div>
+          <label class="form-label">Payment Method</label>
+          <select id="dr-record-method" class="cyber-input w-full" required>
+            <option value="">Select method...</option>
+            <option value="M-Pesa">M-Pesa</option>
+            <option value="Bank Transfer">Bank Transfer</option>
+            <option value="Cash">Cash</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Transaction / Reference Number</label>
+          <input type="text" id="dr-record-ref" class="cyber-input w-full" placeholder="e.g. QHJ8K7L2P9" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="form-label">Refund Date</label>
+            <input type="date" id="dr-record-date" class="cyber-input w-full" />
+          </div>
+          <div>
+            <label class="form-label">Refund Time</label>
+            <input type="time" id="dr-record-time" class="cyber-input w-full" />
+          </div>
+        </div>
+        <div>
+          <label class="form-label">Remarks</label>
+          <input type="text" id="dr-record-remarks" class="cyber-input w-full" placeholder="Optional notes..." />
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="qc-btn qc-btn-primary flex-1">Save Refund</button>
+          <button type="button" id="btn-dr-record-cancel" class="qc-btn flex-1">Cancel</button>
+        </div>
+      </form>
     </div>
   </div>
 

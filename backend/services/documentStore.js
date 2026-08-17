@@ -8,7 +8,7 @@ const path = require('path');
 const puppeteer = require('puppeteer');
 const { getPuppeteerLaunchOptions } = require('../config/puppeteerChrome');
 const { getLogoBase64 } = require('./logo');
-const { receiptDocumentName, statementDocumentName, maintenanceInvoiceDocumentName, workOrderDocumentName, invoiceDocumentName, exitInvoiceDocumentName } = require('./docNames');
+const { receiptDocumentName, statementDocumentName, maintenanceInvoiceDocumentName, workOrderDocumentName, invoiceDocumentName, exitInvoiceDocumentName, salaryInvoiceDocumentName, reimbursementInvoiceDocumentName, expenseInvoiceDocumentName } = require('./docNames');
 const store = require('../storage/store');
 
 const DOCUMENTS_DIR = path.join(__dirname, '../storage/documents');
@@ -905,6 +905,533 @@ async function generateAndStoreWorkOrder(id) {
   }
 }
 
+function buildSalaryInvoiceHtml(record, payments) {
+  const totalPayable = Number(record.expected_salary || 0) + Number(record.previous_balance || 0);
+  const totalPaid = Number(record.total_paid || 0);
+  const outstanding = Number(record.outstanding || 0);
+
+  let paymentsSection = '';
+  if (payments && payments.length) {
+    paymentsSection = '<div class="section-label">Payment History</div><table><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Notes</th></tr></thead><tbody>';
+    payments.forEach(p => {
+      paymentsSection += `<tr><td>${formatDate(p.payment_date)}</td><td>KES ${KESNum(p.amount)}</td><td>${p.payment_method || '—'}</td><td>${p.reference || '—'}</td><td>${p.notes || '—'}</td></tr>`;
+    });
+    paymentsSection += '</tbody></table>';
+  }
+
+  return renderTemplate('salary_invoice.html', {
+    date: formatDate(new Date(), { monthFull: true }),
+    invoice_number: `SAL-${(record.salary_month || '').replace('-', '')}-${(record.employee_name || 'EMP').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6)}`,
+    employee_name: record.employee_name || '',
+    salary_month: record.salary_month || '',
+    previous_balance: KESNum(record.previous_balance || 0),
+    expected_salary: KESNum(record.expected_salary || 0),
+    total_payable: KESNum(totalPayable),
+    total_paid: KESNum(totalPaid),
+    outstanding: KESNum(outstanding),
+    status: record.status || 'Pending',
+    payments_section: paymentsSection,
+  });
+}
+
+async function generateAndStoreSalaryInvoice(recordId, actor) {
+  try {
+    const record = await store.getSalaryRecord(recordId);
+    if (!record) return null;
+    const payments = await store.getSalaryPayments(recordId);
+
+    const filename = salaryInvoiceDocumentName({
+      employeeName: record.employee_name,
+      salaryMonth: record.salary_month,
+    });
+    ensureDir();
+    const html = buildSalaryInvoiceHtml(record, payments);
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+
+    const invoiceNumber = `SAL-${(record.salary_month || '').replace('-', '')}-${(record.employee_name || 'EMP').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6)}`;
+
+    const doc = await store.createDocument({
+      doc_type: 'salary_invoice',
+      doc_number: invoiceNumber,
+      title: `Salary Invoice - ${record.employee_name} (${record.salary_month})`,
+      filename,
+      file_path: pdfPath,
+      tenant_code: null,
+      house_paybill_number: null,
+      property_name: null,
+      unit_label: null,
+      amount: Number(record.expected_salary || 0) + Number(record.previous_balance || 0),
+      doc_date: new Date().toISOString().slice(0, 10),
+    });
+
+    return { filename, pdfPath, doc, invoice_number: invoiceNumber };
+  } catch (err) {
+    console.error('[Documents] Salary invoice generation failed:', err.message);
+    return null;
+  }
+}
+
+function buildReimbursementInvoiceHtml(invoice, payments) {
+  const totalPaid = Number(invoice.total_paid || 0);
+  const outstanding = Number(invoice.outstanding || 0);
+  const item = Array.isArray(invoice.items) && invoice.items.length ? invoice.items[0] : {};
+  const dynamicData = item.materials ? (typeof item.materials === 'string' ? JSON.parse(item.materials || '{}') : item.materials) : {};
+
+  let paymentsSection = '';
+  if (payments && payments.length) {
+    paymentsSection = '<div class="section-label">Payment History</div><table><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Notes</th></tr></thead><tbody>';
+    payments.forEach(p => {
+      paymentsSection += `<tr><td>${formatDate(p.payment_date)}</td><td>KES ${KESNum(p.amount)}</td><td>${p.payment_method || '—'}</td><td>${p.reference || '—'}</td><td>${p.notes || '—'}</td></tr>`;
+    });
+    paymentsSection += '</tbody></table>';
+  }
+
+  const staffName = dynamicData['mnt-person'] || item.work_done || 'Staff';
+  const purpose = item.problem || 'Staff reimbursement';
+  const originalAmount = Number(item.labour_cost || 0) + Number(item.material_cost || 0);
+
+  return renderTemplate('reimbursement_invoice.html', {
+    date: formatDate(new Date(), { monthFull: true }),
+    invoice_number: invoice.mnt_number || 'REIMB-000',
+    employee_name: staffName,
+    expense_date: formatDate(invoice.date_reported),
+    property_name: invoice.property_name || '—',
+    purpose: purpose,
+    original_amount: KESNum(originalAmount),
+    previous_outstanding: KESNum(originalAmount - totalPaid),
+    total_paid: KESNum(totalPaid),
+    outstanding: KESNum(outstanding),
+    status: invoice.status || 'Pending Reimbursement',
+    payments_section: paymentsSection,
+  });
+}
+
+async function generateAndStoreReimbursementInvoice(invoiceId, actor) {
+  try {
+    const invoice = await store.getMaintenanceInvoice(invoiceId);
+    if (!invoice) return null;
+    const payments = await store.getExpensePayments(invoiceId);
+
+    const filename = reimbursementInvoiceDocumentName({
+      invoiceNo: invoice.mnt_number,
+      employeeName: (invoice.items && invoice.items[0] ? (invoice.items[0].work_done || 'staff') : 'staff'),
+    });
+    ensureDir();
+    const html = buildReimbursementInvoiceHtml(invoice, payments);
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+
+    const doc = await store.createDocument({
+      doc_type: 'reimbursement_invoice',
+      doc_number: invoice.mnt_number,
+      title: `Reimbursement Invoice ${invoice.mnt_number}`,
+      filename,
+      file_path: pdfPath,
+      tenant_code: null,
+      house_paybill_number: null,
+      property_name: invoice.property_name || null,
+      unit_label: null,
+      amount: invoice.grand_total,
+      doc_date: invoice.date_reported || new Date().toISOString().slice(0, 10),
+    });
+
+    return { filename, pdfPath, doc, invoice_number: invoice.mnt_number };
+  } catch (err) {
+    console.error('[Documents] Reimbursement invoice generation failed:', err.message);
+    return null;
+  }
+}
+
+const MGMT_CATEGORY_LABELS = {
+  petty_cash: 'Petty Cash',
+  office_purchase: 'Office Purchase',
+  administration: 'Administration',
+  staff_reimbursement: 'Staff Reimbursement',
+  property_maintenance: 'Property Maintenance',
+  salary: 'Salary',
+  other: 'Other Management Expense',
+};
+
+function buildExpenseInvoiceHtml(invoice, payments) {
+  const item = Array.isArray(invoice.items) && invoice.items.length ? invoice.items[0] : {};
+  const dynamicData = item.materials ? (typeof item.materials === 'string' ? JSON.parse(item.materials || '{}') : item.materials) : {};
+  const category = item.work_required || 'other';
+  const categoryLabel = MGMT_CATEGORY_LABELS[category] || category;
+  const description = item.problem || 'Management expense';
+  const totalAmount = Number(invoice.grand_total || 0);
+  const totalPaid = Number(invoice.total_paid || 0) || 0;
+  const outstanding = totalAmount - totalPaid;
+  const source = (invoice.notes || '').startsWith('WO Source: ') ? 'Work Order' : 'Manual';
+  const woRef = source === 'Work Order' ? (invoice.notes || '').replace('WO Source: ', '').split(' ')[0] : '';
+
+  // Build dynamic fields HTML
+  let dynamicFieldsHtml = '';
+  const fieldEntries = Object.entries(dynamicData).filter(([k, v]) => v && k !== 'mnt-notes');
+  if (fieldEntries.length) {
+    dynamicFieldsHtml = fieldEntries.map(([k, v]) => {
+      const label = k.replace(/^mnt-/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      return `<div class="info-box"><div class="label">${label}</div><div class="value">${escapeHtml ? v : v}</div></div>`;
+    }).join('');
+  }
+
+  // Payments section
+  let paymentsSection = '';
+  if (payments && payments.length) {
+    paymentsSection = '<div style="margin-top:12px;font-size:11px;font-weight:700;color:#1a4b8c;text-transform:uppercase;">Payment History</div><table><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Notes</th></tr></thead><tbody>';
+    payments.forEach(p => {
+      paymentsSection += `<tr><td>${formatDate(p.payment_date)}</td><td>KES ${KESNum(p.amount)}</td><td>${p.payment_method || '—'}</td><td>${p.reference || '—'}</td><td>${p.notes || '—'}</td></tr>`;
+    });
+    paymentsSection += '</tbody></table>';
+  }
+
+  // Notes section
+  let notesSection = '';
+  const notes = dynamicData['mnt-notes'] || invoice.notes || '';
+  if (notes) {
+    notesSection = `<div style="margin-top:8px;padding:6px;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;color:#555;"><strong>Notes:</strong> ${notes}</div>`;
+  }
+
+  return renderTemplate('expense_invoice.html', {
+    date: formatDate(new Date(), { monthFull: true }),
+    invoice_number: invoice.mnt_number || 'EXP-000',
+    invoice_title: `${categoryLabel.toUpperCase()} INVOICE`,
+    category: categoryLabel,
+    expense_date: formatDate(invoice.date_reported),
+    property_name: invoice.property_name || '—',
+    source: woRef ? `Work Order (${woRef})` : source,
+    dynamic_fields_html: dynamicFieldsHtml,
+    total_amount: KESNum(totalAmount),
+    total_paid: KESNum(totalPaid),
+    outstanding: KESNum(outstanding),
+    status: invoice.status || 'Pending',
+    payments_section: paymentsSection,
+    notes_section: notesSection,
+  });
+}
+
+async function generateAndStoreExpenseInvoice(invoiceId, actor) {
+  try {
+    const invoice = await store.getMaintenanceInvoice(invoiceId);
+    if (!invoice) return null;
+    const payments = await store.getExpensePayments(invoiceId);
+
+    const item = Array.isArray(invoice.items) && invoice.items.length ? invoice.items[0] : {};
+    const category = item.work_required || 'other';
+
+    const filename = expenseInvoiceDocumentName({
+      invoiceNo: invoice.mnt_number,
+      category,
+    });
+    ensureDir();
+    const html = buildExpenseInvoiceHtml(invoice, payments);
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+
+    const doc = await store.createDocument({
+      doc_type: 'expense_invoice',
+      doc_number: invoice.mnt_number,
+      title: `${MGMT_CATEGORY_LABELS[category] || category} Invoice ${invoice.mnt_number}`,
+      filename,
+      file_path: pdfPath,
+      tenant_code: null,
+      house_paybill_number: null,
+      property_name: invoice.property_name || null,
+      unit_label: null,
+      amount: invoice.grand_total,
+      doc_date: invoice.date_reported || new Date().toISOString().slice(0, 10),
+    });
+
+    return { filename, pdfPath, doc, invoice_number: invoice.mnt_number };
+  } catch (err) {
+    console.error('[Documents] Expense invoice generation failed:', err.message);
+    return null;
+  }
+}
+
+function buildManagementExpensesReportHtml(report) {
+  const summary = report.summary || {};
+  const expenses = report.expenses || [];
+  const byCategory = report.by_category || {};
+  const bySource = report.by_source || {};
+  const salaryRecords = report.salary_records || [];
+
+  // Category boxes
+  const categoryBoxes = Object.entries(byCategory).map(([cat, amt]) =>
+    `<div class="cat-box"><div class="cat-label">${cat}</div><div class="cat-value">KES ${Number(amt).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div></div>`
+  ).join('');
+
+  // Property summary
+  let propertySummarySection = '';
+  if (summary.property_expenses > 0 || summary.general_expenses > 0) {
+    propertySummarySection = `<div class="section-label">Property vs General</div>
+    <div style="display:flex;gap:20px;margin-bottom:12px;font-size:11px;">
+      <div><strong>Property Expenses:</strong> KES ${Number(summary.property_expenses || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+      <div><strong>General/Office Expenses:</strong> KES ${Number(summary.general_expenses || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+    </div>`;
+  }
+
+  // Expenses table
+  let expensesHtml = '';
+  let hasExpenses = false;
+  if (expenses.length) {
+    hasExpenses = true;
+    expensesHtml = expenses.map(e => {
+      const date = e.date_reported ? String(e.date_reported).slice(0, 10) : (e.date_month || '—');
+      const srcBadge = e.source === 'Work Order' ? 'WO' : e.source === 'Salary' ? 'Salary' : 'Manual';
+      return `<tr><td>${date}</td><td>${e.invoice_number || '—'}</td><td>${e.category || '—'}</td><td>${(e.description || '—').slice(0, 40)}</td><td>${e.property_name || e.employee || '—'}</td><td>${srcBadge}</td><td style="text-align:right">KES ${Number(e.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td><td>${e.status || '—'}</td></tr>`;
+    }).join('');
+  }
+
+  // Salary section
+  let salarySection = '';
+  if (salaryRecords.length) {
+    salarySection = `<div class="section-label">Salary Records</div><table><thead><tr><th>Employee</th><th style="text-align:right">Expected</th><th style="text-align:right">Prev. Balance</th><th style="text-align:right">Paid</th><th style="text-align:right">Outstanding</th><th>Status</th></tr></thead><tbody>`;
+    salaryRecords.forEach(s => {
+      salarySection += `<tr><td>${s.employee || s.description || '—'}</td><td style="text-align:right">KES ${Number(s.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td><td style="text-align:right">${s.previous_balance > 0 ? 'KES ' + Number(s.previous_balance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}</td><td style="text-align:right;color:#059669">KES ${Number(s.total_paid || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td><td style="text-align:right;color:${s.outstanding > 0 ? '#dc2626' : '#059669'}">${s.outstanding > 0 ? 'KES ' + Number(s.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}</td><td>${s.status || '—'}</td></tr>`;
+    });
+    salarySection += '</tbody></table>';
+  }
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+    body{font-family:'Roboto',sans-serif;margin:0;padding:22px;color:#333;background:white;font-size:11px}
+    .header{display:flex;align-items:center;margin-bottom:10px}.header img{width:90px;object-fit:contain}
+    .header-content{flex:1;text-align:center;padding-left:16px}
+    .company-title{font-size:16px;font-weight:700;color:#1a4b8c;margin:0 0 3px 0}
+    .company-slogan{font-size:9px;font-style:italic;color:#666;margin:0 0 3px 0}
+    .company-details{font-size:9px;color:#555}
+    .separator-bar{height:3px;background:#e31837;width:100%;margin:10px 0;position:relative}
+    .separator-bar::after{content:'';position:absolute;top:3px;left:30%;right:0;height:3px;background:#111}
+    .inv-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .inv-title{font-size:16px;font-weight:700;color:#1a4b8c}
+    .inv-date{font-weight:700;font-size:12px}
+    .inv-no-bar{display:inline-block;background:#1a4b8c;color:white;font-weight:700;font-size:12px;padding:5px 12px;border-radius:4px;margin-bottom:10px}
+    .summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+    .summary-box{border:1px solid #dee2e6;border-radius:6px;padding:8px 10px;text-align:center}
+    .summary-box .label{font-weight:700;font-size:9px;color:#666;text-transform:uppercase;margin-bottom:2px}
+    .summary-box .value{font-size:14px;font-weight:700}
+    .cyan{color:#0891b2}.green{color:#059669}.red{color:#dc2626}
+    .section-label{font-size:12px;font-weight:700;color:#1a4b8c;margin:12px 0 6px 0;text-transform:uppercase;border-bottom:2px solid #1a4b8c;padding-bottom:3px}
+    table{width:100%;border-collapse:collapse;margin-bottom:12px}
+    th{background:#1a4b8c;color:white;text-align:left;padding:5px;font-size:10px}
+    td{padding:4px 5px;border:1px solid #dee2e6;font-size:10px}
+    tr:nth-child(even) td{background:#f8f9fa}
+    .cat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+    .cat-box{border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;text-align:center}
+    .cat-box .cat-label{font-size:9px;color:#666;text-transform:uppercase}
+    .cat-box .cat-value{font-size:12px;font-weight:700;color:#333}
+    .footer-bar{height:3px;background:#e31837;width:100%;margin:12px 0 6px 0;position:relative}
+    .footer-bar::after{content:'';position:absolute;top:3px;left:30%;right:0;height:3px;background:#111}
+    .footer-text{text-align:center;font-size:11px;color:#1a4b8c;font-weight:700}
+    .footer-slogan{text-align:center;font-size:9px;font-style:italic;color:#555}
+    .no-activity{text-align:center;color:#888;padding:10px;font-style:italic}
+  </style></head><body>
+  <div class="header"><img src="${readLogoBase64()}" alt="Logo"><div class="header-content"><h1 class="company-title">GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</h1><p class="company-slogan">Find a Home. Leave the Management to Us</p><p class="company-details">Dealers in: Rent management, property and General Consultancy<br>Located in Ruiru, Juja | Tel: +254 702 705 821 | Email: jujaview@gmail.com</p></div></div>
+  <div class="separator-bar"></div>
+  <div class="inv-header"><div class="inv-title">MANAGEMENT EXPENSES REPORT</div><div class="inv-date">${formatDate(new Date(), { monthFull: true })}</div></div>
+  <span class="inv-no-bar">REPORT PERIOD: ${report.month || 'All Time'}</span>
+  <div class="summary-grid">
+    <div class="summary-box"><div class="label">Total Incurred</div><div class="value cyan">KES ${Number(summary.total_incurred || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div></div>
+    <div class="summary-box"><div class="label">Total Paid</div><div class="value green">KES ${Number(summary.total_paid || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div></div>
+    <div class="summary-box"><div class="label">Outstanding</div><div class="value red">KES ${Number(summary.total_outstanding || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div></div>
+    <div class="summary-box"><div class="label">Total Expenses</div><div class="value">${expenses.length}</div></div>
+  </div>
+  ${propertySummarySection}
+  <div class="section-label">Expenses by Category</div>
+  <div class="cat-grid">${categoryBoxes || '<div class="no-activity">No category data</div>'}</div>
+  <div class="section-label">Full Expense List</div>
+  ${hasExpenses ? `<table><thead><tr><th>Date</th><th>Invoice #</th><th>Category</th><th>Description</th><th>Property</th><th>Source</th><th style="text-align:right">Amount</th><th>Status</th></tr></thead><tbody>${expensesHtml}</tbody></table>` : '<div class="no-activity">No expenses recorded for this period.</div>'}
+  ${salarySection}
+  <div class="footer-bar"></div>
+  <div class="footer-text">Gutenberg Elite Home & Property Managements</div>
+  <div class="footer-slogan">Find a Home. Leave the Management to Us</div>
+  </body></html>`;
+}
+
+async function generateAndStoreManagementExpensesReport(reportData, actor) {
+  try {
+    const filename = `Management-Expenses-Report_${(reportData.month || 'all').replace(/[^A-Za-z0-9]/g, '-')}.pdf`;
+    ensureDir();
+    const html = buildManagementExpensesReportHtml(reportData);
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+
+    const doc = await store.createDocument({
+      doc_type: 'management_expenses_report',
+      doc_number: `MER-${Date.now()}`,
+      title: `Management Expenses Report — ${reportData.month || 'All Time'}`,
+      filename,
+      file_path: pdfPath,
+      tenant_code: null,
+      house_paybill_number: null,
+      property_name: null,
+      unit_label: null,
+      amount: reportData.summary?.total_incurred || 0,
+      doc_date: new Date().toISOString().slice(0, 10),
+    });
+
+    return { filename, pdfPath, doc };
+  } catch (err) {
+    console.error('[Documents] Management expenses report generation failed:', err.message);
+    return null;
+  }
+}
+
+// ============================================================
+// STAFF ADVANCE INVOICE (Phase 6)
+// ============================================================
+
+function buildStaffAdvanceHtml(advance, payments) {
+  const fs = require('fs');
+  const path = require('path');
+  const templatePath = path.join(__dirname, '..', 'templates', 'staff_advance_invoice.html');
+  let html = fs.readFileSync(templatePath, 'utf8');
+  const formatKes = (v) => `KES ${Number(v || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
+  const statusBadge = (s) => {
+    const cls = s === 'Fully Recovered' ? 'status-full' : s === 'Written Off' ? 'status-pending' : 'status-partial';
+    return `<span class="status-badge ${cls}">${s || 'Pending'}</span>`;
+  };
+  const replacements = {
+    '{{generatedDate}}': new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
+    '{{employeeName}}': advance.employee_name || '',
+    '{{dateAdvanced}}': advance.date_advanced ? new Date(advance.date_advanced).toLocaleDateString('en-KE') : '',
+    '{{reason}}': advance.reason || '—',
+    '{{recoveryMethod}}': (advance.recovery_method || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    '{{propertyUnit}}': advance.property_name ? `${advance.property_name}${advance.unit_code ? ' / ' + advance.unit_code : ''}` : '—',
+    '{{expectedRecovery}}': advance.expected_recovery_month || '—',
+    '{{amountAdvanced}}': formatKes(advance.amount),
+    '{{amountRecovered}}': formatKes(advance.amount_recovered),
+    '{{outstandingBalance}}': formatKes(advance.outstanding),
+  };
+  for (const [key, val] of Object.entries(replacements)) {
+    html = html.split(key).join(val);
+  }
+  html = html.replace('{{{statusBadge}}}', statusBadge(advance.status));
+
+  let paymentsHtml = '';
+  if (payments && payments.length) {
+    paymentsHtml = '<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th style="text-align:right">Amount</th></tr></thead><tbody>';
+    for (const p of payments) {
+      paymentsHtml += `<tr><td>${p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-KE') : ''}</td><td>${p.payment_method || ''}</td><td>${p.reference || ''}</td><td style="text-align:right;font-weight:600;">${formatKes(p.amount)}</td></tr>`;
+    }
+    paymentsHtml += '</tbody></table>';
+  } else {
+    paymentsHtml = '<p style="color:#94a3b8;font-style:italic;">No recovery payments recorded yet.</p>';
+  }
+  html = html.replace(/{{#if payments\.length}}[\s\S]*?{{\/if}}/, paymentsHtml);
+  html = html.replace(/\{\{#each payments\}\}[\s\S]*?\{\{\/each\}\}/, '');
+
+  if (advance.notes) {
+    html = html.replace(/{{#if notes}}[\s\S]*?{{\/if}}/, `<div class="section-title">Notes</div><p style="font-size:13px;color:#475569;">${advance.notes}</p>`);
+  } else {
+    html = html.replace(/{{#if notes}}[\s\S]*?{{\/if}}/, '');
+  }
+  return html;
+}
+
+async function generateAndStoreStaffAdvanceInvoice(advanceId) {
+  const { query } = require('../db/pool');
+  const { generatePdfToFile } = require('./pdfGenerator');
+  const { staffAdvanceInvoiceDocumentName } = require('./docNames');
+  try {
+    const advRes = await query('SELECT * FROM staff_advances WHERE id = $1', [advanceId]);
+    const advance = advRes.rows[0];
+    if (!advance) throw new Error('Staff advance not found');
+    const payRes = await query('SELECT * FROM staff_advance_payments WHERE staff_advance_id = $1 ORDER BY payment_date ASC', [advanceId]);
+    const payments = payRes.rows;
+    const html = buildStaffAdvanceHtml(advance, payments);
+    const filename = staffAdvanceInvoiceDocumentName(advance.employee_name);
+    const { filename: pdfFilename, filepath: pdfPath } = await generatePdfToFile(html, filename);
+    const doc = await storeGeneratedPdf(pdfFilename, pdfPath, {
+      title: `Staff Advance Invoice — ${advance.employee_name}`,
+      source_type: 'staff_advance_invoice',
+      source_id: advance.id,
+    });
+    return { filename: pdfFilename, pdfPath, doc };
+  } catch (err) {
+    console.error('[Documents] Staff advance invoice generation failed:', err.message);
+    return null;
+  }
+}
+
+// ============================================================
+// EMPLOYEE RENT INVOICE (Phase 6)
+// ============================================================
+
+function buildEmployeeRentHtml(rent, payments) {
+  const fs = require('fs');
+  const path = require('path');
+  const templatePath = path.join(__dirname, '..', 'templates', 'employee_rent_invoice.html');
+  let html = fs.readFileSync(templatePath, 'utf8');
+  const formatKes = (v) => `KES ${Number(v || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
+  const statusBadge = (s) => {
+    const cls = s === 'Fully Paid' ? 'status-full' : s === 'Partially Paid' ? 'status-partial' : 'status-pending';
+    return `<span class="status-badge ${cls}">${s || 'Pending'}</span>`;
+  };
+  const dueDay = rent.rent_due_day || 5;
+  const period = rent.rent_period || '';
+  const dueDateStr = period ? `${period}-${String(dueDay).padStart(2, '0')}` : '';
+  const replacements = {
+    '{{generatedDate}}': new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
+    '{{employeeName}}': rent.employee_name || '',
+    '{{propertyUnit}}': `${rent.property_name || ''} / ${rent.unit_code || ''}`,
+    '{{rentPeriod}}': rent.rent_period || '',
+    '{{rentDueDate}}': dueDateStr,
+    '{{monthlyRent}}': formatKes(rent.monthly_rent),
+    '{{previousBalance}}': formatKes(rent.previous_balance),
+    '{{monthlyRentVal}}': formatKes(rent.monthly_rent),
+    '{{totalPaid}}': formatKes(rent.total_paid),
+    '{{totalDeducted}}': formatKes(rent.total_deducted),
+    '{{outstanding}}': formatKes(rent.outstanding),
+  };
+  for (const [key, val] of Object.entries(replacements)) {
+    html = html.split(key).join(val);
+  }
+  html = html.replace('{{{statusBadge}}}', statusBadge(rent.status));
+
+  let paymentsHtml = '';
+  if (payments && payments.length) {
+    paymentsHtml = '<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th style="text-align:right">Amount</th></tr></thead><tbody>';
+    for (const p of payments) {
+      paymentsHtml += `<tr><td>${p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-KE') : ''}</td><td>${p.payment_method || ''}</td><td>${p.reference || ''}</td><td style="text-align:right;font-weight:600;">${formatKes(p.amount)}</td></tr>`;
+    }
+    paymentsHtml += '</tbody></table>';
+  } else {
+    paymentsHtml = '<p style="color:#94a3b8;font-style:italic;">No payments recorded yet.</p>';
+  }
+  html = html.replace(/{{#if payments\.length}}[\s\S]*?{{\/if}}/, paymentsHtml);
+  html = html.replace(/\{\{#each payments\}\}[\s\S]*?\{\{\/each\}\}/, '');
+
+  if (rent.notes) {
+    html = html.replace(/{{#if notes}}[\s\S]*?{{\/if}}/, `<div class="section-title">Notes</div><p style="font-size:13px;color:#475569;">${rent.notes}</p>`);
+  } else {
+    html = html.replace(/{{#if notes}}[\s\S]*?{{\/if}}/, '');
+  }
+  return html;
+}
+
+async function generateAndStoreEmployeeRentInvoice(rentId) {
+  const { query } = require('../db/pool');
+  const { generatePdfToFile } = require('./pdfGenerator');
+  const { employeeRentInvoiceDocumentName } = require('./docNames');
+  try {
+    const rentRes = await query('SELECT * FROM employee_rent WHERE id = $1', [rentId]);
+    const rent = rentRes.rows[0];
+    if (!rent) throw new Error('Employee rent not found');
+    const payRes = await query('SELECT * FROM employee_rent_payments WHERE employee_rent_id = $1 ORDER BY payment_date ASC', [rentId]);
+    const payments = payRes.rows;
+    const html = buildEmployeeRentHtml(rent, payments);
+    const filename = employeeRentInvoiceDocumentName(rent.employee_name, rent.rent_period);
+    const { filename: pdfFilename, filepath: pdfPath } = await generatePdfToFile(html, filename);
+    const doc = await storeGeneratedPdf(pdfFilename, pdfPath, {
+      title: `Employee Rent — ${rent.employee_name} (${rent.rent_period})`,
+      source_type: 'employee_rent_invoice',
+      source_id: rent.id,
+    });
+    return { filename: pdfFilename, pdfPath, doc };
+  } catch (err) {
+    console.error('[Documents] Employee rent invoice generation failed:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   DOCUMENTS_DIR,
   buildReceiptHtml,
@@ -921,4 +1448,16 @@ module.exports = {
   generateAndStoreWorkOrder,
   buildExitInvoiceHtml,
   generateAndStoreExitInvoice,
+  buildSalaryInvoiceHtml,
+  generateAndStoreSalaryInvoice,
+  buildReimbursementInvoiceHtml,
+  generateAndStoreReimbursementInvoice,
+  buildExpenseInvoiceHtml,
+  generateAndStoreExpenseInvoice,
+  buildManagementExpensesReportHtml,
+  generateAndStoreManagementExpensesReport,
+  buildStaffAdvanceHtml,
+  generateAndStoreStaffAdvanceInvoice,
+  buildEmployeeRentHtml,
+  generateAndStoreEmployeeRentInvoice,
 };

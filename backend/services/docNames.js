@@ -63,10 +63,33 @@ function exitInvoiceDocumentName({ exitNo, tenantName, houseName, unitCode }) {
   return parts.join('_') + '.pdf';
 }
 
+function salaryInvoiceDocumentName({ employeeName, salaryMonth }) {
+  const parts = ['SALARY-INVOICE', upperClean(employeeName), clean(salaryMonth)].filter(Boolean);
+  return parts.join('_') + '.pdf';
+}
+
+function reimbursementInvoiceDocumentName({ invoiceNo, employeeName }) {
+  const parts = [String(invoiceNo || 'REIMB'), upperClean(employeeName)].filter(Boolean);
+  return parts.join('_') + '.pdf';
+}
+
+function expenseInvoiceDocumentName({ invoiceNo, category }) {
+  const parts = [String(invoiceNo || 'EXPENSE'), upperClean(category)].filter(Boolean);
+  return parts.join('_') + '.pdf';
+}
+
 function reportDocumentName({ type, houseName, date, ext = 'xlsx' }) {
   const typeLabel = cleanLabel(String(type || 'Report'), 'Report');
   const house = houseName ? titleClean(houseName) : 'All-Houses';
   return `${typeLabel}_${house}_${monthYearLabel(date)}.${ext}`;
+}
+
+function staffAdvanceInvoiceDocumentName(employeeName) {
+  return `Staff-Advance_${clean(employeeName)}_${Date.now()}.pdf`;
+}
+
+function employeeRentInvoiceDocumentName(employeeName, period) {
+  return `Employee-Rent_${clean(employeeName)}_${clean(period)}_${Date.now()}.pdf`;
 }
 
 function renameForDelivery(filePath, docName) {
@@ -87,6 +110,11 @@ module.exports = {
   maintenanceInvoiceDocumentName,
   workOrderDocumentName,
   exitInvoiceDocumentName,
+  salaryInvoiceDocumentName,
+  reimbursementInvoiceDocumentName,
+  expenseInvoiceDocumentName,
   reportDocumentName,
+  staffAdvanceInvoiceDocumentName,
+  employeeRentInvoiceDocumentName,
   renameForDelivery,
 };

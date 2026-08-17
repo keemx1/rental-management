@@ -4111,7 +4111,36 @@ async function finalizeExitInvoice(id, patch = {}, actor = null) {
      WHERE id = $1`,
     [id, patch.move_out_date || null, patch.reason != null ? patch.reason : null, actor || null]
   );
-  return getExitInvoice(id);
+
+  const updated = await getExitInvoice(id);
+  if (updated) {
+    const refundable = Number(updated.deposit_refund || 0);
+    const exitDate = updated.move_out_date || null;
+    let refundDueDate = null;
+    if (exitDate) {
+      const d = new Date(exitDate);
+      d.setDate(d.getDate() + 30);
+      refundDueDate = d.toISOString().slice(0, 10);
+    }
+    const status = refundable > 0 ? 'pending' : 'no_refund_due';
+    await query(
+      `INSERT INTO deposit_refunds
+        (tenant_code, exit_invoice_id, archive_id, deposit_amount, deposit_paid, deductions_total,
+         deposit_applied_to_rent, deposit_applied_to_deductions, refundable_amount, remaining_amount,
+         exit_date, refund_due_date, refund_status, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT (exit_invoice_id) DO NOTHING`,
+      [
+        updated.tenant_code, id, updated.archive_id || null,
+        Number(updated.deposit_amount || 0), Number(updated.deposit_paid || 0),
+        Number(updated.deductions_total || 0),
+        Number(updated.deposit_applied_to_rent || 0), Number(updated.deposit_applied_to_deductions || 0),
+        refundable, refundable, exitDate, refundDueDate, status, actor || null,
+      ]
+    );
+  }
+
+  return updated;
 }
 
 async function deleteExitInvoice(id) {
@@ -4450,6 +4479,392 @@ async function recordNoticeToVacate(tenantCode, date, reason = null) {
   return tenant;
 }
 
+// ============================================================
+// DEPOSIT REFUNDS
+// ============================================================
+
+async function listDepositRefunds({ status, tenant, house, search, sort, limit = 100, offset = 0 } = {}) {
+  const conditions = [];
+  const params = [];
+  let idx = 1;
+  if (status && status !== 'all') { conditions.push(`dr.refund_status = $${idx++}`); params.push(status); }
+  if (tenant) { conditions.push(`(dr.tenant_code ILIKE $${idx} OR t.name ILIKE $${idx})`); params.push(`%${tenant}%`); idx++; }
+  if (house) { conditions.push(`ei.house_paybill_number = $${idx++}`); params.push(house); }
+  if (search) { conditions.push(`(t.name ILIKE $${idx} OR dr.tenant_code ILIKE $${idx} OR ei.exit_number ILIKE $${idx} OR dr.transaction_reference ILIKE $${idx})`); params.push(`%${search}%`); idx++; }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const orderMap = { 'due_asc': 'dr.refund_due_date ASC NULLS LAST', 'due_desc': 'dr.refund_due_date DESC NULLS LAST', 'exit_asc': 'dr.exit_date ASC NULLS LAST', 'exit_desc': 'dr.exit_date DESC NULLS LAST', 'amount_desc': 'dr.refundable_amount DESC', 'amount_asc': 'dr.refundable_amount ASC', 'tenant_asc': 't.name ASC NULLS LAST', 'tenant_desc': 't.name DESC NULLS LAST', 'status': `CASE dr.refund_status WHEN 'overdue' THEN 1 WHEN 'due_today' THEN 2 WHEN 'due_soon' THEN 3 WHEN 'pending' THEN 4 WHEN 'partially_refunded' THEN 5 WHEN 'refunded' THEN 6 WHEN 'no_refund_due' THEN 7 END`, 'newest': 'dr.created_at DESC', 'oldest': 'dr.created_at ASC' };
+  const orderBy = orderMap[sort] || orderMap['status'];
+  const sql = `SELECT dr.*, t.name AS tenant_name, t.phone_number AS tenant_phone, ei.exit_number, ei.house_paybill_number, ei.unit_label, ei.property_name FROM deposit_refunds dr LEFT JOIN tenants t ON t.tenant_code = dr.tenant_code LEFT JOIN exit_invoices ei ON ei.id = dr.exit_invoice_id ${where} ORDER BY ${orderBy} LIMIT $${idx++} OFFSET $${idx++}`;
+  params.push(limit, offset);
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function getDepositRefund(id) {
+  const res = await query(`SELECT dr.*, t.name AS tenant_name, t.phone_number AS tenant_phone, t.national_id AS tenant_national_id, ei.exit_number, ei.house_paybill_number, ei.unit_label, ei.property_name, ei.deposit_amount AS ei_deposit_amount, ei.deposit_paid AS ei_deposit_paid, ei.deductions_total AS ei_deductions_total, ei.deposit_refund AS ei_deposit_refund, ei.outstanding_balance AS ei_outstanding_balance, ei.final_settlement AS ei_final_settlement, ei.lines AS ei_lines, ei.move_out_date AS ei_move_out_date, ei.deposit_treatment, ei.deposit_applied_to_rent AS ei_dep_applied_rent, ei.deposit_applied_to_deductions AS ei_dep_applied_ded, ei.rent_treatment, ei.rent_charged_amount, ei.pro_rated_days FROM deposit_refunds dr LEFT JOIN tenants t ON t.tenant_code = dr.tenant_code LEFT JOIN exit_invoices ei ON ei.id = dr.exit_invoice_id WHERE dr.id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function getDepositRefundByExitInvoice(exitInvoiceId) {
+  const res = await query(`SELECT * FROM deposit_refunds WHERE exit_invoice_id = $1`, [exitInvoiceId]);
+  return res.rows[0] || null;
+}
+
+async function updateDepositRefund(id, patch) {
+  const fields = []; const vals = []; let idx = 1;
+  const allowed = ['refund_status', 'amount_refunded', 'remaining_amount', 'refund_date', 'refund_time', 'payment_method', 'transaction_reference', 'remarks', 'refunded_by', 'archive_id'];
+  for (const k of allowed) { if (patch[k] !== undefined) { fields.push(`${k} = $${idx++}`); vals.push(patch[k]); } }
+  if (fields.length === 0) return getDepositRefund(id);
+  fields.push(`updated_at = NOW()`); vals.push(id);
+  await query(`UPDATE deposit_refunds SET ${fields.join(', ')} WHERE id = $${idx}`, vals);
+  return getDepositRefund(id);
+}
+
+async function recordDepositRefund(id, { amount, paymentMethod, transactionReference, refundDate, refundTime, remarks, actor }) {
+  const existing = await getDepositRefund(id);
+  if (!existing) return { error: 'Deposit refund record not found' };
+  const refundable = Number(existing.refundable_amount || 0);
+  const previouslyRefunded = Number(existing.amount_refunded || 0);
+  const newTotal = previouslyRefunded + Number(amount || 0);
+  if (newTotal > refundable) return { error: `Refund amount exceeds outstanding balance. Outstanding: ${refundable - previouslyRefunded}` };
+  const remaining = refundable - newTotal;
+  const status = remaining <= 0 ? 'refunded' : 'partially_refunded';
+  return updateDepositRefund(id, { refund_status: status, amount_refunded: newTotal, remaining_amount: remaining, payment_method: paymentMethod || null, transaction_reference: transactionReference || null, refund_date: refundDate || new Date().toISOString().slice(0, 10), refund_time: refundTime || new Date().toISOString().slice(11, 19), remarks: remarks || null, refunded_by: actor || null });
+}
+
+async function getDepositRefundSummary() {
+  const res = await query(`SELECT refund_status, COUNT(*)::int AS count, COALESCE(SUM(refundable_amount), 0)::numeric AS total_amount, COALESCE(SUM(amount_refunded), 0)::numeric AS total_refunded FROM deposit_refunds GROUP BY refund_status`);
+  const summary = { pending: 0, due_soon: 0, due_today: 0, overdue: 0, refunded: 0, partially_refunded: 0, no_refund_due: 0, pending_amount: 0, due_soon_amount: 0, due_today_amount: 0, overdue_amount: 0, refunded_amount: 0, outstanding_amount: 0 };
+  for (const r of res.rows) {
+    const s = r.refund_status; summary[s] = r.count;
+    if (s === 'pending') summary.pending_amount = Number(r.total_amount);
+    if (s === 'due_soon') summary.due_soon_amount = Number(r.total_amount);
+    if (s === 'due_today') summary.due_today_amount = Number(r.total_amount);
+    if (s === 'overdue') summary.overdue_amount = Number(r.total_amount);
+    if (s === 'refunded') summary.refunded_amount = Number(r.total_refunded);
+    if (['pending', 'due_soon', 'due_today', 'overdue', 'partially_refunded'].includes(s)) summary.outstanding_amount += Number(r.total_amount) - Number(r.total_refunded);
+  }
+  return summary;
+}
+
+async function createDepositRefund(data) {
+  const res = await query(`INSERT INTO deposit_refunds (tenant_code, exit_invoice_id, archive_id, deposit_amount, deposit_paid, deductions_total, deposit_applied_to_rent, deposit_applied_to_deductions, refundable_amount, remaining_amount, exit_date, refund_due_date, refund_status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (exit_invoice_id) DO UPDATE SET refundable_amount = EXCLUDED.refundable_amount, remaining_amount = EXCLUDED.remaining_amount, updated_at = NOW() RETURNING *`,
+    [data.tenant_code, data.exit_invoice_id, data.archive_id || null, data.deposit_amount || 0, data.deposit_paid || 0, data.deductions_total || 0, data.deposit_applied_to_rent || 0, data.deposit_applied_to_deductions || 0, data.refundable_amount || 0, data.remaining_amount || data.refundable_amount || 0, data.exit_date || null, data.refund_due_date || null, data.refund_status || 'pending', data.created_by || null]);
+  return res.rows[0];
+}
+
+// ============================================================
+// MANAGEMENT EXPENSE PAYMENTS
+// ============================================================
+
+async function recordExpensePayment(invoiceId, { amount, payment_method, reference, notes, recorded_by }) {
+  const res = await query(`INSERT INTO management_expense_payments (invoice_id, amount, payment_method, reference, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [invoiceId, amount, payment_method || null, reference || null, notes || null, recorded_by || null]);
+  return res.rows[0];
+}
+
+async function getExpensePayments(invoiceId) {
+  const res = await query(`SELECT * FROM management_expense_payments WHERE invoice_id = $1 ORDER BY payment_date ASC, id ASC`, [invoiceId]);
+  return res.rows;
+}
+
+async function deleteExpensePayment(id) {
+  await query(`DELETE FROM management_expense_payments WHERE id = $1`, [id]);
+}
+
+// ============================================================
+// SALARY RECORDS
+// ============================================================
+
+async function listSalaryRecords({ employee_name, salary_month } = {}) {
+  const conditions = []; const params = []; let idx = 1;
+  if (employee_name) { conditions.push(`employee_name ILIKE $${idx++}`); params.push(`%${employee_name}%`); }
+  if (salary_month) { conditions.push(`salary_month = $${idx++}`); params.push(salary_month); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const res = await query(`SELECT * FROM salary_records ${where} ORDER BY salary_month DESC, employee_name ASC`, params);
+  return res.rows;
+}
+
+async function getSalaryRecord(id) {
+  const res = await query(`SELECT * FROM salary_records WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function createSalaryRecord({ employee_name, salary_month, expected_salary, previous_balance, notes }) {
+  const outstanding = Number(expected_salary || 0) + Number(previous_balance || 0);
+  const res = await query(`INSERT INTO salary_records (employee_name, salary_month, expected_salary, previous_balance, outstanding, notes) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (employee_name, salary_month) DO UPDATE SET expected_salary = EXCLUDED.expected_salary, previous_balance = EXCLUDED.previous_balance, outstanding = EXCLUDED.outstanding, updated_at = NOW() RETURNING *`, [employee_name, salary_month, expected_salary || 0, previous_balance || 0, outstanding, notes || null]);
+  return res.rows[0];
+}
+
+async function updateSalaryRecord(id, patch) {
+  const fields = []; const vals = []; let idx = 1;
+  for (const k of ['employee_name', 'salary_month', 'expected_salary', 'previous_balance', 'notes', 'status']) {
+    if (patch[k] !== undefined) { fields.push(`${k} = $${idx++}`); vals.push(patch[k]); }
+  }
+  if (fields.length === 0) return getSalaryRecord(id);
+  fields.push(`updated_at = NOW()`); vals.push(id);
+  await query(`UPDATE salary_records SET ${fields.join(', ')} WHERE id = $${idx}`, vals);
+  return getSalaryRecord(id);
+}
+
+async function deleteSalaryRecord(id) {
+  await query(`DELETE FROM salary_records WHERE id = $1`, [id]);
+}
+
+async function recordSalaryPayment(salaryRecordId, { amount, payment_date, payment_method, reference, notes, recorded_by }) {
+  const rec = await getSalaryRecord(salaryRecordId);
+  if (!rec) return null;
+  const res = await query(`INSERT INTO salary_payments (salary_record_id, amount, payment_date, payment_method, reference, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [salaryRecordId, amount, payment_date || new Date().toISOString().slice(0, 10), payment_method || null, reference || null, notes || null, recorded_by || null]);
+  const totalPaid = Number(rec.total_paid || 0) + Number(amount || 0);
+  const outstanding = Math.max(0, Number(rec.expected_salary || 0) + Number(rec.previous_balance || 0) - totalPaid);
+  const status = outstanding <= 0 ? 'Fully Paid' : totalPaid > 0 ? 'Partially Paid' : 'Pending';
+  await query(`UPDATE salary_records SET total_paid = $1, outstanding = $2, status = $3, updated_at = NOW() WHERE id = $4`, [totalPaid, outstanding, status, salaryRecordId]);
+  return res.rows[0];
+}
+
+async function getSalaryPayments(salaryRecordId) {
+  const res = await query(`SELECT * FROM salary_payments WHERE salary_record_id = $1 ORDER BY payment_date ASC, id ASC`, [salaryRecordId]);
+  return res.rows;
+}
+
+async function deleteSalaryPayment(id) {
+  const pay = (await query(`SELECT * FROM salary_payments WHERE id = $1`, [id])).rows[0];
+  if (!pay) return;
+  await query(`DELETE FROM salary_payments WHERE id = $1`, [id]);
+  const rec = await getSalaryRecord(pay.salary_record_id);
+  if (rec) {
+    const totalPaid = Math.max(0, Number(rec.total_paid || 0) - Number(pay.amount || 0));
+    const outstanding = Math.max(0, Number(rec.expected_salary || 0) + Number(rec.previous_balance || 0) - totalPaid);
+    const status = outstanding <= 0 ? 'Fully Paid' : totalPaid > 0 ? 'Partially Paid' : 'Pending';
+    await query(`UPDATE salary_records SET total_paid = $1, outstanding = $2, status = $3, updated_at = NOW() WHERE id = $4`, [totalPaid, outstanding, status, pay.salary_record_id]);
+  }
+}
+
+async function rollOverSalaries(fromMonth, toMonth, actor) {
+  const prev = await query(`SELECT * FROM salary_records WHERE salary_month = $1`, [fromMonth]);
+  let created = 0;
+  for (const rec of prev.rows) {
+    const outstanding = Number(rec.outstanding || 0);
+    if (outstanding > 0) {
+      await query(`INSERT INTO salary_records (employee_name, salary_month, expected_salary, previous_balance, outstanding, notes) VALUES ($1,$2,0,$3,$4,$5) ON CONFLICT (employee_name, salary_month) DO UPDATE SET previous_balance = salary_records.previous_balance + EXCLUDED.previous_balance, outstanding = salary_records.outstanding + EXCLUDED.outstanding, updated_at = NOW()`, [rec.employee_name, toMonth, outstanding, outstanding, `Rolled over from ${fromMonth}`]);
+      created++;
+    }
+  }
+  return { created };
+}
+
+async function getSalaryHistory(employeeName) {
+  const res = await query(`SELECT * FROM salary_records WHERE employee_name = $1 ORDER BY salary_month DESC`, [employeeName]);
+  return res.rows;
+}
+
+async function listSalaryEmployees() {
+  const res = await query(`SELECT DISTINCT employee_name FROM salary_records ORDER BY employee_name`);
+  return res.rows.map(r => r.employee_name);
+}
+
+// ============================================================
+// STAFF ADVANCES
+// ============================================================
+
+async function listStaffAdvances({ employee_name, status } = {}) {
+  const conditions = []; const params = []; let idx = 1;
+  if (employee_name) { conditions.push(`employee_name ILIKE $${idx++}`); params.push(`%${employee_name}%`); }
+  if (status && status !== 'all') { conditions.push(`status = $${idx++}`); params.push(status); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const res = await query(`SELECT * FROM staff_advances ${where} ORDER BY created_at DESC`, params);
+  return res.rows;
+}
+
+async function getStaffAdvance(id) {
+  const res = await query(`SELECT * FROM staff_advances WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function createStaffAdvance(data) {
+  const outstanding = Number(data.amount || 0) - Number(data.amount_recovered || 0);
+  const res = await query(`INSERT INTO staff_advances (employee_name, date_advanced, amount, reason, property_name, unit_code, recovery_method, expected_recovery_month, amount_recovered, outstanding, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [data.employee_name, data.date_advanced || new Date().toISOString().slice(0, 10), data.amount || 0, data.reason || null, data.property_name || null, data.unit_code || null, data.recovery_method || 'salary_deduction', data.expected_recovery_month || null, data.amount_recovered || 0, outstanding, data.notes || null]);
+  return res.rows[0];
+}
+
+async function updateStaffAdvance(id, patch) {
+  const fields = []; const vals = []; let idx = 1;
+  for (const k of ['employee_name', 'date_advanced', 'amount', 'reason', 'property_name', 'unit_code', 'recovery_method', 'expected_recovery_month', 'notes', 'status']) {
+    if (patch[k] !== undefined) { fields.push(`${k} = $${idx++}`); vals.push(patch[k]); }
+  }
+  if (fields.length === 0) return getStaffAdvance(id);
+  fields.push(`updated_at = NOW()`); vals.push(id);
+  await query(`UPDATE staff_advances SET ${fields.join(', ')} WHERE id = $${idx}`, vals);
+  return getStaffAdvance(id);
+}
+
+async function deleteStaffAdvance(id) {
+  await query(`DELETE FROM staff_advances WHERE id = $1`, [id]);
+}
+
+async function recordStaffAdvancePayment(staffAdvanceId, { amount, payment_date, payment_method, reference, notes, recorded_by }) {
+  const adv = await getStaffAdvance(staffAdvanceId);
+  if (!adv) return null;
+  const res = await query(`INSERT INTO staff_advance_payments (staff_advance_id, amount, payment_date, payment_method, reference, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [staffAdvanceId, amount, payment_date || new Date().toISOString().slice(0, 10), payment_method || null, reference || null, notes || null, recorded_by || null]);
+  const recovered = Number(adv.amount_recovered || 0) + Number(amount || 0);
+  const outstanding = Math.max(0, Number(adv.amount || 0) - recovered);
+  const status = outstanding <= 0 ? 'Fully Recovered' : recovered > 0 ? 'Partially Recovered' : 'Pending';
+  await query(`UPDATE staff_advances SET amount_recovered = $1, outstanding = $2, status = $3, updated_at = NOW() WHERE id = $4`, [recovered, outstanding, status, staffAdvanceId]);
+  return res.rows[0];
+}
+
+async function getStaffAdvancePayments(staffAdvanceId) {
+  const res = await query(`SELECT * FROM staff_advance_payments WHERE staff_advance_id = $1 ORDER BY payment_date ASC, id ASC`, [staffAdvanceId]);
+  return res.rows;
+}
+
+async function deleteStaffAdvancePayment(id) {
+  const pay = (await query(`SELECT * FROM staff_advance_payments WHERE id = $1`, [id])).rows[0];
+  if (!pay) return;
+  await query(`DELETE FROM staff_advance_payments WHERE id = $1`, [id]);
+  const adv = await getStaffAdvance(pay.staff_advance_id);
+  if (adv) {
+    const recovered = Math.max(0, Number(adv.amount_recovered || 0) - Number(pay.amount || 0));
+    const outstanding = Math.max(0, Number(adv.amount || 0) - recovered);
+    const status = outstanding <= 0 ? 'Fully Recovered' : recovered > 0 ? 'Partially Recovered' : 'Pending';
+    await query(`UPDATE staff_advances SET amount_recovered = $1, outstanding = $2, status = $3, updated_at = NOW() WHERE id = $4`, [recovered, outstanding, status, pay.staff_advance_id]);
+  }
+}
+
+async function listStaffAdvanceEmployees() {
+  const res = await query(`SELECT DISTINCT employee_name FROM staff_advances ORDER BY employee_name`);
+  return res.rows.map(r => r.employee_name);
+}
+
+// ============================================================
+// EMPLOYEE RENT
+// ============================================================
+
+async function listEmployeeRent({ employee_name, rent_period, status } = {}) {
+  const conditions = []; const params = []; let idx = 1;
+  if (employee_name) { conditions.push(`employee_name ILIKE $${idx++}`); params.push(`%${employee_name}%`); }
+  if (rent_period) { conditions.push(`rent_period = $${idx++}`); params.push(rent_period); }
+  if (status && status !== 'all') { conditions.push(`status = $${idx++}`); params.push(status); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const res = await query(`SELECT * FROM employee_rent ${where} ORDER BY rent_period DESC, employee_name ASC`, params);
+  return res.rows;
+}
+
+async function getEmployeeRent(id) {
+  const res = await query(`SELECT * FROM employee_rent WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function createEmployeeRent(data) {
+  const outstanding = Number(data.monthly_rent || 0) + Number(data.previous_balance || 0);
+  const res = await query(`INSERT INTO employee_rent (employee_name, property_name, unit_code, monthly_rent, rent_due_day, rent_period, previous_balance, outstanding) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (employee_name, property_name, unit_code, rent_period) DO UPDATE SET monthly_rent = EXCLUDED.monthly_rent, previous_balance = EXCLUDED.previous_balance, outstanding = EXCLUDED.outstanding, updated_at = NOW() RETURNING *`, [data.employee_name, data.property_name, data.unit_code, data.monthly_rent || 0, data.rent_due_day || 5, data.rent_period, data.previous_balance || 0, outstanding]);
+  return res.rows[0];
+}
+
+async function updateEmployeeRent(id, patch) {
+  const fields = []; const vals = []; let idx = 1;
+  for (const k of ['employee_name', 'property_name', 'unit_code', 'monthly_rent', 'rent_due_day', 'rent_period', 'notes', 'status']) {
+    if (patch[k] !== undefined) { fields.push(`${k} = $${idx++}`); vals.push(patch[k]); }
+  }
+  if (fields.length === 0) return getEmployeeRent(id);
+  fields.push(`updated_at = NOW()`); vals.push(id);
+  await query(`UPDATE employee_rent SET ${fields.join(', ')} WHERE id = $${idx}`, vals);
+  return getEmployeeRent(id);
+}
+
+async function deleteEmployeeRent(id) {
+  await query(`DELETE FROM employee_rent WHERE id = $1`, [id]);
+}
+
+async function recordEmployeeRentPayment(employeeRentId, { amount, payment_date, payment_method, reference, notes, recorded_by }) {
+  const rec = await getEmployeeRent(employeeRentId);
+  if (!rec) return null;
+  const res = await query(`INSERT INTO employee_rent_payments (employee_rent_id, amount, payment_date, payment_method, reference, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [employeeRentId, amount, payment_date || new Date().toISOString().slice(0, 10), payment_method || null, reference || null, notes || null, recorded_by || null]);
+  const totalPaid = Number(rec.total_paid || 0) + Number(amount || 0);
+  const outstanding = Math.max(0, Number(rec.previous_balance || 0) + Number(rec.monthly_rent || 0) - totalPaid - Number(rec.total_deducted || 0));
+  const status = outstanding <= 0 ? 'Fully Paid' : totalPaid > 0 ? 'Partially Paid' : 'Pending';
+  await query(`UPDATE employee_rent SET total_paid = $1, outstanding = $2, status = $3, updated_at = NOW() WHERE id = $4`, [totalPaid, outstanding, status, employeeRentId]);
+  return res.rows[0];
+}
+
+async function getEmployeeRentPayments(employeeRentId) {
+  const res = await query(`SELECT * FROM employee_rent_payments WHERE employee_rent_id = $1 ORDER BY payment_date ASC, id ASC`, [employeeRentId]);
+  return res.rows;
+}
+
+async function deleteEmployeeRentPayment(id) {
+  const pay = (await query(`SELECT * FROM employee_rent_payments WHERE id = $1`, [id])).rows[0];
+  if (!pay) return;
+  await query(`DELETE FROM employee_rent_payments WHERE id = $1`, [id]);
+  const rec = await getEmployeeRent(pay.employee_rent_id);
+  if (rec) {
+    const totalPaid = Math.max(0, Number(rec.total_paid || 0) - Number(pay.amount || 0));
+    const outstanding = Math.max(0, Number(rec.previous_balance || 0) + Number(rec.monthly_rent || 0) - totalPaid - Number(rec.total_deducted || 0));
+    const status = outstanding <= 0 ? 'Fully Paid' : totalPaid > 0 ? 'Partially Paid' : 'Pending';
+    await query(`UPDATE employee_rent SET total_paid = $1, outstanding = $2, status = $3, updated_at = NOW() WHERE id = $4`, [totalPaid, outstanding, status, pay.employee_rent_id]);
+  }
+}
+
+async function deductRentFromSalary(employeeRentId, { amount, salary_record_id, notes }) {
+  const rec = await getEmployeeRent(employeeRentId);
+  if (!rec) return null;
+  const deducted = Number(rec.total_deducted || 0) + Number(amount || 0);
+  const outstanding = Math.max(0, Number(rec.previous_balance || 0) + Number(rec.monthly_rent || 0) - Number(rec.total_paid || 0) - deducted);
+  const status = outstanding <= 0 ? 'Fully Paid' : deducted > 0 ? 'Partially Paid' : 'Pending';
+  await query(`UPDATE employee_rent SET total_deducted = $1, outstanding = $2, status = $3, updated_at = NOW() WHERE id = $4`, [deducted, outstanding, status, employeeRentId]);
+  const ded = await query(`INSERT INTO salary_deductions (employee_name, salary_month, deduction_type, description, amount, amount_deducted, outstanding, related_id, status, notes) VALUES ($1,$2,'employee_rent',$3,$4,$5,$6,$7,'Fully Deducted',$8) RETURNING *`, [rec.employee_name, salary_record_id ? (await getSalaryRecord(salary_record_id))?.salary_month : new Date().toISOString().slice(0, 7), `Rent deduction: ${rec.property_name} ${rec.unit_code}`, amount, amount, 0, employeeRentId, notes || null]);
+  return ded.rows[0];
+}
+
+async function listEmployeeRentEmployees() {
+  const res = await query(`SELECT DISTINCT employee_name FROM employee_rent ORDER BY employee_name`);
+  return res.rows.map(r => r.employee_name);
+}
+
+// ============================================================
+// SALARY DEDUCTIONS
+// ============================================================
+
+async function listSalaryDeductions({ employee_name, salary_month, deduction_type } = {}) {
+  const conditions = []; const params = []; let idx = 1;
+  if (employee_name) { conditions.push(`employee_name ILIKE $${idx++}`); params.push(`%${employee_name}%`); }
+  if (salary_month) { conditions.push(`salary_month = $${idx++}`); params.push(salary_month); }
+  if (deduction_type) { conditions.push(`deduction_type = $${idx++}`); params.push(deduction_type); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const res = await query(`SELECT * FROM salary_deductions ${where} ORDER BY salary_month DESC, employee_name ASC`, params);
+  return res.rows;
+}
+
+async function getSalaryDeduction(id) {
+  const res = await query(`SELECT * FROM salary_deductions WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function createSalaryDeduction(data) {
+  const outstanding = Number(data.amount || 0) - Number(data.amount_deducted || 0);
+  const res = await query(`INSERT INTO salary_deductions (employee_name, salary_month, deduction_type, description, amount, amount_deducted, outstanding, related_id, status, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, [data.employee_name, data.salary_month, data.deduction_type, data.description || null, data.amount || 0, data.amount_deducted || 0, outstanding, data.related_id || null, data.status || 'Pending', data.notes || null]);
+  return res.rows[0];
+}
+
+async function updateSalaryDeduction(id, patch) {
+  const fields = []; const vals = []; let idx = 1;
+  for (const k of ['description', 'amount', 'amount_deducted', 'outstanding', 'status', 'notes']) {
+    if (patch[k] !== undefined) { fields.push(`${k} = $${idx++}`); vals.push(patch[k]); }
+  }
+  if (fields.length === 0) return getSalaryDeduction(id);
+  fields.push(`updated_at = NOW()`); vals.push(id);
+  await query(`UPDATE salary_deductions SET ${fields.join(', ')} WHERE id = $${idx}`, vals);
+  return getSalaryDeduction(id);
+}
+
+async function deleteSalaryDeduction(id) {
+  await query(`DELETE FROM salary_deductions WHERE id = $1`, [id]);
+}
+
+async function getSalaryDeductionsForMonth(employeeName, salaryMonth) {
+  const res = await query(`SELECT * FROM salary_deductions WHERE employee_name = $1 AND salary_month = $2 ORDER BY id ASC`, [employeeName, salaryMonth]);
+  return res.rows;
+}
+
 module.exports = {
   init,
   findUserByUsername,
@@ -4579,4 +4994,50 @@ module.exports = {
   vacateTenancy,
   resetTenancyFinancials,
   recordNoticeToVacate,
+  recordExpensePayment,
+  getExpensePayments,
+  deleteExpensePayment,
+  listSalaryRecords,
+  getSalaryRecord,
+  createSalaryRecord,
+  updateSalaryRecord,
+  deleteSalaryRecord,
+  recordSalaryPayment,
+  getSalaryPayments,
+  deleteSalaryPayment,
+  rollOverSalaries,
+  getSalaryHistory,
+  listSalaryEmployees,
+  listStaffAdvances,
+  getStaffAdvance,
+  createStaffAdvance,
+  updateStaffAdvance,
+  deleteStaffAdvance,
+  recordStaffAdvancePayment,
+  getStaffAdvancePayments,
+  deleteStaffAdvancePayment,
+  listStaffAdvanceEmployees,
+  listEmployeeRent,
+  getEmployeeRent,
+  createEmployeeRent,
+  updateEmployeeRent,
+  deleteEmployeeRent,
+  recordEmployeeRentPayment,
+  getEmployeeRentPayments,
+  deleteEmployeeRentPayment,
+  deductRentFromSalary,
+  listEmployeeRentEmployees,
+  listSalaryDeductions,
+  getSalaryDeduction,
+  createSalaryDeduction,
+  updateSalaryDeduction,
+  deleteSalaryDeduction,
+  getSalaryDeductionsForMonth,
+  listDepositRefunds,
+  getDepositRefund,
+  getDepositRefundByExitInvoice,
+  updateDepositRefund,
+  recordDepositRefund,
+  getDepositRefundSummary,
+  createDepositRefund,
 };

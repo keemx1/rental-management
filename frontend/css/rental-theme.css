@@ -108,10 +108,9 @@ body {
 
 /* Header */
 #main-nav {
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--qc-border);
-  box-shadow: var(--qc-glow);
 }
 
 .brand-lockup {
@@ -127,6 +126,16 @@ body {
   flex-shrink: 0;
   border-radius: 6px;
   filter: drop-shadow(0 2px 8px rgba(124, 58, 237, 0.15));
+}
+
+@media (min-width: 768px) {
+  .brand-logo {
+    width: 40px;
+    height: 40px;
+  }
+  .brand-title {
+    font-size: 0.95rem;
+  }
 }
 
 .brand-title {
@@ -150,14 +159,15 @@ body {
 #main-nav .nav-link {
   color: #475569;
   font-family: var(--qc-font-mono);
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
   font-weight: 500;
-  padding: 0.5rem 0.85rem;
+  padding: 0.4rem 0.5rem;
   border: 1px solid transparent;
   border-radius: 4px;
   transition: all 0.2s;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 #main-nav .nav-link:hover {
@@ -775,4 +785,396 @@ div[id$="modal"] label {
   background: var(--qc-green);
   border-color: var(--qc-green);
   color: #ffffff;
+}
+
+/* ============================================================
+   APP SHELL — CSS Grid Layout (Desktop)
+   ============================================================ */
+
+.app-shell {
+  display: block;
+}
+
+@media (min-width: 1024px) {
+  .app-shell {
+    display: grid;
+    grid-template-columns: var(--sidebar-width, 250px) minmax(0, 1fr);
+    min-height: 100vh;
+  }
+}
+
+.main-area {
+  min-width: 0;
+  width: 100%;
+}
+
+.main-content {
+  flex: 1;
+  max-width: 1600px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+@media (min-width: 1024px) {
+  .main-content {
+    padding: 2rem 2rem;
+  }
+}
+
+/* ============================================================
+   SIDEBAR NAVIGATION — Light Theme (Desktop, lg+)
+   ============================================================ */
+
+/* ============================================================
+   SIDEBAR NAVIGATION — Light Theme (Desktop, lg+)
+   Mobile: display:none — zero layout impact
+   ============================================================ */
+
+#sidebar {
+  /* Mobile: hidden, no layout impact */
+  display: none;
+}
+
+@media (min-width: 1024px) {
+#sidebar {
+  display: flex;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 40;
+  background: #ffffff;
+  border-right: 1px solid #e2e8f0;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.25s ease-in-out;
+  width: var(--sidebar-width, 250px);
+}
+
+.sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Brand area */
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 20px 18px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  flex-shrink: 0;
+  min-height: 68px;
+}
+
+.sidebar-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  overflow: hidden;
+  transition: opacity 0.2s ease, width 0.2s ease;
+}
+
+.sidebar-brand-name {
+  font-family: var(--qc-font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #0f172a;
+}
+
+/* Toggle button */
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: absolute;
+  top: 20px;
+  right: 12px;
+  z-index: 10;
+}
+
+.sidebar-toggle:hover {
+  background: #f1f5f9;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+
+.sidebar-toggle-icon {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.25s ease-in-out;
+}
+
+/* Scrollable navigation area */
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 10px;
+  scrollbar-width: thin;
+  scrollbar-color: #e2e8f0 transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 4px;
+}
+
+/* Section labels */
+.sidebar-section-label {
+  font-family: var(--qc-font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  padding: 16px 10px 6px;
+  user-select: none;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity 0.2s ease;
+}
+
+.sidebar-section-label:first-child {
+  padding-top: 4px;
+}
+
+/* Navigation links */
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-family: var(--qc-font-body);
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #475569;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar-link:hover {
+  color: #1e293b;
+  background: #f1f5f9;
+}
+
+.sidebar-link.active {
+  color: var(--qc-purple);
+  background: var(--qc-purple-dim);
+  font-weight: 600;
+}
+
+.sidebar-link.active .sidebar-icon {
+  color: var(--qc-purple);
+}
+
+/* Icons */
+.sidebar-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  color: #64748b;
+  transition: color 0.15s ease;
+}
+
+.sidebar-link:hover .sidebar-icon {
+  color: #334155;
+}
+
+.sidebar-link.active .sidebar-icon {
+  color: var(--qc-purple);
+}
+
+/* Labels (text) — hidden when collapsed */
+.sidebar-label {
+  transition: opacity 0.15s ease;
+}
+
+/* User / Sign Out section */
+.sidebar-user {
+  flex-shrink: 0;
+  border-top: 1px solid #f1f5f9;
+  padding: 14px 14px;
+}
+
+.sidebar-user-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sidebar-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sidebar-avatar svg {
+  width: 18px;
+  height: 18px;
+  color: #64748b;
+}
+
+.sidebar-user-details {
+  overflow: hidden;
+  transition: opacity 0.2s ease;
+}
+
+.sidebar-username {
+  font-family: var(--qc-font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-signout {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-family: var(--qc-font-mono);
+  font-size: 0.65rem;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+}
+
+.sidebar-signout:hover {
+  color: var(--qc-rose);
+}
+} /* end @media (min-width: 1024px) for sidebar */
+
+/* ============================================================
+   COLLAPSED SIDEBAR STATE (desktop only)
+   ============================================================ */
+
+#sidebar.collapsed {
+  width: var(--sidebar-collapsed-width, 68px);
+}
+
+#sidebar.collapsed .sidebar-toggle-icon {
+  transform: rotate(180deg);
+}
+
+#sidebar.collapsed .sidebar-brand {
+  justify-content: center;
+  padding: 20px 8px 16px;
+}
+
+#sidebar.collapsed .sidebar-brand-text {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+}
+
+#sidebar.collapsed .sidebar-section-label {
+  opacity: 0;
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#sidebar.collapsed .sidebar-link {
+  justify-content: center;
+  padding: 10px;
+}
+
+#sidebar.collapsed .sidebar-label {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+#sidebar.collapsed .sidebar-nav {
+  padding: 8px 6px;
+}
+
+#sidebar.collapsed .sidebar-user {
+  padding: 14px 8px;
+}
+
+#sidebar.collapsed .sidebar-user-info {
+  justify-content: center;
+}
+
+#sidebar.collapsed .sidebar-user-details {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+}
+
+#sidebar.collapsed .sidebar-toggle {
+  right: 50%;
+  transform: translateX(50%);
+}
+
+/* Tooltip for collapsed icons */
+#sidebar.collapsed .sidebar-link {
+  position: relative;
+}
+
+#sidebar.collapsed .sidebar-link::after {
+  content: attr(title);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1e293b;
+  color: #f8fafc;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: var(--qc-font-body);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 50;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+#sidebar.collapsed .sidebar-link:hover::after {
+  opacity: 1;
 }

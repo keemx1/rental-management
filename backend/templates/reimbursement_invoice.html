@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+    body { font-family: 'Roboto', sans-serif; margin: 0; padding: 22px; color: #333; background: white; font-size: 11px; }
+    .header { display: flex; align-items: center; margin-bottom: 10px; }
+    .header img { width: 90px; max-width: 90px; object-fit: contain; }
+    .header-content { flex: 1; text-align: center; padding-left: 16px; }
+    .company-title { font-size: 16px; font-weight: 700; color: #1a4b8c; margin: 0 0 3px 0; }
+    .company-slogan { font-size: 9px; font-style: italic; color: #666; margin: 0 0 3px 0; }
+    .company-details { font-size: 9px; color: #555; }
+    .separator-bar { height: 3px; background: #e31837; width: 100%; margin: 10px 0; position: relative; }
+    .separator-bar::after { content: ''; position: absolute; top: 3px; left: 30%; right: 0; height: 3px; background: #111; }
+    .inv-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .inv-title { font-size: 16px; font-weight: 700; color: #1a4b8c; }
+    .inv-date { font-weight: 700; font-size: 12px; }
+    .inv-no-bar { display: inline-block; background: #1a4b8c; color: white; font-weight: 700; font-size: 12px; padding: 5px 12px; border-radius: 4px; margin-bottom: 10px; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; font-size: 11px; }
+    .info-box { border: 1px solid #dee2e6; border-radius: 6px; padding: 8px 10px; }
+    .info-box .label { font-weight: 700; font-size: 9px; color: #666; text-transform: uppercase; margin-bottom: 2px; }
+    .info-box .value { font-size: 12px; font-weight: 500; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+    th { background: #1a4b8c; color: white; text-align: left; padding: 5px; font-size: 11px; }
+    td { padding: 5px; border: 1px solid #dee2e6; font-size: 11px; }
+    tr:nth-child(even) td { background: #f8f9fa; }
+    .note-box { margin-top: 10px; padding: 8px; border: 1px solid #6366f1; border-radius: 6px; background: #f0f0ff; font-size: 10px; color: #4338ca; text-align: center; }
+    .footer-bar { height: 3px; background: #e31837; width: 100%; margin: 12px 0 6px 0; position: relative; }
+    .footer-bar::after { content: ''; position: absolute; top: 3px; left: 30%; right: 0; height: 3px; background: #111; }
+    .footer-text { text-align: center; font-size: 11px; color: #1a4b8c; font-weight: 700; }
+    .footer-slogan { text-align: center; font-size: 9px; font-style: italic; color: #555; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="{{logo_base64}}" alt="Logo">
+    <div class="header-content">
+      <h1 class="company-title">GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</h1>
+      <p class="company-slogan">Find a Home. Leave the Management to Us</p>
+      <p class="company-details">Dealers in: Rent management, property and General Consultancy<br>Located in Ruiru, Juja | Tel: +254 702 705 821 | Email: jujaview@gmail.com</p>
+    </div>
+  </div>
+  <div class="separator-bar"></div>
+
+  <div class="inv-header">
+    <div class="inv-title">STAFF REIMBURSEMENT INVOICE</div>
+    <div class="inv-date">{{date}}</div>
+  </div>
+  <span class="inv-no-bar">INVOICE NO: {{invoice_number}}</span>
+
+  <div class="info-grid">
+    <div class="info-box">
+      <div class="label">STAFF NAME</div>
+      <div class="value">{{employee_name}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">EXPENSE DATE</div>
+      <div class="value">{{expense_date}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">PROPERTY</div>
+      <div class="value">{{property_name}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">PURPOSE</div>
+      <div class="value">{{purpose}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">ORIGINAL AMOUNT</div>
+      <div class="value">KES {{original_amount}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">PREVIOUS OUTSTANDING</div>
+      <div class="value">KES {{previous_outstanding}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">AMOUNT REIMBURSED</div>
+      <div class="value" style="color: #059669;">KES {{total_paid}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">REMAINING BALANCE</div>
+      <div class="value" style="color: #dc2626; font-weight: 700;">KES {{outstanding}}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">PAYMENT STATUS</div>
+      <div class="value">{{status}}</div>
+    </div>
+  </div>
+
+  {{payments_section}}
+
+  <div class="note-box">
+    This is a staff reimbursement invoice. Payment status is updated as reimbursement payments are recorded.
+  </div>
+
+  <div class="footer-bar"></div>
+  <div class="footer-text">Gutenberg Elite Home & Property Managements</div>
+  <div class="footer-slogan">Find a Home. Leave the Management to Us</div>
+</body>
+</html>

@@ -897,6 +897,18 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_payments_billing_period ON payments (billing_period);
 
+-- Management Expenses Invoice linkage: tracks which WO management expenses
+-- have been included in a Management Expenses Invoice.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'maintenance_charges' AND column_name = 'management_expense_invoice_id'
+  ) THEN
+    ALTER TABLE maintenance_charges ADD COLUMN management_expense_invoice_id INTEGER NULL;
+  END IF;
+END $$;
+
 -- =====================================================================
 -- DEPOSIT-TO-RENT AUTHORIZATION & RENT LOSS MANAGEMENT
 -- Tracks every authorized use of a tenant's security deposit to cover rent,
@@ -1005,3 +1017,221 @@ BEGIN
     ALTER TABLE tenants ADD COLUMN first_billing_days INTEGER NULL;
   END IF;
 END $$;
+
+-- =====================================================================
+-- MANAGEMENT EXPENSE PAYMENTS (Phase 3: Partial reimbursement tracking)
+-- Records individual payments made against a management expense invoice.
+-- For staff reimbursements, tracks partial payments until fully reimbursed.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS management_expense_payments (
+  id SERIAL PRIMARY KEY,
+  invoice_id INTEGER NOT NULL REFERENCES maintenance_invoices(id) ON DELETE CASCADE,
+  amount DECIMAL(10, 2) NOT NULL,
+  payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  payment_method VARCHAR(64) NULL,
+  reference VARCHAR(128) NULL,
+  notes TEXT NULL,
+  recorded_by VARCHAR(128) NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_mgmt_exp_pay_invoice ON management_expense_payments (invoice_id);
+
+-- =====================================================================
+-- SALARY RECORDS (Phase 4: Salary management)
+-- Tracks monthly salary obligations per employee with balance carry-forward.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS salary_records (
+  id SERIAL PRIMARY KEY,
+  employee_name VARCHAR(128) NOT NULL,
+  salary_month VARCHAR(7) NOT NULL,
+  expected_salary DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  previous_balance DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  total_paid DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  outstanding DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'Pending'
+    CHECK (status IN ('Pending', 'Partially Paid', 'Fully Paid')),
+  notes TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (employee_name, salary_month)
+);
+
+CREATE INDEX IF NOT EXISTS idx_salary_rec_month ON salary_records (salary_month);
+CREATE INDEX IF NOT EXISTS idx_salary_rec_employee ON salary_records (employee_name);
+
+-- =====================================================================
+-- SALARY PAYMENTS (Phase 4: Individual salary payments)
+-- Records each payment made against a salary record.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS salary_payments (
+  id SERIAL PRIMARY KEY,
+  salary_record_id INTEGER NOT NULL REFERENCES salary_records(id) ON DELETE CASCADE,
+  amount DECIMAL(10, 2) NOT NULL,
+  payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  payment_method VARCHAR(64) NULL,
+  reference VARCHAR(128) NULL,
+  notes TEXT NULL,
+  recorded_by VARCHAR(128) NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_salary_pay_record ON salary_payments (salary_record_id);
+
+-- =====================================================================
+-- STAFF ADVANCES (Phase 6)
+-- Tracks advances given to employees for recovery from future salary.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS staff_advances (
+  id SERIAL PRIMARY KEY,
+  employee_name VARCHAR(128) NOT NULL,
+  date_advanced DATE NOT NULL DEFAULT CURRENT_DATE,
+  amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  reason TEXT NULL,
+  property_name VARCHAR(128) NULL,
+  unit_code VARCHAR(32) NULL,
+  recovery_method VARCHAR(64) NULL DEFAULT 'salary_deduction',
+  expected_recovery_month VARCHAR(7) NULL,
+  amount_recovered DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  outstanding DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'Pending'
+    CHECK (status IN ('Pending', 'Partially Recovered', 'Fully Recovered', 'Written Off')),
+  notes TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_adv_employee ON staff_advances (employee_name);
+CREATE INDEX IF NOT EXISTS idx_staff_adv_status ON staff_advances (status);
+
+-- =====================================================================
+-- STAFF ADVANCE PAYMENTS (Phase 6)
+-- Records each recovery payment against a staff advance.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS staff_advance_payments (
+  id SERIAL PRIMARY KEY,
+  staff_advance_id INTEGER NOT NULL REFERENCES staff_advances(id) ON DELETE CASCADE,
+  amount DECIMAL(10, 2) NOT NULL,
+  payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  payment_method VARCHAR(64) NULL,
+  reference VARCHAR(128) NULL,
+  notes TEXT NULL,
+  recorded_by VARCHAR(128) NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_adv_pay_advance ON staff_advance_payments (staff_advance_id);
+
+-- =====================================================================
+-- EMPLOYEE RENT (Phase 6)
+-- Tracks rent obligations for employees living in managed properties.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS employee_rent (
+  id SERIAL PRIMARY KEY,
+  employee_name VARCHAR(128) NOT NULL,
+  property_name VARCHAR(128) NOT NULL,
+  unit_code VARCHAR(32) NOT NULL,
+  monthly_rent DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  rent_due_day INTEGER NOT NULL DEFAULT 5,
+  rent_period VARCHAR(7) NOT NULL,
+  previous_balance DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  total_paid DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  total_deducted DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  outstanding DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'Pending'
+    CHECK (status IN ('Pending', 'Partially Paid', 'Fully Paid')),
+  notes TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (employee_name, property_name, unit_code, rent_period)
+);
+
+CREATE INDEX IF NOT EXISTS idx_emp_rent_employee ON employee_rent (employee_name);
+CREATE INDEX IF NOT EXISTS idx_emp_rent_period ON employee_rent (rent_period);
+CREATE INDEX IF NOT EXISTS idx_emp_rent_property ON employee_rent (property_name);
+
+-- =====================================================================
+-- EMPLOYEE RENT PAYMENTS (Phase 6)
+-- Records each payment made against an employee rent obligation.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS employee_rent_payments (
+  id SERIAL PRIMARY KEY,
+  employee_rent_id INTEGER NOT NULL REFERENCES employee_rent(id) ON DELETE CASCADE,
+  amount DECIMAL(10, 2) NOT NULL,
+  payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  payment_method VARCHAR(64) NULL,
+  reference VARCHAR(128) NULL,
+  notes TEXT NULL,
+  recorded_by VARCHAR(128) NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_emp_rent_pay_rent ON employee_rent_payments (employee_rent_id);
+
+-- =====================================================================
+-- SALARY DEDUCTIONS (Phase 6)
+-- Tracks approved deductions from employee salary.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS salary_deductions (
+  id SERIAL PRIMARY KEY,
+  employee_name VARCHAR(128) NOT NULL,
+  salary_month VARCHAR(7) NOT NULL,
+  deduction_type VARCHAR(64) NOT NULL
+    CHECK (deduction_type IN ('staff_advance_recovery', 'employee_rent', 'other')),
+  description TEXT NULL,
+  amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  amount_deducted DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  outstanding DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  related_id INTEGER NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'Pending'
+    CHECK (status IN ('Pending', 'Partially Deducted', 'Fully Deducted')),
+  notes TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sal_ded_employee ON salary_deductions (employee_name);
+CREATE INDEX IF NOT EXISTS idx_sal_ded_month ON salary_deductions (salary_month);
+
+-- ============================================================
+-- DEPOSIT REFUNDS
+-- Tracks refundable deposits after tenant exit, linked to Exit Invoices
+-- ============================================================
+CREATE TABLE IF NOT EXISTS deposit_refunds (
+  id SERIAL PRIMARY KEY,
+  tenant_code VARCHAR(64) NOT NULL,
+  exit_invoice_id INTEGER UNIQUE NOT NULL,
+  archive_id INTEGER NULL,
+
+  deposit_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  deposit_paid DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  deductions_total DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  deposit_applied_to_rent DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  deposit_applied_to_deductions DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  refundable_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+
+  amount_refunded DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  remaining_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+
+  exit_date DATE NULL,
+  refund_due_date DATE NULL,
+  refund_date DATE NULL,
+  refund_time TIME NULL,
+
+  payment_method VARCHAR(32) NULL,
+  transaction_reference VARCHAR(128) NULL,
+  remarks TEXT NULL,
+
+  refund_status VARCHAR(32) NOT NULL DEFAULT 'pending'
+    CHECK (refund_status IN ('pending', 'due_soon', 'due_today', 'overdue', 'refunded', 'partially_refunded', 'no_refund_due')),
+
+  created_by VARCHAR(64) NULL,
+  refunded_by VARCHAR(64) NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dep_ref_tenant ON deposit_refunds (tenant_code);
+CREATE INDEX IF NOT EXISTS idx_dep_ref_exit_invoice ON deposit_refunds (exit_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_dep_ref_status ON deposit_refunds (refund_status);
+CREATE INDEX IF NOT EXISTS idx_dep_ref_due_date ON deposit_refunds (refund_due_date);

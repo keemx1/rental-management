@@ -401,6 +401,10 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return request(`/maintenance-invoices${qs ? '?' + qs : ''}`);
   },
+  listEligibleManagementExpenses(house = null) {
+    const qs = house ? `?house=${encodeURIComponent(house)}` : '';
+    return request(`/maintenance-invoices/eligible${qs}`);
+  },
   getMaintenanceInvoice(id) {
     return request(`/maintenance-invoices/${id}`);
   },
@@ -409,6 +413,83 @@ export const api = {
   },
   updateMaintenanceInvoice(id, body) {
     return request(`/maintenance-invoices/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  linkWoExpenses(invoiceId, woId, issueNos) {
+    return request(`/maintenance-invoices/${invoiceId}/link-wo`, {
+      method: 'POST',
+      body: JSON.stringify({ wo_id: woId, issue_nos: issueNos }),
+    });
+  },
+  recordExpensePayment(invoiceId, payment) {
+    return request(`/maintenance-invoices/${invoiceId}/payments`, {
+      method: 'POST', body: JSON.stringify(payment),
+    });
+  },
+  getExpensePayments(invoiceId) {
+    return request(`/maintenance-invoices/${invoiceId}/payments`);
+  },
+  deleteExpensePayment(invoiceId, paymentId) {
+    return request(`/maintenance-invoices/${invoiceId}/payments/${paymentId}`, { method: 'DELETE' });
+  },
+  listSalaryRecords(month) {
+    return request(`/salary?month=${encodeURIComponent(month)}`);
+  },
+  listSalaryEmployees() {
+    return request('/salary/employees');
+  },
+  getSalaryHistory(employee) {
+    return request(`/salary/history/${encodeURIComponent(employee)}`);
+  },
+  createSalaryRecord(body) {
+    return request('/salary', { method: 'POST', body: JSON.stringify(body) });
+  },
+  updateSalaryRecord(id, body) {
+    return request(`/salary/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  deleteSalaryRecord(id) {
+    return request(`/salary/${id}`, { method: 'DELETE' });
+  },
+  recordSalaryPayment(recordId, payment) {
+    return request(`/salary/${recordId}/payments`, { method: 'POST', body: JSON.stringify(payment) });
+  },
+  getSalaryPayments(recordId) {
+    return request(`/salary/${recordId}/payments`);
+  },
+  deleteSalaryPayment(recordId, paymentId) {
+    return request(`/salary/${recordId}/payments/${paymentId}`, { method: 'DELETE' });
+  },
+  rollOverSalaries(month) {
+    return request('/salary/rollover', { method: 'POST', body: JSON.stringify({ month }) });
+  },
+  downloadSalaryInvoice(recordId) {
+    return getBlob(`/salary/${recordId}/invoice`, { mode: 'download' });
+  },
+  generateSalaryInvoice(recordId) {
+    return request(`/salary/${recordId}/invoice?mode=info`);
+  },
+  downloadReimbursementInvoice(invoiceId) {
+    return getBlob(`/maintenance-invoices/${invoiceId}/reimbursement-invoice`, { mode: 'download' });
+  },
+  generateReimbursementInvoice(invoiceId) {
+    return request(`/maintenance-invoices/${invoiceId}/reimbursement-invoice?mode=info`);
+  },
+  downloadExpenseInvoice(invoiceId) {
+    return getBlob(`/maintenance-invoices/${invoiceId}/expense-invoice`, { mode: 'download' });
+  },
+  generateExpenseInvoice(invoiceId) {
+    return request(`/maintenance-invoices/${invoiceId}/expense-invoice?mode=info`);
+  },
+  getManagementExpensesReport(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return request('/management-expenses-report' + (qs ? '?' + qs : ''));
+  },
+  downloadManagementExpensesReport(params = {}) {
+    return blobRequest('/management-expenses-report/pdf', { method: 'POST', body: JSON.stringify(params) });
+  },
+  getPropertyExpenseReport(property, month) {
+    const params = new URLSearchParams({ property });
+    if (month) params.set('month', month);
+    return request('/management-expenses-report/property?' + params.toString());
   },
   deleteMaintenanceInvoice(id) {
     return request(`/maintenance-invoices/${id}`, { method: 'DELETE' });
@@ -509,5 +590,124 @@ export const api = {
   },
   sendCollectionReport(house_id, billing_month, phone_number) {
     return request('/payments/collection-report', { method: 'POST', body: JSON.stringify({ house_id, billing_month, mode: 'send', phone_number }) });
+  },
+  // Staff Advances (Phase 6)
+  listStaffAdvances(employee) {
+    const qs = employee ? `?employee=${encodeURIComponent(employee)}` : '';
+    return request('/staff-advances' + qs);
+  },
+  listStaffAdvanceEmployees() {
+    return request('/staff-advances/employees');
+  },
+  getStaffAdvance(id) {
+    return request(`/staff-advances/${id}`);
+  },
+  createStaffAdvance(body) {
+    return request('/staff-advances', { method: 'POST', body: JSON.stringify(body) });
+  },
+  updateStaffAdvance(id, body) {
+    return request(`/staff-advances/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  deleteStaffAdvance(id) {
+    return request(`/staff-advances/${id}`, { method: 'DELETE' });
+  },
+  getStaffAdvancePayments(id) {
+    return request(`/staff-advances/${id}/payments`);
+  },
+  recordStaffAdvancePayment(id, payment) {
+    return request(`/staff-advances/${id}/payments`, { method: 'POST', body: JSON.stringify(payment) });
+  },
+  deleteStaffAdvancePayment(advanceId, paymentId) {
+    return request(`/staff-advances/payments/${paymentId}`, { method: 'DELETE' });
+  },
+  // Employee Rent (Phase 6)
+  listEmployeeRent(employee, period) {
+    const params = new URLSearchParams();
+    if (employee) params.set('employee', employee);
+    if (period) params.set('period', period);
+    const qs = params.toString() ? '?' + params.toString() : '';
+    return request('/employee-rent' + qs);
+  },
+  listEmployeeRentEmployees() {
+    return request('/employee-rent/employees');
+  },
+  getEmployeeRent(id) {
+    return request(`/employee-rent/${id}`);
+  },
+  createEmployeeRent(body) {
+    return request('/employee-rent', { method: 'POST', body: JSON.stringify(body) });
+  },
+  updateEmployeeRent(id, body) {
+    return request(`/employee-rent/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  deleteEmployeeRent(id) {
+    return request(`/employee-rent/${id}`, { method: 'DELETE' });
+  },
+  getEmployeeRentPayments(id) {
+    return request(`/employee-rent/${id}/payments`);
+  },
+  recordEmployeeRentPayment(id, payment) {
+    return request(`/employee-rent/${id}/payments`, { method: 'POST', body: JSON.stringify(payment) });
+  },
+  deleteEmployeeRentPayment(rentId, paymentId) {
+    return request(`/employee-rent/payments/${paymentId}`, { method: 'DELETE' });
+  },
+  deductRentFromSalary(rentId, salaryRecordId, amount, recordedBy) {
+    return request(`/employee-rent/${rentId}/deduct-from-salary`, {
+      method: 'POST',
+      body: JSON.stringify({ salary_record_id: salaryRecordId, amount, recorded_by: recordedBy }),
+    });
+  },
+  // Salary Deductions (Phase 6)
+  listSalaryDeductions(employee, month) {
+    const params = new URLSearchParams();
+    if (employee) params.set('employee', employee);
+    if (month) params.set('month', month);
+    const qs = params.toString() ? '?' + params.toString() : '';
+    return request('/salary-deductions' + qs);
+  },
+  getSalaryDeductionsForMonth(employee, month) {
+    return request(`/salary-deductions/for-month?employee=${encodeURIComponent(employee)}&month=${encodeURIComponent(month)}`);
+  },
+  createSalaryDeduction(body) {
+    return request('/salary-deductions', { method: 'POST', body: JSON.stringify(body) });
+  },
+  updateSalaryDeduction(id, body) {
+    return request(`/salary-deductions/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  deleteSalaryDeduction(id) {
+    return request(`/salary-deductions/${id}`, { method: 'DELETE' });
+  },
+  // Staff Advance Invoice
+  downloadStaffAdvanceInvoice(id) {
+    return getBlob(`/staff-advances/${id}/invoice`, { mode: 'download' });
+  },
+  generateStaffAdvanceInvoice(id) {
+    return request(`/staff-advances/${id}/invoice?mode=info`);
+  },
+  // Employee Rent Invoice
+  downloadEmployeeRentInvoice(id) {
+    return getBlob(`/employee-rent/${id}/invoice`, { mode: 'download' });
+  },
+  generateEmployeeRentInvoice(id) {
+    return request(`/employee-rent/${id}/invoice?mode=info`);
+  },
+
+  // Deposit Refunds
+  listDepositRefunds(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/deposit-refunds${qs ? '?' + qs : ''}`);
+  },
+  getDepositRefundSummary() {
+    return request('/deposit-refunds/summary');
+  },
+  getDepositRefund(id) {
+    return request(`/deposit-refunds/${id}`);
+  },
+  recordDepositRefund(id, body) {
+    return request(`/deposit-refunds/${id}/record-refund`, { method: 'POST', body: JSON.stringify(body) });
+  },
+  updateDepositRefund(id, body) {
+    return request(`/deposit-refunds/${id}`, { method: 'PUT', body: JSON.stringify(body) });
   },
 };

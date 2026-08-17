@@ -69,12 +69,18 @@ app.use('/api/receipts', receiptRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/statements', statementRoutes);
 app.use('/api/maintenance-invoices', maintenanceInvoiceRoutes);
+app.use('/api/salary', require('./routes/salary'));
+app.use('/api/staff-advances', require('./routes/staffAdvances'));
+app.use('/api/employee-rent', require('./routes/employeeRent'));
+app.use('/api/salary-deductions', require('./routes/salaryDeductions'));
+app.use('/api/management-expenses-report', require('./routes/managementExpensesReport'));
 app.use('/api/work-orders', workOrderRoutes);
 app.use('/api/exit-invoices', exitInvoiceRoutes);
 app.use('/api/archive', archiveRoutes);
 app.use('/api/pending-overpayments', pendingOverpaymentRoutes);
 app.use('/api/invoice-register', invoiceRegisterRoutes);
 app.use('/api/monthly-reports', monthlyReportRoutes);
+app.use('/api/deposit-refunds', require('./routes/depositRefunds'));
 
 app.get('/api/health', healthDetailedAuth, (req, res) => {
   const payload = { ok: true, timestamp: new Date().toISOString() };

@@ -47,8 +47,14 @@ function showView(name) {
   document.querySelectorAll('[data-view]').forEach((el) => {
     el.classList.toggle('hidden', el.dataset.view !== name);
   });
+  // Desktop sidebar: hide on login
+  document.getElementById('sidebar')?.classList.toggle('hidden', name === 'login');
+  // Mobile header: hide on login
   document.getElementById('main-nav')?.classList.toggle('hidden', name === 'login');
-  document.querySelectorAll('.nav-link').forEach((a) => {
+  // Mobile drawer: also hide on login
+  document.getElementById('nav-container')?.classList.toggle('hidden', name === 'login');
+  // Active state on both desktop sidebar links and mobile nav links
+  document.querySelectorAll('.nav-link, .sidebar-link').forEach((a) => {
     a.classList.toggle('active', a.dataset.nav === name);
   });
   window.scrollTo(0, 0);
@@ -62,8 +68,15 @@ function showView(name) {
   if (name === 'documents') loadDocuments();
   if (name === 'invoice-register') loadInvoiceRegister();
   if (name === 'monthly-reports') loadMonthlyReports();
+  if (name === 'mgmt-expenses-report') {
+    document.getElementById('mer-month').value = new Date().toISOString().slice(0, 7);
+    document.getElementById('mer-date-from').value = '';
+    document.getElementById('mer-date-to').value = '';
+    populatePropertyDropdowns();
+  }
   if (name === 'archive') loadArchive();
   if (name === 'pending-overpayments') loadPendingOverpayments();
+  if (name === 'deposit-refunds') loadDepositRefunds();
   if (name === 'users') loadUsers();
   if (name === 'reports') {
     document.getElementById('report-phone').value = '';
@@ -384,6 +397,9 @@ async function loadTenantDashboard(code) {
     // Maintenance / Repairs from Work Orders
     loadTenantMaintenanceCharges(tenant.tenant_code, maintenanceCharges || []);
 
+    // Deposit Refund info (if exit invoice exists)
+    loadTenantDepositRefund(tenant.tenant_code);
+
     const addPenaltyBtn = document.getElementById('btn-td-add-penalty');
     if (addPenaltyBtn) {
       addPenaltyBtn.onclick = async () => {
@@ -445,6 +461,30 @@ function loadTenantMaintenanceCharges(tenantCode, charges) {
   }).join('');
 
   if (outstandingEl) outstandingEl.textContent = money(outstanding);
+}
+
+async function loadTenantDepositRefund(tenantCode) {
+  const section = document.getElementById('td-deposit-refund-section');
+  if (!section) return;
+  try {
+    const { refunds } = await api.listDepositRefunds({ tenant: tenantCode, sort: 'newest' });
+    const refund = refunds.find(r => r.tenant_code === tenantCode);
+    if (!refund) { section.classList.add('hidden'); return; }
+    section.classList.remove('hidden');
+    setTextEl('td-dr-deposit', formatKes(refund.deposit_paid));
+    setTextEl('td-dr-deductions', formatKes(refund.deductions_total));
+    setTextEl('td-dr-refundable', formatKes(refund.refundable_amount));
+    const statusMap = { pending: 'Pending', due_soon: 'Due Soon', due_today: 'Due Today', overdue: 'Overdue', refunded: 'Refunded', partially_refunded: 'Partially Refunded', no_refund_due: 'No Refund Due' };
+    const statusEl = document.getElementById('td-dr-status');
+    statusEl.textContent = statusMap[refund.refund_status] || refund.refund_status;
+    statusEl.className = 'font-bold ' + (refund.refund_status === 'refunded' ? 'text-green-400' : refund.refund_status === 'overdue' ? 'text-rose-400' : 'text-amber-400');
+    setTextEl('td-dr-due', fmtDate(refund.refund_due_date));
+    setTextEl('td-dr-countdown', getDrCountdown(refund).replace(/<[^>]+>/g, ''));
+    document.getElementById('btn-td-view-refund').onclick = () => {
+      showView('deposit-refunds');
+      setTimeout(() => openDrDetail(refund.id), 300);
+    };
+  } catch (_) { section.classList.add('hidden'); }
 }
 
 async function loadTenantPenalties(tenantCode) {
@@ -1291,6 +1331,28 @@ function renderEiActions(invoice) {
   }
 }
 
+async function loadEiDepositRefundInfo(exitInvoiceId) {
+  const panel = document.getElementById('ei-deposit-refund-info');
+  if (!panel) return;
+  try {
+    const { refunds } = await api.listDepositRefunds({ sort: 'newest' });
+    const refund = refunds.find(r => r.exit_invoice_id === Number(exitInvoiceId));
+    if (!refund) { panel.classList.add('hidden'); return; }
+    panel.classList.remove('hidden');
+    setTextEl('ei-dr-amount', formatKes(refund.refundable_amount));
+    setTextEl('ei-dr-due', fmtDate(refund.refund_due_date));
+    const statusEl = document.getElementById('ei-dr-status');
+    const statusMap = { pending: 'Pending', due_soon: 'Due Soon', due_today: 'Due Today', overdue: 'Overdue', refunded: 'Refunded', partially_refunded: 'Partially Refunded', no_refund_due: 'No Refund Due' };
+    statusEl.textContent = statusMap[refund.refund_status] || refund.refund_status;
+    statusEl.className = 'font-bold ' + (refund.refund_status === 'refunded' ? 'text-green-400' : refund.refund_status === 'overdue' ? 'text-rose-400' : refund.refund_status === 'no_refund_due' ? 'text-slate-500' : 'text-amber-400');
+    document.getElementById('btn-ei-view-refund').onclick = () => {
+      document.getElementById('exit-invoice-modal').classList.add('hidden');
+      showView('deposit-refunds');
+      setTimeout(() => openDrDetail(refund.id), 300);
+    };
+  } catch (_) { panel.classList.add('hidden'); }
+}
+
 function setEiStatusMsg(msg) {
   const el = document.getElementById('ei-status-msg');
   if (!el) return;
@@ -1366,6 +1428,12 @@ async function openExitInvoiceModal(tenantCode) {
   renderEiActions(existing);
   renderEiLines(existing ? existing.lines : []);
   recalcEiTotals();
+  // Load deposit refund info for finalized invoices
+  if (existing && existing.status === 'Finalized' && existing.id) {
+    loadEiDepositRefundInfo(existing.id);
+  } else {
+    document.getElementById('ei-deposit-refund-info')?.classList.add('hidden');
+  }
 }
 
 async function saveEiDraft() {
@@ -1450,6 +1518,8 @@ async function finalizeEi() {
     renderEiActions(fin);
     recalcEiTotals();
     setEiStatusMsg('Exit invoice finalized and locked.');
+    // Load deposit refund info
+    loadEiDepositRefundInfo(fin.id);
   } catch (err) {
     setEiStatusMsg('Error: ' + (err.message || err));
   }
@@ -1662,6 +1732,20 @@ async function openArchiveDetail(id) {
         </table>
       </div>` : ''}
 
+      <div id="archive-dr-section" class="bg-slate-900 border border-slate-700 rounded p-3 hidden">
+        <p class="text-xs text-slate-500 font-mono mb-2">Deposit Refund</p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm font-mono">
+          <div>Deposit Paid: <span class="text-cyan-400" id="arch-dr-deposit">KES 0</span></div>
+          <div>Deductions: <span class="text-rose-400" id="arch-dr-deductions">KES 0</span></div>
+          <div>Refundable: <span class="text-green-400" id="arch-dr-refundable">KES 0</span></div>
+          <div>Status: <span class="font-bold" id="arch-dr-status">—</span></div>
+          <div>Due Date: <span class="text-amber-400" id="arch-dr-due">—</span></div>
+          <div>Refunded: <span class="text-green-400" id="arch-dr-refunded">KES 0</span></div>
+          <div>Method: <span class="text-slate-300" id="arch-dr-method">—</span></div>
+          <div>Reference: <span class="text-cyan-400" id="arch-dr-ref">—</span></div>
+        </div>
+      </div>
+
       ${fin ? `<div class="bg-slate-900 border border-slate-700 rounded p-3">
         <p class="text-xs text-slate-500 font-mono mb-2">Financial Snapshot</p>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm font-mono">
@@ -1724,6 +1808,28 @@ async function openArchiveDetail(id) {
         <p class="text-xs text-slate-500 font-mono mb-2">Statements (${stmts.length})</p>
         <p class="text-sm">${stmts.map(s => escapeHtml(s.statement_number || s.id || 'statement')).join(', ')}</p>
       </div>` : ''}`;
+
+    // Load deposit refund info for this archive
+    if (a.tenant_code) {
+      try {
+        const { refunds } = await api.listDepositRefunds({ tenant: a.tenant_code, sort: 'newest' });
+        const dr = refunds.find(r => r.tenant_code === a.tenant_code);
+        if (dr) {
+          document.getElementById('archive-dr-section')?.classList.remove('hidden');
+          setTextEl('arch-dr-deposit', ksh(dr.deposit_paid));
+          setTextEl('arch-dr-deductions', ksh(dr.deductions_total));
+          setTextEl('arch-dr-refundable', ksh(dr.refundable_amount));
+          const statusMap = { pending: 'Pending', due_soon: 'Due Soon', due_today: 'Due Today', overdue: 'Overdue', refunded: 'Refunded', partially_refunded: 'Partially Refunded', no_refund_due: 'No Refund Due' };
+          const sEl = document.getElementById('arch-dr-status');
+          sEl.textContent = statusMap[dr.refund_status] || dr.refund_status;
+          sEl.className = 'font-bold ' + (dr.refund_status === 'refunded' ? 'text-green-400' : dr.refund_status === 'overdue' ? 'text-rose-400' : 'text-amber-400');
+          setTextEl('arch-dr-due', fmtDate(dr.refund_due_date));
+          setTextEl('arch-dr-refunded', ksh(dr.amount_refunded));
+          setTextEl('arch-dr-method', dr.payment_method || '—');
+          setTextEl('arch-dr-ref', dr.transaction_reference || '—');
+        }
+      } catch (_) {}
+    }
   } catch (err) {
     body.innerHTML = `<p class="text-rose-400">${escapeHtml(err.message)}</p>`;
   }
@@ -2315,6 +2421,14 @@ document.getElementById('logout-btn')?.addEventListener('click', () => {
   showView('login');
 });
 
+document.getElementById('logout-btn-mobile')?.addEventListener('click', () => {
+  api.logout();
+  stopPolls();
+  activeHouseId = null;
+  setHash('#');
+  showView('login');
+});
+
 document.querySelectorAll('[data-nav]').forEach((a) => {
   a.addEventListener('click', (e) => {
     e.preventDefault();
@@ -2324,7 +2438,7 @@ document.querySelectorAll('[data-nav]').forEach((a) => {
     
     // Auto-hide mobile menu
     const container = document.getElementById('nav-container');
-    if (container && window.innerWidth < 768) {
+    if (container && window.innerWidth < 1024) {
       container.classList.add('-translate-x-full');
       document.getElementById('mobile-menu-backdrop')?.classList.add('hidden');
     }
@@ -2345,6 +2459,26 @@ document.getElementById('mobile-menu-backdrop')?.addEventListener('click', () =>
   document.getElementById('nav-container')?.classList.add('-translate-x-full');
   document.getElementById('mobile-menu-backdrop')?.classList.add('hidden');
 });
+
+// ============================================================
+// SIDEBAR TOGGLE (Desktop, lg+)
+// ============================================================
+(function initSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const toggle = document.getElementById('sidebar-toggle');
+  if (!sidebar || !toggle) return;
+
+  // Restore saved state
+  const saved = localStorage.getItem('rental_sidebar_collapsed');
+  if (saved === 'true') {
+    sidebar.classList.add('collapsed');
+  }
+
+  toggle.addEventListener('click', () => {
+    sidebar.classList.toggle('collapsed');
+    localStorage.setItem('rental_sidebar_collapsed', sidebar.classList.contains('collapsed'));
+  });
+})();
 
 document.querySelectorAll('.nav-jump').forEach((btn) => {
   btn.addEventListener('click', () => showView(btn.dataset.nav));
@@ -2855,9 +2989,662 @@ document.getElementById('btn-sync-historical-payments')?.addEventListener('click
   } catch (err) {
     alert(err.message);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Sync Historical Payments'; }
+    if (btn) btn.disabled = false;
   }
 });
+
+// ============================================================
+// PHASE 6: STAFF ADVANCES
+// ============================================================
+
+async function loadStaffAdvances() {
+  const employee = document.getElementById('sa-employee-filter')?.value || '';
+  try {
+    const records = await api.listStaffAdvances(employee || undefined);
+    renderStaffAdvanceList(records);
+    updateStaffAdvanceSummary(records);
+  } catch (e) {
+    console.error('Error loading staff advances:', e);
+  }
+}
+
+function renderStaffAdvanceList(records) {
+  const tbody = document.getElementById('sa-list-tbody');
+  if (!tbody) return;
+  if (!records.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">No staff advances recorded</td></tr>';
+    return;
+  }
+  tbody.innerHTML = records.map(r => {
+    const outstanding = Number(r.outstanding || 0);
+    const statusClass = r.status === 'Fully Recovered' ? 'text-green-400' :
+      r.status === 'Partially Recovered' ? 'text-amber-400' :
+      r.status === 'Written Off' ? 'text-slate-500' : 'text-rose-400';
+    const buttons = [
+      `<button onclick="showSaPayments(${r.id})" class="text-cyan-400 hover:text-cyan-300 text-xs" title="Record Payment">Payment</button>`,
+      `<button onclick="downloadStaffAdvancePdf(${r.id})" class="text-emerald-400 hover:text-emerald-300 text-xs" title="Download Invoice PDF">PDF</button>`,
+    ];
+    if (r.status !== 'Fully Recovered' && r.status !== 'Written Off') {
+      buttons.push(`<button onclick="editStaffAdvance(${r.id})" class="text-amber-400 hover:text-amber-300 text-xs" title="Edit">Edit</button>`);
+    }
+    buttons.push(`<button onclick="deleteStaffAdvance(${r.id})" class="text-rose-400 hover:text-rose-300 text-xs" title="Delete">Delete</button>`);
+    return `<tr>
+      <td>${r.employee_name || ''}</td>
+      <td>${r.date_advanced ? new Date(r.date_advanced).toLocaleDateString() : ''}</td>
+      <td>${r.reason || ''}</td>
+      <td>${r.property_name || ''}${r.unit_code ? ' / ' + r.unit_code : ''}</td>
+      <td class="text-right font-mono">${formatKes(r.amount)}</td>
+      <td class="text-right font-mono text-green-400">${formatKes(r.amount_recovered)}</td>
+      <td class="text-right font-mono text-rose-400">${formatKes(outstanding)}</td>
+      <td><span class="${statusClass}">${r.status}</span></td>
+      <td class="text-right space-x-2">${buttons.join(' ')}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateStaffAdvanceSummary(records) {
+  const totalAdvanced = records.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const totalRecovered = records.reduce((s, r) => s + Number(r.amount_recovered || 0), 0);
+  const totalOutstanding = records.reduce((s, r) => s + Number(r.outstanding || 0), 0);
+  const activeCount = records.filter(r => r.status !== 'Fully Recovered' && r.status !== 'Written Off').length;
+  const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
+  el('sa-total-advanced', formatKes(totalAdvanced));
+  el('sa-total-recovered', formatKes(totalRecovered));
+  el('sa-total-outstanding', formatKes(totalOutstanding));
+  el('sa-active-count', activeCount.toString());
+}
+
+async function loadStaffAdvanceEmployees() {
+  try {
+    const employees = await api.listStaffAdvanceEmployees();
+    const filter = document.getElementById('sa-employee-filter');
+    if (filter) {
+      const current = filter.value;
+      filter.innerHTML = '<option value="">All Employees</option>' + employees.map(e => `<option value="${e}">${e}</option>`).join('');
+      filter.value = current;
+    }
+  } catch (e) { console.error('Error loading employees:', e); }
+}
+
+function showSaForm(record) {
+  const wrap = document.getElementById('sa-form-wrap');
+  if (!wrap) return;
+  wrap.classList.remove('hidden');
+  document.getElementById('sa-form-id').value = record ? record.id : '';
+  document.getElementById('sa-employee').value = record ? record.employee_name : '';
+  document.getElementById('sa-date').value = record ? (record.date_advanced || '').slice(0, 10) : new Date().toISOString().slice(0, 10);
+  document.getElementById('sa-amount').value = record ? record.amount : '';
+  document.getElementById('sa-reason').value = record ? record.reason || '' : '';
+  document.getElementById('sa-recovery-method').value = record ? record.recovery_method || 'salary_deduction' : 'salary_deduction';
+  document.getElementById('sa-expected-recovery').value = record ? record.expected_recovery_month || '' : '';
+  document.getElementById('sa-status').value = record ? record.status || 'Pending' : 'Pending';
+  document.getElementById('sa-notes').value = record ? record.notes || '' : '';
+  document.getElementById('sa-form-result').textContent = '';
+  document.getElementById('sa-property').value = record ? record.property_name || '' : '';
+  document.getElementById('sa-unit').value = record ? record.unit_code || '' : '';
+}
+
+function hideSaForm() {
+  document.getElementById('sa-form-wrap')?.classList.add('hidden');
+}
+
+async function saveStaffAdvance(e) {
+  e.preventDefault();
+  const id = document.getElementById('sa-form-id').value;
+  const data = {
+    employee_name: document.getElementById('sa-employee').value.trim(),
+    date_advanced: document.getElementById('sa-date').value,
+    amount: document.getElementById('sa-amount').value,
+    reason: document.getElementById('sa-reason').value.trim(),
+    property_name: document.getElementById('sa-property').value || null,
+    unit_code: document.getElementById('sa-unit').value.trim() || null,
+    recovery_method: document.getElementById('sa-recovery-method').value,
+    expected_recovery_month: document.getElementById('sa-expected-recovery').value || null,
+    status: document.getElementById('sa-status').value,
+    notes: document.getElementById('sa-notes').value.trim() || null,
+  };
+  const resultEl = document.getElementById('sa-form-result');
+  try {
+    if (id) {
+      await api.updateStaffAdvance(id, data);
+      resultEl.textContent = 'Staff advance updated.';
+      resultEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    } else {
+      await api.createStaffAdvance(data);
+      resultEl.textContent = 'Staff advance created.';
+      resultEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    }
+    hideSaForm();
+    loadStaffAdvances();
+    loadStaffAdvanceEmployees();
+  } catch (err) {
+    resultEl.textContent = err.message;
+    resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+  }
+}
+
+async function editStaffAdvance(id) {
+  try {
+    const record = await api.getStaffAdvance(id);
+    if (record) showSaForm(record);
+  } catch (e) { alert('Error loading staff advance: ' + e.message); }
+}
+
+async function deleteStaffAdvance(id) {
+  if (!confirm('Delete this staff advance? This cannot be undone.')) return;
+  try {
+    await api.deleteStaffAdvance(id);
+    loadStaffAdvances();
+    loadStaffAdvanceEmployees();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function showSaPayments(advanceId) {
+  const modal = document.getElementById('sa-payment-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  document.getElementById('sapm-advance-id').value = advanceId;
+  document.getElementById('sapm-amount').value = '';
+  document.getElementById('sapm-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('sapm-method').value = '';
+  document.getElementById('sapm-reference').value = '';
+  document.getElementById('sapm-notes').value = '';
+  document.getElementById('sapm-result').textContent = '';
+  try {
+    const adv = await api.getStaffAdvance(advanceId);
+    if (adv) {
+      document.getElementById('sa-pay-title').textContent = `Recovery: ${adv.employee_name}`;
+      document.getElementById('sa-pay-subtitle').textContent =
+        `Advanced: ${formatKes(adv.amount)} | Recovered: ${formatKes(adv.amount_recovered)} | Outstanding: ${formatKes(adv.outstanding)}`;
+    }
+    await loadSaPaymentHistory(advanceId);
+  } catch (e) { console.error(e); }
+}
+
+async function loadSaPaymentHistory(advanceId) {
+  const container = document.getElementById('sapm-payment-history');
+  if (!container) return;
+  try {
+    const payments = await api.getStaffAdvancePayments(advanceId);
+    if (!payments.length) {
+      container.innerHTML = '<p class="text-slate-500">No payments recorded.</p>';
+      return;
+    }
+    container.innerHTML = `<table class="w-full text-xs">
+      <thead><tr><th>Date</th><th>Method</th><th class="text-right">Amount</th><th>Ref</th><th></th></tr></thead>
+      <tbody>${payments.map(p => `<tr>
+        <td>${p.payment_date ? new Date(p.payment_date).toLocaleDateString() : ''}</td>
+        <td>${p.payment_method || ''}</td>
+        <td class="text-right font-mono">${formatKes(p.amount)}</td>
+        <td>${p.reference || ''}</td>
+        <td class="text-right"><button onclick="deleteSaPayment(${advanceId}, ${p.id})" class="text-rose-400 hover:text-rose-300 text-xs">Del</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  } catch (e) { container.textContent = 'Error loading payments'; }
+}
+
+async function saveSaPayment(e) {
+  e.preventDefault();
+  const advanceId = document.getElementById('sapm-advance-id').value;
+  const data = {
+    amount: document.getElementById('sapm-amount').value,
+    payment_date: document.getElementById('sapm-date').value,
+    payment_method: document.getElementById('sapm-method').value || null,
+    reference: document.getElementById('sapm-reference').value.trim() || null,
+    notes: document.getElementById('sapm-notes').value.trim() || null,
+  };
+  const resultEl = document.getElementById('sapm-result');
+  try {
+    await api.recordStaffAdvancePayment(advanceId, data);
+    resultEl.textContent = 'Payment recorded.';
+    resultEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    document.getElementById('sapm-amount').value = '';
+    document.getElementById('sapm-reference').value = '';
+    document.getElementById('sapm-notes').value = '';
+    await loadSaPaymentHistory(advanceId);
+    loadStaffAdvances();
+  } catch (err) {
+    resultEl.textContent = err.message;
+    resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+  }
+}
+
+async function deleteSaPayment(advanceId, paymentId) {
+  if (!confirm('Delete this payment?')) return;
+  try {
+    await api.deleteStaffAdvancePayment(advanceId, paymentId);
+    await loadSaPaymentHistory(advanceId);
+    loadStaffAdvances();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ============================================================
+// PHASE 6: EMPLOYEE RENT
+// ============================================================
+
+async function loadEmployeeRent() {
+  const employee = document.getElementById('er-employee-filter')?.value || '';
+  const period = document.getElementById('er-period-filter')?.value || '';
+  try {
+    const records = await api.listEmployeeRent(employee || undefined, period || undefined);
+    renderEmployeeRentList(records);
+    updateEmployeeRentSummary(records);
+  } catch (e) {
+    console.error('Error loading employee rent:', e);
+  }
+}
+
+function renderEmployeeRentList(records) {
+  const tbody = document.getElementById('er-list-tbody');
+  if (!tbody) return;
+  if (!records.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">No employee rent records</td></tr>';
+    return;
+  }
+  tbody.innerHTML = records.map(r => {
+    const statusClass = r.status === 'Fully Paid' ? 'text-green-400' :
+      r.status === 'Partially Paid' ? 'text-amber-400' : 'text-rose-400';
+    const buttons = [
+      `<button onclick="showErPayments(${r.id})" class="text-cyan-400 hover:text-cyan-300 text-xs" title="Record Payment">Pay</button>`,
+      `<button onclick="downloadEmployeeRentPdf(${r.id})" class="text-emerald-400 hover:text-emerald-300 text-xs" title="Download Invoice PDF">PDF</button>`,
+    ];
+    if (Number(r.outstanding || 0) > 0) {
+      buttons.push(`<button onclick="showErDeductModal(${r.id}, ${Number(r.outstanding || 0)})" class="text-purple-400 hover:text-purple-300 text-xs" title="Deduct from Salary">Deduct</button>`);
+    }
+    if (r.status !== 'Fully Paid') {
+      buttons.push(`<button onclick="editEmployeeRent(${r.id})" class="text-amber-400 hover:text-amber-300 text-xs" title="Edit">Edit</button>`);
+    }
+    buttons.push(`<button onclick="deleteEmployeeRent(${r.id})" class="text-rose-400 hover:text-rose-300 text-xs" title="Delete">Del</button>`);
+    return `<tr>
+      <td>${r.employee_name || ''}</td>
+      <td>${r.property_name || ''} / ${r.unit_code || ''}</td>
+      <td>${r.rent_period || ''}</td>
+      <td class="text-right font-mono">${formatKes(r.monthly_rent)}</td>
+      <td class="text-right font-mono text-green-400">${formatKes(r.total_paid)}</td>
+      <td class="text-right font-mono text-purple-400">${formatKes(r.total_deducted)}</td>
+      <td class="text-right font-mono text-rose-400">${formatKes(r.outstanding)}</td>
+      <td><span class="${statusClass}">${r.status}</span></td>
+      <td class="text-right space-x-2">${buttons.join(' ')}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateEmployeeRentSummary(records) {
+  const totalDue = records.reduce((s, r) => s + Number(r.previous_balance || 0) + Number(r.monthly_rent || 0), 0);
+  const totalPaid = records.reduce((s, r) => s + Number(r.total_paid || 0), 0);
+  const totalDeducted = records.reduce((s, r) => s + Number(r.total_deducted || 0), 0);
+  const totalOutstanding = records.reduce((s, r) => s + Number(r.outstanding || 0), 0);
+  const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
+  el('er-total-due', formatKes(totalDue));
+  el('er-total-paid', formatKes(totalPaid));
+  el('er-total-deducted', formatKes(totalDeducted));
+  el('er-total-outstanding', formatKes(totalOutstanding));
+  el('er-record-count', records.length.toString());
+}
+
+async function loadEmployeeRentEmployees() {
+  try {
+    const employees = await api.listEmployeeRentEmployees();
+    const filter = document.getElementById('er-employee-filter');
+    if (filter) {
+      const current = filter.value;
+      filter.innerHTML = '<option value="">All Employees</option>' + employees.map(e => `<option value="${e}">${e}</option>`).join('');
+      filter.value = current;
+    }
+  } catch (e) { console.error('Error loading employees:', e); }
+}
+
+function showErForm(record) {
+  const wrap = document.getElementById('er-form-wrap');
+  if (!wrap) return;
+  wrap.classList.remove('hidden');
+  document.getElementById('er-form-id').value = record ? record.id : '';
+  document.getElementById('er-employee').value = record ? record.employee_name : '';
+  document.getElementById('er-unit').value = record ? record.unit_code : '';
+  document.getElementById('er-monthly-rent').value = record ? record.monthly_rent : '';
+  document.getElementById('er-due-day').value = record ? record.rent_due_day : 5;
+  document.getElementById('er-period').value = record ? record.rent_period : new Date().toISOString().slice(0, 7);
+  document.getElementById('er-previous-balance').value = record ? record.previous_balance : 0;
+  document.getElementById('er-notes').value = record ? record.notes || '' : '';
+  document.getElementById('er-form-result').textContent = '';
+  if (record && record.property_name) {
+    const propSel = document.getElementById('er-property');
+    if (propSel) {
+      propSel.value = record.property_name;
+      if (!propSel.value) {
+        const opt = document.createElement('option');
+        opt.value = record.property_name;
+        opt.textContent = record.property_name;
+        propSel.appendChild(opt);
+        propSel.value = record.property_name;
+      }
+    }
+  } else {
+    document.getElementById('er-property').value = '';
+  }
+  updateErPreview();
+}
+
+function hideErForm() {
+  document.getElementById('er-form-wrap')?.classList.add('hidden');
+}
+
+function updateErPreview() {
+  const prevBal = Number(document.getElementById('er-previous-balance')?.value || 0);
+  const monthly = Number(document.getElementById('er-monthly-rent')?.value || 0);
+  const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
+  el('er-prev-bal-display', formatKes(prevBal));
+  el('er-monthly-display', formatKes(monthly));
+  el('er-total-due-display', formatKes(prevBal + monthly));
+}
+
+async function saveEmployeeRent(e) {
+  e.preventDefault();
+  const id = document.getElementById('er-form-id').value;
+  const data = {
+    employee_name: document.getElementById('er-employee').value.trim(),
+    property_name: document.getElementById('er-property').value,
+    unit_code: document.getElementById('er-unit').value.trim(),
+    monthly_rent: document.getElementById('er-monthly-rent').value,
+    rent_due_day: document.getElementById('er-due-day').value,
+    rent_period: document.getElementById('er-period').value,
+    previous_balance: document.getElementById('er-previous-balance').value || 0,
+    notes: document.getElementById('er-notes').value.trim() || null,
+  };
+  const resultEl = document.getElementById('er-form-result');
+  try {
+    if (id) {
+      await api.updateEmployeeRent(id, data);
+      resultEl.textContent = 'Rent record updated.';
+      resultEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    } else {
+      await api.createEmployeeRent(data);
+      resultEl.textContent = 'Rent record created.';
+      resultEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    }
+    hideErForm();
+    loadEmployeeRent();
+    loadEmployeeRentEmployees();
+  } catch (err) {
+    resultEl.textContent = err.message;
+    resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+  }
+}
+
+async function editEmployeeRent(id) {
+  try {
+    const record = await api.getEmployeeRent(id);
+    if (record) showErForm(record);
+  } catch (e) { alert('Error loading rent record: ' + e.message); }
+}
+
+async function deleteEmployeeRent(id) {
+  if (!confirm('Delete this rent record? This cannot be undone.')) return;
+  try {
+    await api.deleteEmployeeRent(id);
+    loadEmployeeRent();
+    loadEmployeeRentEmployees();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function showErPayments(rentId) {
+  const modal = document.getElementById('er-payment-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  document.getElementById('erpm-rent-id').value = rentId;
+  document.getElementById('erpm-amount').value = '';
+  document.getElementById('erpm-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('erpm-method').value = '';
+  document.getElementById('erpm-reference').value = '';
+  document.getElementById('erpm-notes').value = '';
+  document.getElementById('erpm-result').textContent = '';
+  try {
+    const rent = await api.getEmployeeRent(rentId);
+    if (rent) {
+      document.getElementById('er-pay-title').textContent = `Rent Payment: ${rent.employee_name}`;
+      document.getElementById('er-pay-subtitle').textContent =
+        `${rent.property_name} ${rent.unit_code} | Rent: ${formatKes(rent.monthly_rent)} | Paid: ${formatKes(rent.total_paid)} | Outstanding: ${formatKes(rent.outstanding)}`;
+    }
+    await loadErPaymentHistory(rentId);
+  } catch (e) { console.error(e); }
+}
+
+async function loadErPaymentHistory(rentId) {
+  const container = document.getElementById('erpm-payment-history');
+  if (!container) return;
+  try {
+    const payments = await api.getEmployeeRentPayments(rentId);
+    if (!payments.length) {
+      container.innerHTML = '<p class="text-slate-500">No payments recorded.</p>';
+      return;
+    }
+    container.innerHTML = `<table class="w-full text-xs">
+      <thead><tr><th>Date</th><th>Method</th><th class="text-right">Amount</th><th>Ref</th><th></th></tr></thead>
+      <tbody>${payments.map(p => `<tr>
+        <td>${p.payment_date ? new Date(p.payment_date).toLocaleDateString() : ''}</td>
+        <td>${p.payment_method || ''}</td>
+        <td class="text-right font-mono">${formatKes(p.amount)}</td>
+        <td>${p.reference || ''}</td>
+        <td class="text-right"><button onclick="deleteErPayment(${rentId}, ${p.id})" class="text-rose-400 hover:text-rose-300 text-xs">Del</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  } catch (e) { container.textContent = 'Error loading payments'; }
+}
+
+async function saveErPayment(e) {
+  e.preventDefault();
+  const rentId = document.getElementById('erpm-rent-id').value;
+  const data = {
+    amount: document.getElementById('erpm-amount').value,
+    payment_date: document.getElementById('erpm-date').value,
+    payment_method: document.getElementById('erpm-method').value || null,
+    reference: document.getElementById('erpm-reference').value.trim() || null,
+    notes: document.getElementById('erpm-notes').value.trim() || null,
+  };
+  const resultEl = document.getElementById('erpm-result');
+  try {
+    await api.recordEmployeeRentPayment(rentId, data);
+    resultEl.textContent = 'Payment recorded.';
+    resultEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    document.getElementById('erpm-amount').value = '';
+    document.getElementById('erpm-reference').value = '';
+    document.getElementById('erpm-notes').value = '';
+    await loadErPaymentHistory(rentId);
+    loadEmployeeRent();
+  } catch (err) {
+    resultEl.textContent = err.message;
+    resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+  }
+}
+
+async function deleteErPayment(rentId, paymentId) {
+  if (!confirm('Delete this payment?')) return;
+  try {
+    await api.deleteEmployeeRentPayment(rentId, paymentId);
+    await loadErPaymentHistory(rentId);
+    loadEmployeeRent();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function showErDeductModal(rentId, outstanding) {
+  const modal = document.getElementById('er-deduct-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  document.getElementById('erd-rent-id').value = rentId;
+  document.getElementById('erd-rent-outstanding').value = outstanding;
+  document.getElementById('erd-rent-out').textContent = formatKes(outstanding);
+  document.getElementById('erd-amount').value = '';
+  document.getElementById('erd-result').textContent = '';
+  const salarySel = document.getElementById('erd-salary-record');
+  salarySel.innerHTML = '<option value="">Loading...</option>';
+  try {
+    const month = document.getElementById('salary-month-select')?.value || new Date().toISOString().slice(0, 7);
+    const salaries = await api.listSalaryRecords(month);
+    const employeeName = '';
+    const empName = document.getElementById('er-employee-filter')?.value || '';
+    const filtered = empName ? salaries.filter(s => s.employee_name === empName) : salaries;
+    salarySel.innerHTML = '<option value="">Select salary</option>' +
+      filtered.map(s => `<option value="${s.id}">${s.employee_name} (${s.salary_month}) - Balance: ${formatKes(s.outstanding)}</option>`).join('');
+  } catch (e) { salarySel.innerHTML = '<option value="">Error loading salaries</option>'; }
+}
+
+async function saveErDeduction(e) {
+  e.preventDefault();
+  const rentId = document.getElementById('erd-rent-id').value;
+  const salaryRecordId = document.getElementById('erd-salary-record').value;
+  const amount = document.getElementById('erd-amount').value;
+  const resultEl = document.getElementById('erd-result');
+  if (!salaryRecordId) {
+    resultEl.textContent = 'Please select a salary record.';
+    resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    return;
+  }
+  try {
+    await api.deductRentFromSalary(rentId, salaryRecordId, amount);
+    resultEl.textContent = 'Deduction applied successfully.';
+    resultEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    loadEmployeeRent();
+    document.getElementById('erd-amount').value = '';
+  } catch (err) {
+    resultEl.textContent = err.message;
+    resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+  }
+}
+
+// ============================================================
+// PHASE 6: STAFF ADVANCE ROLLOVER
+// ============================================================
+
+async function runStaffAdvanceRollover() {
+  if (!confirm('Rollover all unrecovered staff advances to the next period?')) return;
+  try {
+    const advances = await api.listStaffAdvances();
+    const unrecovered = advances.filter(a => a.status !== 'Fully Recovered' && a.status !== 'Written Off');
+    if (!unrecovered.length) {
+      alert('No unrecovered staff advances to rollover.');
+      return;
+    }
+    let rolloverCount = 0;
+    for (const adv of unrecovered) {
+      if (adv.expected_recovery_month) {
+        const parts = adv.expected_recovery_month.split('-');
+        let nextMonth = parseInt(parts[1]) + 1;
+        let nextYear = parseInt(parts[0]);
+        if (nextMonth > 12) { nextMonth = 1; nextYear++; }
+        const nextMonthStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
+        await api.updateStaffAdvance(adv.id, { expected_recovery_month: nextMonthStr });
+        rolloverCount++;
+      }
+    }
+    alert(`Rolled over ${rolloverCount} staff advance(s).`);
+    loadStaffAdvances();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ============================================================
+// PHASE 6: EMPLOYEE RENT ROLLOVER
+// ============================================================
+
+async function runEmployeeRentRollover() {
+  if (!confirm('Rollover all outstanding employee rent to the next month?')) return;
+  try {
+    const currentMonth = document.getElementById('er-period-filter')?.value || new Date().toISOString().slice(0, 7);
+    const records = await api.listEmployeeRent(undefined, currentMonth);
+    const outstanding = records.filter(r => Number(r.outstanding || 0) > 0);
+    if (!outstanding.length) {
+      alert('No outstanding employee rent to rollover.');
+      return;
+    }
+    const parts = currentMonth.split('-');
+    let nextMonth = parseInt(parts[1]) + 1;
+    let nextYear = parseInt(parts[0]);
+    if (nextMonth > 12) { nextMonth = 1; nextYear++; }
+    const nextMonthStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
+    let rolloverCount = 0;
+    for (const rec of outstanding) {
+      const existingRecords = await api.listEmployeeRent(rec.employee_name, nextMonthStr);
+      const exists = existingRecords.find(r => r.property_name === rec.property_name && r.unit_code === rec.unit_code);
+      if (!exists) {
+        await api.createEmployeeRent({
+          employee_name: rec.employee_name,
+          property_name: rec.property_name,
+          unit_code: rec.unit_code,
+          monthly_rent: rec.monthly_rent,
+          rent_due_day: rec.rent_due_day,
+          rent_period: nextMonthStr,
+          previous_balance: rec.outstanding,
+          notes: `Rolled over from ${currentMonth}`,
+        });
+        rolloverCount++;
+      }
+    }
+    alert(`Rolled over ${rolloverCount} rent record(s) to ${nextMonthStr}.`);
+    loadEmployeeRent();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ============================================================
+// PHASE 6: EVENT LISTENERS
+// ============================================================
+
+// Staff Advance navigation
+document.getElementById('btn-back-staff-advance')?.addEventListener('click', showInvoiceTypeSelector);
+document.getElementById('btn-new-staff-advance')?.addEventListener('click', () => showSaForm(null));
+document.getElementById('btn-cancel-sa-form')?.addEventListener('click', hideSaForm);
+document.getElementById('staff-advance-form')?.addEventListener('submit', saveStaffAdvance);
+document.getElementById('sa-employee-filter')?.addEventListener('change', loadStaffAdvances);
+document.getElementById('sa-payment-form')?.addEventListener('submit', saveSaPayment);
+document.getElementById('btn-close-sapm-modal')?.addEventListener('click', () => {
+  document.getElementById('sa-payment-modal').style.display = 'none';
+});
+
+// Employee Rent navigation
+document.getElementById('btn-back-employee-rent')?.addEventListener('click', showInvoiceTypeSelector);
+document.getElementById('btn-new-employee-rent')?.addEventListener('click', () => showErForm(null));
+document.getElementById('btn-cancel-er-form')?.addEventListener('click', hideErForm);
+document.getElementById('employee-rent-form')?.addEventListener('submit', saveEmployeeRent);
+document.getElementById('er-employee-filter')?.addEventListener('change', loadEmployeeRent);
+document.getElementById('er-period-filter')?.addEventListener('change', loadEmployeeRent);
+document.getElementById('er-payment-form')?.addEventListener('submit', saveErPayment);
+document.getElementById('btn-close-erpm-modal')?.addEventListener('click', () => {
+  document.getElementById('er-payment-modal').style.display = 'none';
+});
+document.getElementById('er-deduct-form')?.addEventListener('submit', saveErDeduction);
+document.getElementById('btn-close-erd-modal')?.addEventListener('click', () => {
+  document.getElementById('er-deduct-modal').style.display = 'none';
+});
+
+// Employee Rent preview
+document.getElementById('er-previous-balance')?.addEventListener('input', updateErPreview);
+document.getElementById('er-monthly-rent')?.addEventListener('input', updateErPreview);
+
+// Expose functions to window
+window.loadStaffAdvances = loadStaffAdvances;
+window.showSaPayments = showSaPayments;
+window.editStaffAdvance = editStaffAdvance;
+window.deleteStaffAdvance = deleteStaffAdvance;
+window.deleteSaPayment = deleteSaPayment;
+window.showSaForm = showSaForm;
+window.loadEmployeeRent = loadEmployeeRent;
+window.showErPayments = showErPayments;
+window.editEmployeeRent = editEmployeeRent;
+window.deleteEmployeeRent = deleteEmployeeRent;
+window.deleteErPayment = deleteErPayment;
+window.showErForm = showErForm;
+window.showErDeductModal = showErDeductModal;
+window.runStaffAdvanceRollover = runStaffAdvanceRollover;
+window.runEmployeeRentRollover = runEmployeeRentRollover;
+
+async function downloadStaffAdvancePdf(id) {
+  try { await api.downloadStaffAdvanceInvoice(id); } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function downloadEmployeeRentPdf(id) {
+  try { await api.downloadEmployeeRentInvoice(id); } catch (e) { alert('Error: ' + e.message); }
+}
+
+window.downloadStaffAdvancePdf = downloadStaffAdvancePdf;
+window.downloadEmployeeRentPdf = downloadEmployeeRentPdf;
 
 document.getElementById('payments-tbody')?.addEventListener('click', async (e) => {
   const approveId = e.target.dataset.approvePayment;
@@ -3076,6 +3863,9 @@ function showInvoiceTypeSelector() {
   document.getElementById('exit-invoice-panel')?.classList.add('hidden');
   document.getElementById('rent-invoice-panel')?.classList.add('hidden');
   document.getElementById('maintenance-invoices-panel')?.classList.add('hidden');
+  document.getElementById('salary-panel')?.classList.add('hidden');
+  document.getElementById('staff-advance-panel')?.classList.add('hidden');
+  document.getElementById('employee-rent-panel')?.classList.add('hidden');
 }
 
 function showInvoiceType(type) {
@@ -3085,7 +3875,13 @@ function showInvoiceType(type) {
   document.getElementById('rent-invoice-panel')?.classList.toggle('hidden', type !== 'rent');
   const mntPanel = document.getElementById('maintenance-invoices-panel');
   mntPanel?.classList.toggle('hidden', type !== 'maintenance-invoice');
-  if (type === 'maintenance-invoice') loadMaintenanceInvoices();
+  if (type === 'maintenance-invoice') { loadMaintenanceInvoices(); populatePropertyDropdowns(); }
+  document.getElementById('salary-panel')?.classList.toggle('hidden', type !== 'salary');
+  if (type === 'salary') loadSalaryDashboard();
+  document.getElementById('staff-advance-panel')?.classList.toggle('hidden', type !== 'staff-advance');
+  if (type === 'staff-advance') { loadStaffAdvances(); loadStaffAdvanceEmployees(); }
+  document.getElementById('employee-rent-panel')?.classList.toggle('hidden', type !== 'employee-rent');
+  if (type === 'employee-rent') { loadEmployeeRent(); loadEmployeeRentEmployees(); populatePropertyDropdowns(); }
 }
 
 function resolveTenant(searchInputId, cacheKey) {
@@ -3476,117 +4272,208 @@ async function runRentInvoiceAction(mode) {
   }
 }
 
-let mntItemCount = 0;
+// ============================================================
+// MANAGEMENT EXPENSES INVOICE
+// ============================================================
 
-function addMntItem() {
-  const tbody = document.getElementById('mnt-items-tbody');
-  if (!tbody) return;
-  const id = ++mntItemCount;
-  const tr = document.createElement('tr');
-  tr.id = `mnt-item-${id}`;
-  tr.innerHTML = `
-    <td><input type="text" class="cyber-input p-1 w-full" name="mnt-unit[]" placeholder="B20" /></td>
-    <td><input type="text" class="cyber-input p-1 w-full" name="mnt-problem[]" placeholder="e.g. Leaking pipe" /></td>
-    <td><input type="text" class="cyber-input p-1 w-full" name="mnt-workreq[]" placeholder="Replace pipe" /></td>
-    <td><input type="text" class="cyber-input p-1 w-full" name="mnt-workdone[]" /></td>
-    <td><input type="text" class="cyber-input p-1 w-full" name="mnt-materials[]" /></td>
-    <td><select class="cyber-input p-1 w-full" name="mnt-priority[]">
-      <option>Low</option><option selected>Medium</option><option>High</option>
-    </select></td>
-    <td><select class="cyber-input p-1 w-full" name="mnt-status[]">
-      <option>Pending</option><option>Approved</option><option>Assigned</option><option>In Progress</option><option>Completed</option>
-    </select></td>
-    <td><input type="number" class="cyber-input p-1 w-full text-right mnt-calc" name="mnt-labour[]" value="0" min="0" /></td>
-    <td><input type="number" class="cyber-input p-1 w-full text-right mnt-calc" name="mnt-mat[]" value="0" min="0" /></td>
-    <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeMntItem(${id})">×</button></td>
-  `;
-  tbody.appendChild(tr);
-  tr.querySelectorAll('.mnt-calc').forEach(inp => inp.addEventListener('input', calculateMntTotals));
-}
+const MNT_CATEGORY_FIELDS = {
+  petty_cash: [
+    { id: 'mnt-date-spent', label: 'Date Spent', type: 'date', required: true },
+    { id: 'mnt-location', label: 'Location / Property', type: 'text', placeholder: 'e.g. Blue House' },
+    { id: 'mnt-purpose', label: 'Purpose / Description', type: 'text', placeholder: 'What was the money used for?', required: true },
+    { id: 'mnt-person', label: 'Person Who Used / Received', type: 'text', placeholder: 'e.g. John Doe' },
+    { id: 'mnt-receipt', label: 'Supporting Receipt / Document', type: 'text', placeholder: 'Receipt reference or file name' },
+  ],
+  office_purchase: [
+    { id: 'mnt-date-spent', label: 'Date Purchased', type: 'date', required: true },
+    { id: 'mnt-item-purchased', label: 'Item Purchased', type: 'text', placeholder: 'e.g. Printer toner', required: true },
+    { id: 'mnt-quantity', label: 'Quantity', type: 'number', placeholder: '1' },
+    { id: 'mnt-supplier', label: 'Supplier', type: 'text', placeholder: 'e.g. OfficeMax' },
+    { id: 'mnt-location', label: 'Location / Property', type: 'text', placeholder: 'e.g. Blue House' },
+    { id: 'mnt-receipt', label: 'Supporting Receipt / Document', type: 'text', placeholder: 'Receipt reference or file name' },
+  ],
+  administration: [
+    { id: 'mnt-date-spent', label: 'Date Spent', type: 'date', required: true },
+    { id: 'mnt-purpose', label: 'Purpose / Description', type: 'text', placeholder: 'e.g. Internet bill payment', required: true },
+    { id: 'mnt-person', label: 'Person / Vendor', type: 'text', placeholder: 'e.g. Safaricom' },
+    { id: 'mnt-location', label: 'Location / Property', type: 'text', placeholder: 'If applicable' },
+    { id: 'mnt-receipt', label: 'Supporting Document', type: 'text', placeholder: 'Receipt or reference' },
+  ],
+  staff_reimbursement: [
+    { id: 'mnt-date-spent', label: 'Date of Expense', type: 'date', required: true },
+    { id: 'mnt-purpose', label: 'Purpose / Description', type: 'text', placeholder: 'What expense is being reimbursed?', required: true },
+    { id: 'mnt-person', label: 'Employee / Staff Name', type: 'text', placeholder: 'e.g. Peter Kamau', required: true },
+    { id: 'mnt-receipt', label: 'Supporting Receipt / Document', type: 'text', placeholder: 'Receipt reference' },
+  ],
+  property_maintenance: [
+    { id: 'mnt-date-spent', label: 'Date of Maintenance', type: 'date', required: true },
+    { id: 'mnt-location', label: 'Location / Property', type: 'text', placeholder: 'e.g. Blue House', required: true },
+    { id: 'mnt-purpose', label: 'Work Description', type: 'text', placeholder: 'e.g. Fix leaking pipe', required: true },
+    { id: 'mnt-person', label: 'Technician / Vendor', type: 'text', placeholder: 'e.g. ABC Plumbing' },
+    { id: 'mnt-receipt', label: 'Supporting Receipt / Document', type: 'text', placeholder: 'Receipt reference' },
+  ],
+  salary: [
+    { id: 'mnt-date-spent', label: 'Payment Date', type: 'date', required: true },
+    { id: 'mnt-person', label: 'Employee Name', type: 'text', placeholder: 'e.g. Peter Kamau', required: true },
+    { id: 'mnt-purpose', label: 'Description', type: 'text', placeholder: 'e.g. August 2026 salary' },
+  ],
+  other: [
+    { id: 'mnt-date-spent', label: 'Date', type: 'date', required: true },
+    { id: 'mnt-purpose', label: 'Description', type: 'text', placeholder: 'What is this expense for?', required: true },
+    { id: 'mnt-location', label: 'Location / Property', type: 'text', placeholder: 'If applicable' },
+    { id: 'mnt-receipt', label: 'Supporting Document', type: 'text', placeholder: 'Receipt or reference' },
+  ],
+};
 
-function removeMntItem(id) {
-  const tr = document.getElementById(`mnt-item-${id}`);
-  if (tr) {
-    tr.remove();
-    calculateMntTotals();
+const MNT_STATUS_OPTIONS = {
+  petty_cash: ['Pending', 'Approved', 'Paid'],
+  office_purchase: ['Pending', 'Approved', 'Paid'],
+  administration: ['Pending', 'Approved', 'Paid'],
+  staff_reimbursement: ['Pending Reimbursement', 'Partially Reimbursed', 'Fully Reimbursed'],
+  property_maintenance: ['Pending', 'Approved', 'Paid'],
+  salary: ['Pending', 'Approved', 'Paid'],
+  other: ['Pending', 'Approved', 'Paid'],
+};
+
+const MNT_CATEGORY_LABELS = {
+  petty_cash: 'Petty Cash',
+  office_purchase: 'Office Purchase',
+  administration: 'Administration',
+  staff_reimbursement: 'Staff Reimbursement',
+  property_maintenance: 'Property Maintenance',
+  salary: 'Salary',
+  other: 'Other',
+};
+
+function renderMntDynamicFields(category) {
+  const container = document.getElementById('mnt-dynamic-fields');
+  if (!container) return;
+  const fields = MNT_CATEGORY_FIELDS[category] || MNT_CATEGORY_FIELDS.other;
+  container.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-3 gap-4">' +
+    fields.map(f => {
+      const req = f.required ? ' required' : '';
+      const ph = f.placeholder ? ` placeholder="${f.placeholder}"` : '';
+      const min = f.type === 'number' ? ' min="0" step="1"' : '';
+      return `<div>
+        <label class="form-label">${f.label}</label>
+        <input type="${f.type}" id="${f.id}" class="cyber-input"${ph}${min}${req} />
+      </div>`;
+    }).join('') +
+    '</div>' +
+    '<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">' +
+    '<div><label class="form-label">Notes</label><input type="text" id="mnt-notes" class="cyber-input" placeholder="Additional notes" /></div>' +
+    '</div>';
+
+  const statusSel = document.getElementById('mnt-status');
+  if (statusSel) {
+    const opts = MNT_STATUS_OPTIONS[category] || MNT_STATUS_OPTIONS.other;
+    statusSel.innerHTML = opts.map(s => `<option value="${s}"${s === 'Pending' ? ' selected' : ''}>${s}</option>`).join('');
   }
 }
 
-function calculateMntTotals() {
-  let total = 0;
-  document.querySelectorAll('#mnt-items-tbody tr').forEach(row => {
-    const labour = Number(row.querySelector('input[name="mnt-labour[]"]')?.value) || 0;
-    const mat = Number(row.querySelector('input[name="mnt-mat[]"]')?.value) || 0;
-    total += labour + mat;
+function collectMntItems() {
+  const category = document.getElementById('mnt-category')?.value || 'other';
+  const dynamicData = {};
+  const fields = MNT_CATEGORY_FIELDS[category] || MNT_CATEGORY_FIELDS.other;
+  fields.forEach(f => {
+    const el = document.getElementById(f.id);
+    if (el) dynamicData[f.id] = el.value.trim();
   });
-  const el = document.getElementById('mnt-grand-total');
-  if (el) el.textContent = money(total);
+  const amount = Number(document.getElementById('mnt-amount')?.value || 0);
+  const notes = document.getElementById('mnt-notes')?.value?.trim() || '';
+  const purpose = dynamicData['mnt-purpose'] || '';
+  const person = dynamicData['mnt-person'] || '';
+  const location = dynamicData['mnt-location'] || '';
+  const receipt = dynamicData['mnt-receipt'] || '';
+  const dateSpent = dynamicData['mnt-date-spent'] || '';
+  const itemPurchased = dynamicData['mnt-item-purchased'] || '';
+  const quantity = dynamicData['mnt-quantity'] || '';
+
+  const description = purpose || itemPurchased || 'Management expense';
+
+  const item = {
+    unit_code: location || '',
+    problem: description,
+    work_required: category,
+    work_done: person || '',
+    materials: JSON.stringify(dynamicData),
+    priority: 'Medium',
+    status: document.getElementById('mnt-status')?.value || 'Pending',
+    labour_cost: amount,
+    material_cost: 0,
+  };
+  return [item];
 }
 
 function resetMntForm() {
   const form = document.getElementById('maintenance-invoice-form');
   if (form) form.reset();
   document.getElementById('mnt-form-id').value = '';
-  document.getElementById('mnt-items-tbody').innerHTML = '';
-  mntItemCount = 0;
-  addMntItem();
-  calculateMntTotals();
-}
-
-function collectMntItems() {
-  const items = [];
-  document.querySelectorAll('#mnt-items-tbody tr').forEach(row => {
-    const problem = row.querySelector('input[name="mnt-problem[]"]')?.value;
-    const labour = Number(row.querySelector('input[name="mnt-labour[]"]')?.value) || 0;
-    const mat = Number(row.querySelector('input[name="mnt-mat[]"]')?.value) || 0;
-    if (!problem && labour === 0 && mat === 0) return;
-    items.push({
-      unit_code: row.querySelector('input[name="mnt-unit[]"]')?.value || '',
-      problem: problem || '',
-      work_required: row.querySelector('input[name="mnt-workreq[]"]')?.value || '',
-      work_done: row.querySelector('input[name="mnt-workdone[]"]')?.value || '',
-      materials: row.querySelector('input[name="mnt-materials[]"]')?.value || '',
-      priority: row.querySelector('select[name="mnt-priority[]"]')?.value || 'Medium',
-      status: row.querySelector('select[name="mnt-status[]"]')?.value || 'Pending',
-      labour_cost: labour,
-      material_cost: mat,
-    });
-  });
-  return items;
+  document.getElementById('mnt-source-wo-id').value = '';
+  document.getElementById('mnt-source-wo-number').value = '';
+  document.getElementById('mnt-source-issue-nos').value = '';
+  document.getElementById('mnt-category').value = 'petty_cash';
+  document.getElementById('mnt-status').value = 'Pending';
+  renderMntDynamicFields('petty_cash');
+  document.getElementById('mnt-form-result').textContent = '';
 }
 
 async function saveMaintenanceInvoice(e) {
   e.preventDefault();
   const resEl = document.getElementById('mnt-form-result');
+  const id = document.getElementById('mnt-form-id').value;
+  const woId = document.getElementById('mnt-source-wo-id').value;
+  const woNumber = document.getElementById('mnt-source-wo-number').value;
+  const issueNos = document.getElementById('mnt-source-issue-nos').value;
+  const category = document.getElementById('mnt-category')?.value || 'other';
   const items = collectMntItems();
-  if (!items.length) {
-    resEl.textContent = 'Add at least one work item.';
+  const amount = Number(document.getElementById('mnt-amount')?.value || 0);
+  if (amount <= 0) {
+    resEl.textContent = 'Enter an amount greater than 0.';
     resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
     return;
   }
-  const id = document.getElementById('mnt-form-id').value;
+
+  const notes = document.getElementById('mnt-notes')?.value?.trim() || '';
+  const dateSpent = document.getElementById('mnt-date-spent')?.value || '';
+  const property = document.getElementById('mnt-location')?.value?.trim() ||
+    document.getElementById('mnt-property')?.value?.trim() || '';
+  const fullNotes = (woNumber ? `WO Source: ${woNumber} ` : '') + notes;
+
   const payload = {
-    property_name: document.getElementById('mnt-property').value.trim(),
-    house_paybill_number: document.getElementById('mnt-paybill').value.trim() || null,
-    unit_codes: document.getElementById('mnt-units').value.trim() || null,
-    caretaker_name: document.getElementById('mnt-caretaker').value.trim() || null,
-    date_reported: document.getElementById('mnt-date-reported').value || null,
-    status: document.getElementById('mnt-status').value,
-    technician_name: document.getElementById('mnt-technician').value.trim() || null,
-    technician_phone: document.getElementById('mnt-technician-phone').value.trim() || null,
+    property_name: property,
+    house_paybill_number: null,
+    unit_codes: null,
+    caretaker_name: null,
+    date_reported: dateSpent || new Date().toISOString().slice(0, 10),
+    status: document.getElementById('mnt-status')?.value || 'Pending',
+    technician_name: null,
+    technician_phone: null,
     items,
-    notes: document.getElementById('mnt-notes').value.trim() || null,
+    notes: fullNotes || null,
   };
+
   resEl.textContent = 'Saving...';
   resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
   try {
+    let invoice;
     if (id) {
-      await api.updateMaintenanceInvoice(id, payload);
-      resEl.textContent = 'Maintenance invoice updated.';
+      const result = await api.updateMaintenanceInvoice(id, payload);
+      invoice = result.invoice;
+      resEl.textContent = 'Expense updated.';
     } else {
-      await api.createMaintenanceInvoice(payload);
-      resEl.textContent = 'Maintenance invoice created.';
+      const result = await api.createMaintenanceInvoice(payload);
+      invoice = result.invoice;
+      resEl.textContent = 'Expense saved.';
     }
+
+    if (woId && invoice) {
+      try {
+        const issueNosArr = issueNos ? issueNos.split(',').map(Number).filter(n => n > 0) : [];
+        await api.linkWoExpenses(invoice.id, woId, issueNosArr.length ? issueNosArr : null);
+      } catch (_) { /* WO linking is best-effort */ }
+    }
+
     resEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
     document.getElementById('maintenance-invoice-form-wrap').classList.add('hidden');
     resetMntForm();
@@ -3604,54 +4491,39 @@ async function editMaintenanceInvoice(id) {
     const set = (elId, val) => { const el = document.getElementById(elId); if (el) el.value = val || ''; };
     set('mnt-form-id', invoice.id);
     set('mnt-property', invoice.property_name);
-    set('mnt-paybill', invoice.house_paybill_number);
-    set('mnt-units', invoice.unit_codes);
-    set('mnt-caretaker', invoice.caretaker_name);
     set('mnt-date-reported', invoice.date_reported);
     set('mnt-status', invoice.status);
-    set('mnt-technician', invoice.technician_name);
-    set('mnt-technician-phone', invoice.technician_phone);
-    set('mnt-notes', invoice.notes);
-    document.getElementById('mnt-items-tbody').innerHTML = '';
-    mntItemCount = 0;
-    const items = Array.isArray(invoice.items) ? invoice.items : [];
-    if (!items.length) {
-      addMntItem();
-    } else {
-      items.forEach(it => {
-        const row = document.createElement('tr');
-        row.id = `mnt-item-${++mntItemCount}`;
-        row.innerHTML = `
-          <td><input type="text" class="cyber-input p-1 w-full" name="mnt-unit[]" value="${escapeHtml(it.unit_code || '')}" /></td>
-          <td><input type="text" class="cyber-input p-1 w-full" name="mnt-problem[]" value="${escapeHtml(it.problem || '')}" /></td>
-          <td><input type="text" class="cyber-input p-1 w-full" name="mnt-workreq[]" value="${escapeHtml(it.work_required || '')}" /></td>
-          <td><input type="text" class="cyber-input p-1 w-full" name="mnt-workdone[]" value="${escapeHtml(it.work_done || '')}" /></td>
-          <td><input type="text" class="cyber-input p-1 w-full" name="mnt-materials[]" value="${escapeHtml(it.materials || '')}" /></td>
-          <td><select class="cyber-input p-1 w-full" name="mnt-priority[]">
-            ${['Low', 'Medium', 'High'].map(p => `<option${(it.priority || 'Medium') === p ? ' selected' : ''}>${p}</option>`).join('')}
-          </select></td>
-          <td><select class="cyber-input p-1 w-full" name="mnt-status[]">
-            ${['Pending', 'Approved', 'Assigned', 'In Progress', 'Completed'].map(s => `<option${(it.status || 'Pending') === s ? ' selected' : ''}>${s}</option>`).join('')}
-          </select></td>
-          <td><input type="number" class="cyber-input p-1 w-full text-right mnt-calc" name="mnt-labour[]" value="${Number(it.labour_cost || 0)}" min="0" /></td>
-          <td><input type="number" class="cyber-input p-1 w-full text-right mnt-calc" name="mnt-mat[]" value="${Number(it.material_cost || 0)}" min="0" /></td>
-          <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeMntItem(${mntItemCount})">×</button></td>
-        `;
-        document.getElementById('mnt-items-tbody').appendChild(row);
-        row.querySelectorAll('.mnt-calc').forEach(inp => inp.addEventListener('input', calculateMntTotals));
-      });
+
+    const item = Array.isArray(invoice.items) && invoice.items.length ? invoice.items[0] : {};
+    const category = item.work_required || 'other';
+    set('mnt-category', category);
+    renderMntDynamicFields(category);
+
+    const dynamicData = item.materials ? (typeof item.materials === 'string' ? JSON.parse(item.materials || '{}') : item.materials) : {};
+    Object.keys(dynamicData).forEach(key => {
+      const el = document.getElementById(key);
+      if (el) el.value = dynamicData[key];
+    });
+    set('mnt-amount', item.labour_cost || invoice.grand_total);
+
+    const notes = (invoice.notes || '').replace(/^WO Source: \S+\s*/, '').trim();
+    set('mnt-notes', notes);
+
+    if (invoice.notes && invoice.notes.startsWith('WO Source: ')) {
+      const woRef = invoice.notes.replace('WO Source: ', '').split(' ')[0];
+      set('mnt-source-wo-number', woRef);
     }
-    calculateMntTotals();
+
     document.getElementById('maintenance-invoice-form-wrap').classList.remove('hidden');
   } catch (err) {
     const resEl = document.getElementById('mnt-form-result');
-    resEl.textContent = 'Failed to load maintenance invoice: ' + err.message;
+    resEl.textContent = 'Failed to load expense: ' + err.message;
     resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
   }
 }
 
 async function deleteMaintenanceInvoice(id) {
-  if (!confirm('Delete this maintenance invoice?')) return;
+  if (!confirm('Delete this management expense?')) return;
   try {
     await api.deleteMaintenanceInvoice(id);
     loadMaintenanceInvoices();
@@ -3660,64 +4532,691 @@ async function deleteMaintenanceInvoice(id) {
   }
 }
 
-async function runMntGenerate(mode, id, phone_number) {
-  const resEl = document.getElementById('mnt-list-result');
-  try {
-    if (mode === 'download') {
-      const result = await api.downloadMaintenanceInvoice(id);
-      triggerFileDownload(result, resEl, `Downloaded ${result.filename}`);
-    } else {
-      const phone = phone_number || prompt('Send via WhatsApp to phone number:');
-      if (!phone) return;
-      if (mode === 'both') {
-        const result = await api.sendAndDownloadMaintenanceInvoice(id, phone);
-        triggerFileDownload(result, resEl, `Sent via WhatsApp & downloaded ${result.filename}`);
-      } else {
-        const result = await api.generateMaintenanceInvoice(id, 'send', phone);
-        if (resEl) {
-          resEl.textContent = `Maintenance invoice sent successfully!${result.invoice_no ? ` (${result.invoice_no})` : ''}`;
-          resEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
-        }
-      }
-    }
-  } catch (err) {
-    if (resEl) {
-      resEl.textContent = 'Error: ' + err.message;
-      resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
-    }
-  }
-}
-
 async function loadMaintenanceInvoices() {
   const tbody = document.getElementById('mnt-list-tbody');
-  const resEl = document.getElementById('mnt-list-result');
   if (!tbody) return;
   try {
     const { invoices } = await api.listMaintenanceInvoices();
     if (!invoices.length) {
-      tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-6">No maintenance invoices yet. Create one to get started.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">No management expenses recorded yet.</td></tr>';
       return;
     }
-    tbody.innerHTML = invoices.map(inv => `
-      <tr>
-        <td class="font-mono">${escapeHtml(inv.mnt_number)}</td>
-        <td>${escapeHtml(inv.property_name || '—')}</td>
-        <td>${escapeHtml(inv.unit_codes || '—')}</td>
-        <td>${escapeHtml(inv.technician_name || '—')}</td>
-        <td>${escapeHtml(inv.status || 'Pending')}</td>
-        <td class="text-right font-mono">${money(inv.grand_total)}</td>
-        <td>${(inv.created_at || '').slice(0, 10)}</td>
-        <td class="text-right whitespace-nowrap">
-          <button type="button" class="action-btn px-2 py-1 text-xs" onclick="editMaintenanceInvoice(${inv.id})">Edit</button>
-          <button type="button" class="action-btn px-2 py-1 text-xs" onclick="runMntGenerate('download', ${inv.id})">PDF</button>
-          <button type="button" class="action-btn px-2 py-1 text-xs text-amber-400 border-amber-400" onclick="runMntGenerate('both', ${inv.id})">Send</button>
-          <button type="button" class="action-btn px-2 py-1 text-xs text-rose-400 border-rose-400" onclick="deleteMaintenanceInvoice(${inv.id})">Del</button>
-        </td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = invoices.map(inv => {
+      const item = Array.isArray(inv.items) && inv.items.length ? inv.items[0] : {};
+      const catKey = item.work_required || 'other';
+      const category = MNT_CATEGORY_LABELS[catKey] || catKey;
+      const description = item.problem || '—';
+      const amount = Number(inv.grand_total || 0);
+      const notes = (inv.notes || '');
+      const isWoSource = notes.startsWith('WO Source: ');
+      const sourceLabel = isWoSource ? 'WO' : 'Manual';
+      const sourceDetail = isWoSource ? notes.replace('WO Source: ', '').split(' ')[0] : '';
+      return '<tr>' +
+        '<td class="font-mono">' + escapeHtml(inv.mnt_number) + '</td>' +
+        '<td>' + ((inv.date_reported || '').slice(0, 10) || '—') + '</td>' +
+        '<td>' + escapeHtml(category) + '</td>' +
+        '<td>' + escapeHtml(description) + '</td>' +
+        '<td><span class="' + (isWoSource ? 'text-emerald-400' : 'text-slate-400') + '">' + sourceLabel + '</span>' + (sourceDetail ? ' <span class="text-slate-500 text-xs">' + escapeHtml(sourceDetail) + '</span>' : '') + '</td>' +
+        '<td>' + escapeHtml(inv.property_name || inv.unit_codes || '—') + '</td>' +
+        '<td class="text-right font-mono">' + money(amount) + '</td>' +
+        '<td>' + escapeHtml(inv.status || 'Pending') + '</td>' +
+        '<td class="text-right whitespace-nowrap">' +
+        '<button type="button" class="action-btn px-2 py-1 text-xs" onclick="editMaintenanceInvoice(' + inv.id + ')">Edit</button> ' +
+        '<button type="button" class="action-btn px-2 py-1 text-xs text-purple-400 border-purple-400" onclick="downloadExpenseInvoice(' + inv.id + ')">Invoice</button> ' +
+        '<button type="button" class="action-btn px-2 py-1 text-xs text-rose-400 border-rose-400" onclick="deleteMaintenanceInvoice(' + inv.id + ')">Del</button>' +
+        '</td></tr>';
+    }).join('');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-rose-400 py-6">Failed to load: ${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-rose-400 py-6">Failed to load: ' + escapeHtml(err.message) + '</td></tr>';
   }
+}
+
+// ============================================================
+// WORK ORDER EXPENSE MODAL
+// ============================================================
+
+async function showWoExpenseModal() {
+  const modal = document.getElementById('wo-expense-modal');
+  const loading = document.getElementById('wo-expense-loading');
+  const list = document.getElementById('wo-expense-list');
+  const houseFilter = document.getElementById('wo-expense-filter-house');
+
+  modal.style.display = 'flex';
+  loading.style.display = '';
+  list.classList.add('hidden');
+  list.innerHTML = '';
+
+  try {
+    const { houses } = await api.houses();
+    if (houseFilter && houses.length) {
+      houseFilter.innerHTML = '<option value="">All Properties</option>' +
+        houses.map(h => `<option value="${escapeHtml(h.paybill_number)}">${escapeHtml(h.name)}</option>`).join('');
+    }
+  } catch (_) { /* ignore */ }
+
+  try {
+    const { expenses } = await api.listEligibleManagementExpenses();
+    loading.style.display = 'none';
+    if (!expenses.length) {
+      list.innerHTML = '<p class="text-center text-slate-400 py-4">No eligible work order expenses found. All WO management expenses are already linked to an invoice.</p>';
+      list.classList.remove('hidden');
+      return;
+    }
+    renderWoExpenseList(expenses);
+  } catch (err) {
+    loading.style.display = 'none';
+    list.innerHTML = '<p class="text-center text-rose-400 py-4">Failed to load: ' + escapeHtml(err.message) + '</p>';
+    list.classList.remove('hidden');
+  }
+}
+
+function renderWoExpenseList(expenses) {
+  const list = document.getElementById('wo-expense-list');
+  list.innerHTML = expenses.map(e =>
+    `<div class="border border-slate-700 rounded p-3 mb-2 hover:border-cyan-500 cursor-pointer transition-colors" onclick="selectWoExpense(${e.wo_id}, '${escapeHtml(e.wo_number || '')}', '${escapeHtml((e.issue_nos || []).join(','))}', '${escapeHtml(e.property_name || '')}')">
+      <div class="flex justify-between items-start">
+        <div>
+          <p class="text-sm font-medium text-white">WO: ${escapeHtml(e.wo_number || '—')}</p>
+          <p class="text-xs text-slate-400">Property: ${escapeHtml(e.property_name || '—')}</p>
+          <p class="text-xs text-slate-400">Description: ${escapeHtml(e.description || '—')}</p>
+          <p class="text-xs text-slate-400">Technician: ${escapeHtml(e.technician_name || '—')}</p>
+          ${e.materials ? `<p class="text-xs text-slate-400">Materials: ${escapeHtml(e.materials)}</p>` : ''}
+          <p class="text-xs text-slate-400">Responsible: ${escapeHtml(e.responsible_party || '—')}</p>
+        </div>
+        <p class="text-sm font-mono text-cyan-400">${money(e.amount)}</p>
+      </div>
+    </div>`
+  ).join('');
+  list.classList.remove('hidden');
+}
+
+function selectWoExpense(woId, woNumber, issueNos, property) {
+  document.getElementById('mnt-source-wo-id').value = woId;
+  document.getElementById('mnt-source-wo-number').value = woNumber;
+  document.getElementById('mnt-source-issue-nos').value = issueNos;
+  document.getElementById('mnt-property').value = property;
+  document.getElementById('mnt-category').value = 'property_maintenance';
+  renderMntDynamicFields('property_maintenance');
+  document.getElementById('mnt-status').value = 'Pending';
+  document.getElementById('mnt-form-result').textContent = 'Work Order ' + woNumber + ' linked. Fill in amount and save.';
+  document.getElementById('mnt-form-result').className = 'text-sm font-mono text-cyan-400 text-right mt-2';
+  hideWoExpenseModal();
+  document.getElementById('maintenance-invoice-form-wrap').classList.remove('hidden');
+}
+
+function hideWoExpenseModal() {
+  document.getElementById('wo-expense-modal').style.display = 'none';
+}
+
+function filterWoExpenses() {
+  const house = document.getElementById('wo-expense-filter-house')?.value || '';
+  api.listEligibleManagementExpenses(house || null).then(({ expenses }) => {
+    renderWoExpenseList(expenses);
+  }).catch(() => {});
+}
+
+window.editMaintenanceInvoice = editMaintenanceInvoice;
+window.deleteMaintenanceInvoice = deleteMaintenanceInvoice;
+window.runMntGenerate = runMntGenerate;
+window.showWoExpenseModal = showWoExpenseModal;
+window.hideWoExpenseModal = hideWoExpenseModal;
+window.selectWoExpense = selectWoExpense;
+window.downloadSalaryInvoice = downloadSalaryInvoice;
+window.downloadReimbursementInvoice = downloadReimbursementInvoice;
+window.downloadExpenseInvoice = downloadExpenseInvoice;
+
+// ============================================================
+// SALARY MANAGEMENT
+// ============================================================
+
+async function loadSalaryDashboard() {
+  const month = document.getElementById('salary-month-select')?.value || new Date().toISOString().slice(0, 7);
+  const tbody = document.getElementById('salary-list-tbody');
+  if (!tbody) return;
+  try {
+    const { records } = await api.listSalaryRecords(month);
+    let totalExpected = 0, totalPaid = 0, totalOutstanding = 0;
+    records.forEach(r => {
+      totalExpected += Number(r.expected_salary || 0);
+      totalPaid += Number(r.total_paid || 0);
+      totalOutstanding += Number(r.outstanding || 0);
+    });
+    document.getElementById('sal-total-expected').textContent = money(totalExpected);
+    document.getElementById('sal-total-paid').textContent = money(totalPaid);
+    document.getElementById('sal-total-outstanding').textContent = money(totalOutstanding);
+    document.getElementById('sal-employee-count').textContent = records.length;
+
+    if (!records.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">No salary records for this month. Click "+ Add Salary" to create one.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = records.map(r => {
+      const totalObligation = Number(r.expected_salary || 0) + Number(r.previous_balance || 0);
+      const statusClass = r.status === 'Fully Paid' ? 'text-green-400' : r.status === 'Partially Paid' ? 'text-amber-400' : 'text-slate-400';
+      return `<tr>
+        <td class="font-medium text-white">${escapeHtml(r.employee_name)}</td>
+        <td class="font-mono">${escapeHtml(r.salary_month)}</td>
+        <td class="text-right font-mono">${r.previous_balance > 0 ? money(r.previous_balance) : '—'}</td>
+        <td class="text-right font-mono">${money(r.expected_salary)}</td>
+        <td class="text-right font-mono text-cyan-400">${money(totalObligation)}</td>
+        <td class="text-right font-mono text-green-400">${money(r.total_paid)}</td>
+        <td class="text-right font-mono ${r.outstanding > 0 ? 'text-rose-400' : 'text-green-400'}">${r.outstanding > 0 ? money(r.outstanding) : '—'}</td>
+        <td class="${statusClass}">${escapeHtml(r.status)}</td>
+        <td class="text-right whitespace-nowrap">
+          <button type="button" class="action-btn px-2 py-1 text-xs" onclick="editSalaryRecord(${r.id})">Edit</button>
+          <button type="button" class="action-btn px-2 py-1 text-xs text-green-400 border-green-400" onclick="openSalaryPaymentModal(${r.id}, '${escapeHtml(r.employee_name)}', ${totalObligation}, ${r.total_paid})">Pay</button>
+          <button type="button" class="action-btn px-2 py-1 text-xs text-purple-400 border-purple-400" onclick="downloadSalaryInvoice(${r.id})">Invoice</button>
+          <button type="button" class="action-btn px-2 py-1 text-xs" onclick="showSalaryHistory('${escapeHtml(r.employee_name)}')">History</button>
+          <button type="button" class="action-btn px-2 py-1 text-xs text-rose-400 border-rose-400" onclick="deleteSalaryRecord(${r.id})">Del</button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-rose-400 py-6">Failed to load: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function editSalaryRecord(id) {
+  try {
+    const { record } = await api.getSalaryRecord(id);
+    if (!record) return;
+    document.getElementById('sal-form-id').value = record.id;
+    document.getElementById('sal-employee').value = record.employee_name || '';
+    document.getElementById('sal-month').value = record.salary_month || '';
+    document.getElementById('sal-previous-balance').value = record.previous_balance || 0;
+    document.getElementById('sal-expected').value = record.expected_salary || '';
+    document.getElementById('sal-notes').value = record.notes || '';
+    updateSalaryPreview();
+    document.getElementById('salary-form-wrap').classList.remove('hidden');
+  } catch (err) {
+    alert('Failed to load: ' + err.message);
+  }
+}
+
+async function deleteSalaryRecord(id) {
+  if (!confirm('Delete this salary record and all its payments?')) return;
+  try {
+    await api.deleteSalaryRecord(id);
+    loadSalaryDashboard();
+  } catch (err) {
+    alert('Failed to delete: ' + err.message);
+  }
+}
+
+async function openSalaryPaymentModal(recordId, employeeName, totalObligation, totalPaid) {
+  const modal = document.getElementById('salary-payment-modal');
+  const outstanding = totalObligation - totalPaid;
+  document.getElementById('spm-record-id').value = recordId;
+  document.getElementById('spm-total-obligation').value = totalObligation;
+  document.getElementById('spm-amount').value = outstanding > 0 ? outstanding : '';
+  document.getElementById('spm-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('spm-method').value = '';
+  document.getElementById('spm-reference').value = '';
+  document.getElementById('spm-notes').value = '';
+  document.getElementById('spm-result').textContent = '';
+  document.getElementById('sal-pay-title').textContent = 'Record Salary Payment';
+  document.getElementById('sal-pay-subtitle').textContent = employeeName + ' — Outstanding: ' + money(outstanding);
+
+  // Load payment history
+  const histDiv = document.getElementById('spm-payment-history');
+  histDiv.innerHTML = 'Loading...';
+  try {
+    const { payments } = await api.getSalaryPayments(recordId);
+    if (!payments.length) {
+      histDiv.innerHTML = '<p class="text-slate-500">No payments recorded yet.</p>';
+    } else {
+      histDiv.innerHTML = '<table class="w-full text-xs"><thead><tr><th class="text-left">Date</th><th class="text-right">Amount</th><th>Method</th><th>Ref</th><th></th></tr></thead><tbody>' +
+        payments.map(p => `<tr>
+          <td>${(p.payment_date || '').slice(0, 10)}</td>
+          <td class="text-right font-mono">${money(p.amount)}</td>
+          <td>${escapeHtml(p.payment_method || '—')}</td>
+          <td>${escapeHtml(p.reference || '—')}</td>
+          <td class="text-right"><button type="button" class="text-rose-400 text-xs hover:underline" onclick="deleteSalaryPaymentFromModal(${recordId}, ${p.id})">Del</button></td>
+        </tr>`).join('') +
+        '</tbody></table>';
+    }
+  } catch (_) { histDiv.innerHTML = '<p class="text-rose-400">Failed to load.</p>'; }
+
+  modal.style.display = 'flex';
+}
+
+async function deleteSalaryPaymentFromModal(recordId, paymentId) {
+  if (!confirm('Delete this payment?')) return;
+  try {
+    await api.deleteSalaryPayment(recordId, paymentId);
+    // Reload dashboard and modal
+    loadSalaryDashboard();
+    const rec = await api.getSalaryRecord(recordId);
+    if (rec.record) {
+      const totalObligation = Number(rec.record.expected_salary || 0) + Number(rec.record.previous_balance || 0);
+      openSalaryPaymentModal(recordId, rec.record.employee_name, totalObligation, rec.record.total_paid);
+    }
+  } catch (err) { alert('Failed: ' + err.message); }
+}
+
+async function showSalaryHistory(employee) {
+  const modal = document.getElementById('salary-history-modal');
+  const content = document.getElementById('sal-hist-content');
+  document.getElementById('sal-hist-title').textContent = 'Salary History — ' + employee;
+  content.innerHTML = 'Loading...';
+  modal.style.display = 'flex';
+  try {
+    const { history } = await api.getSalaryHistory(employee);
+    if (!history.length) {
+      content.innerHTML = '<p class="text-slate-500">No salary records found.</p>';
+      return;
+    }
+    content.innerHTML = '<table class="w-full text-xs"><thead><tr><th class="text-left">Month</th><th class="text-right">Expected</th><th class="text-right">Prev. Bal</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th>Status</th></tr></thead><tbody>' +
+      history.map(r => `<tr>
+        <td class="font-mono">${escapeHtml(r.salary_month)}</td>
+        <td class="text-right font-mono">${money(r.expected_salary)}</td>
+        <td class="text-right font-mono">${r.previous_balance > 0 ? money(r.previous_balance) : '—'}</td>
+        <td class="text-right font-mono text-green-400">${money(r.total_paid)}</td>
+        <td class="text-right font-mono ${r.outstanding > 0 ? 'text-rose-400' : 'text-green-400'}">${r.outstanding > 0 ? money(r.outstanding) : '—'}</td>
+        <td>${escapeHtml(r.status)}</td>
+      </tr>`).join('') +
+      '</tbody></table>';
+  } catch (err) { content.innerHTML = '<p class="text-rose-400">Failed: ' + escapeHtml(err.message) + '</p>'; }
+}
+
+window.editSalaryRecord = editSalaryRecord;
+window.deleteSalaryRecord = deleteSalaryRecord;
+window.openSalaryPaymentModal = openSalaryPaymentModal;
+window.showSalaryHistory = showSalaryHistory;
+window.deleteSalaryPaymentFromModal = deleteSalaryPaymentFromModal;
+
+function updateSalaryPreview() {
+  const prevBal = Number(document.getElementById('sal-previous-balance')?.value || 0);
+  const expected = Number(document.getElementById('sal-expected')?.value || 0);
+  const el1 = document.getElementById('sal-prev-bal-display');
+  const el2 = document.getElementById('sal-cur-display');
+  const el3 = document.getElementById('sal-total-display');
+  if (el1) el1.textContent = money(prevBal);
+  if (el2) el2.textContent = money(expected);
+  if (el3) el3.textContent = money(prevBal + expected);
+}
+
+async function saveSalary(e) {
+  e.preventDefault();
+  const resEl = document.getElementById('sal-form-result');
+  const id = document.getElementById('sal-form-id').value;
+  const payload = {
+    employee_name: document.getElementById('sal-employee').value.trim(),
+    salary_month: document.getElementById('sal-month').value,
+    previous_balance: Number(document.getElementById('sal-previous-balance').value || 0),
+    expected_salary: Number(document.getElementById('sal-expected').value || 0),
+    notes: document.getElementById('sal-notes').value.trim() || null,
+  };
+  if (!payload.employee_name || !payload.salary_month || payload.expected_salary <= 0) {
+    resEl.textContent = 'Fill in employee name, month, and expected salary.';
+    resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    return;
+  }
+  resEl.textContent = 'Saving...';
+  resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
+  try {
+    if (id) {
+      await api.updateSalaryRecord(id, payload);
+      resEl.textContent = 'Salary record updated.';
+    } else {
+      await api.createSalaryRecord(payload);
+      resEl.textContent = 'Salary record created.';
+    }
+    resEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    document.getElementById('salary-form-wrap').classList.add('hidden');
+    loadSalaryDashboard();
+  } catch (err) {
+    resEl.textContent = 'Error: ' + err.message;
+    resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+  }
+}
+
+async function saveSalaryPayment(e) {
+  e.preventDefault();
+  const resEl = document.getElementById('spm-result');
+  const recordId = document.getElementById('spm-record-id').value;
+  const payload = {
+    amount: Number(document.getElementById('spm-amount').value || 0),
+    payment_date: document.getElementById('spm-date').value || new Date().toISOString().slice(0, 10),
+    payment_method: document.getElementById('spm-method').value || null,
+    reference: document.getElementById('spm-reference').value.trim() || null,
+    notes: document.getElementById('spm-notes').value.trim() || null,
+  };
+  if (payload.amount <= 0) {
+    resEl.textContent = 'Enter a valid amount.';
+    resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    return;
+  }
+  const totalObligation = Number(document.getElementById('spm-total-obligation').value || 0);
+  resEl.textContent = 'Recording...';
+  resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
+  try {
+    await api.recordSalaryPayment(recordId, payload);
+    resEl.textContent = 'Payment recorded.';
+    resEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    loadSalaryDashboard();
+    // Reload modal
+    const { record } = await api.getSalaryRecord(recordId);
+    if (record) {
+      openSalaryPaymentModal(recordId, record.employee_name, totalObligation, record.total_paid);
+    }
+  } catch (err) {
+    resEl.textContent = 'Error: ' + err.message;
+    resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+  }
+}
+
+async function runSalaryRollover() {
+  const month = document.getElementById('salary-month-select')?.value || new Date().toISOString().slice(0, 7);
+  if (!confirm('Roll over outstanding salary balances to the next month?')) return;
+  try {
+    const result = await api.rollOverSalaries(month);
+    alert('Salary rollover complete. ' + result.carried_forward + ' employee balance(s) carried forward from ' + result.previous_month + '.');
+    loadSalaryDashboard();
+  } catch (err) {
+    alert('Rollover failed: ' + err.message);
+  }
+}
+
+// ============================================================
+// MANAGEMENT EXPENSES HISTORY (Phase 5)
+// ============================================================
+
+async function searchManagementExpensesHistory() {
+  const tbody = document.getElementById('meh-list-tbody');
+  if (!tbody) return;
+  const params = {};
+  const month = document.getElementById('meh-month')?.value;
+  const dateFrom = document.getElementById('meh-date-from')?.value;
+  const dateTo = document.getElementById('meh-date-to')?.value;
+  const property = document.getElementById('meh-property')?.value;
+  const category = document.getElementById('meh-category')?.value;
+  const status = document.getElementById('meh-status')?.value;
+  const source = document.getElementById('meh-source')?.value;
+  const employee = document.getElementById('meh-employee')?.value;
+  const invoice = document.getElementById('meh-invoice')?.value;
+  if (month) params.month = month;
+  if (dateFrom) params.date_from = dateFrom;
+  if (dateTo) params.date_to = dateTo;
+  if (property) params.property = property;
+  if (category) params.category = category;
+  if (status) params.status = status;
+  if (source) params.source = source;
+  if (employee) params.employee = employee;
+  if (invoice) params.invoice_number = invoice;
+
+  tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-400 py-4">Loading...</td></tr>';
+  try {
+    const report = await api.getManagementExpensesReport(params);
+    const expenses = report.expenses || [];
+
+    // Update summary cards
+    document.getElementById('meh-summary-cards').style.display = 'grid';
+    document.getElementById('meh-total-incurred').textContent = money(report.summary.total_incurred);
+    document.getElementById('meh-total-paid').textContent = money(report.summary.total_paid);
+    document.getElementById('meh-total-outstanding').textContent = money(report.summary.total_outstanding);
+    document.getElementById('meh-expense-count').textContent = expenses.length;
+
+    if (!expenses.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-6">No expenses found matching the filters.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = expenses.map(e => {
+      const date = e.date_reported ? String(e.date_reported).slice(0, 10) : (e.date_month || '—');
+      const invNum = e.invoice_number || '—';
+      const desc = e.description || '—';
+      const prop = e.property_name || e.employee || '—';
+      const srcBadge = e.source === 'Work Order' ? '<span class="text-emerald-400">WO</span>' :
+                       e.source === 'Salary' ? '<span class="text-purple-400">Salary</span>' :
+                       '<span class="text-slate-400">Manual</span>';
+      return '<tr>' +
+        '<td>' + date + '</td>' +
+        '<td class="font-mono text-xs">' + escapeHtml(invNum) + '</td>' +
+        '<td>' + escapeHtml(e.category || '—') + '</td>' +
+        '<td>' + escapeHtml(desc) + '</td>' +
+        '<td>' + escapeHtml(prop) + '</td>' +
+        '<td>' + srcBadge + '</td>' +
+        '<td class="text-right font-mono">' + money(e.amount) + '</td>' +
+        '<td>' + escapeHtml(e.status || '—') + '</td>' +
+        '</tr>';
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-rose-400 py-6">Failed to load: ' + escapeHtml(err.message) + '</td></tr>';
+  }
+}
+
+function clearManagementExpensesHistory() {
+  ['meh-month', 'meh-date-from', 'meh-date-to', 'meh-property', 'meh-employee', 'meh-invoice'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  ['meh-category', 'meh-status', 'meh-source'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  document.getElementById('meh-summary-cards').style.display = 'none';
+  document.getElementById('meh-list-tbody').innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-6">Click "Search" to load expenses.</td></tr>';
+}
+
+async function searchPropertyExpenseReport() {
+  const property = document.getElementById('per-property')?.value?.trim();
+  const month = document.getElementById('per-month')?.value;
+  const resultDiv = document.getElementById('per-result');
+  const reportDiv = document.getElementById('per-report');
+  if (!property) { resultDiv.textContent = 'Enter a property name.'; return; }
+  resultDiv.textContent = 'Loading...';
+  reportDiv.classList.add('hidden');
+  try {
+    const report = await api.getPropertyExpenseReport(property, month || null);
+    resultDiv.textContent = '';
+    if (!report.categories.length) {
+      reportDiv.innerHTML = '<p class="text-slate-400">No management expenses found for this property.</p>';
+      reportDiv.classList.remove('hidden');
+      return;
+    }
+    let html = '<h4 class="text-sm font-semibold text-white mb-3">' + escapeHtml(report.property) + ' — Total: ' + money(report.total) + '</h4>';
+    html += '<table class="w-full text-left cyber-table text-sm"><thead><tr><th>Category</th><th class="text-right">Total</th><th class="text-right">Count</th></tr></thead><tbody>';
+    report.categories.forEach(c => {
+      html += '<tr><td>' + escapeHtml(c.category) + '</td><td class="text-right font-mono">' + money(c.total) + '</td><td class="text-right">' + c.expenses.length + '</td></tr>';
+    });
+    html += '<tr class="font-bold border-t border-slate-700"><td>Total</td><td class="text-right font-mono text-cyan-400">' + money(report.total) + '</td><td class="text-right">' + report.expense_count + '</td></tr>';
+    html += '</tbody></table>';
+    reportDiv.innerHTML = html;
+    reportDiv.classList.remove('hidden');
+  } catch (err) {
+    resultDiv.textContent = 'Failed: ' + err.message;
+  }
+}
+
+// ============================================================
+// MONTHLY MANAGEMENT EXPENSES REPORT (Phase 5)
+// ============================================================
+
+async function generateMgmtExpensesReport() {
+  const month = document.getElementById('mer-month')?.value;
+  const dateFrom = document.getElementById('mer-date-from')?.value;
+  const dateTo = document.getElementById('mer-date-to')?.value;
+  const property = document.getElementById('mer-property')?.value;
+  const category = document.getElementById('mer-category')?.value;
+  const status = document.getElementById('mer-status')?.value;
+
+  const hasDateRange = dateFrom || dateTo;
+  const hasMonth = !!month;
+  if (!hasDateRange && !hasMonth) {
+    alert('Select a month, a single date, or a date range (From/To).');
+    return;
+  }
+
+  const params = {};
+  if (hasDateRange) {
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    else if (dateFrom && !dateTo) params.date_to = dateFrom;
+  } else if (hasMonth) {
+    params.month = month;
+  }
+  if (property) params.property = property;
+  if (category) params.category = category;
+  if (status) params.status = status;
+
+  try {
+    const report = await api.getManagementExpensesReport(params);
+    document.getElementById('mer-empty').style.display = 'none';
+    document.getElementById('mer-summary').classList.remove('hidden');
+
+    document.getElementById('mer-total-incurred').textContent = money(report.summary.total_incurred);
+    document.getElementById('mer-total-paid').textContent = money(report.summary.total_paid);
+    document.getElementById('mer-total-outstanding').textContent = money(report.summary.total_outstanding);
+    document.getElementById('mer-period').textContent = report.month;
+    document.getElementById('mer-property-total').textContent = money(report.summary.property_expenses);
+    document.getElementById('mer-general-total').textContent = money(report.summary.general_expenses);
+
+    // By Category
+    const catDiv = document.getElementById('mer-by-category');
+    catDiv.innerHTML = Object.entries(report.by_category).map(([cat, amt]) =>
+      '<div class="bg-slate-800/30 rounded p-3 text-center"><p class="text-xs text-slate-400">' + escapeHtml(cat) + '</p><p class="text-lg font-bold text-white font-mono">' + money(amt) + '</p></div>'
+    ).join('');
+
+    // By Source
+    const srcDiv = document.getElementById('mer-by-source');
+    srcDiv.innerHTML = Object.entries(report.by_source).map(([src, amt]) =>
+      '<div class="bg-slate-800/30 rounded p-3 text-center"><p class="text-xs text-slate-400">' + escapeHtml(src) + '</p><p class="text-lg font-bold text-white font-mono">' + money(amt) + '</p></div>'
+    ).join('');
+
+    // Salary table
+    const salSection = document.getElementById('mer-salary-section');
+    const salTbody = document.getElementById('mer-salary-tbody');
+    if (report.salary_records.length) {
+      salSection.style.display = 'block';
+      salTbody.innerHTML = report.salary_records.map(s => {
+        const totalObligation = Number(s.amount || 0) + Number(s.previous_balance || 0);
+        return '<tr><td>' + escapeHtml(s.employee || s.description) + '</td>' +
+          '<td class="text-right font-mono">' + money(s.amount) + '</td>' +
+          '<td class="text-right font-mono">' + (s.previous_balance > 0 ? money(s.previous_balance) : '—') + '</td>' +
+          '<td class="text-right font-mono text-green-400">' + money(s.total_paid) + '</td>' +
+          '<td class="text-right font-mono ' + (s.outstanding > 0 ? 'text-rose-400' : 'text-green-400') + '">' + (s.outstanding > 0 ? money(s.outstanding) : '—') + '</td>' +
+          '<td>' + escapeHtml(s.status) + '</td></tr>';
+      }).join('');
+    } else {
+      salSection.style.display = 'none';
+    }
+
+    // Full expense list
+    const expTbody = document.getElementById('mer-expenses-tbody');
+    expTbody.innerHTML = report.expenses.map(e => {
+      const date = e.date_reported ? String(e.date_reported).slice(0, 10) : (e.date_month || '—');
+      const srcBadge = e.source === 'Work Order' ? '<span class="text-emerald-400">WO</span>' :
+                       e.source === 'Salary' ? '<span class="text-purple-400">Salary</span>' :
+                       '<span class="text-slate-400">Manual</span>';
+      return '<tr><td>' + date + '</td>' +
+        '<td class="font-mono text-xs">' + escapeHtml(e.invoice_number || '—') + '</td>' +
+        '<td>' + escapeHtml(e.category || '—') + '</td>' +
+        '<td>' + escapeHtml(e.description || '—') + '</td>' +
+        '<td>' + escapeHtml(e.property_name || e.employee || '—') + '</td>' +
+        '<td>' + srcBadge + '</td>' +
+        '<td class="text-right font-mono">' + money(e.amount) + '</td>' +
+        '<td>' + escapeHtml(e.status || '—') + '</td></tr>';
+    }).join('');
+
+  } catch (err) {
+    alert('Failed to generate report: ' + err.message);
+  }
+}
+
+function printMgmtExpensesReport() {
+  window.print();
+}
+
+function getReportParams() {
+  const month = document.getElementById('mer-month')?.value;
+  const dateFrom = document.getElementById('mer-date-from')?.value;
+  const dateTo = document.getElementById('mer-date-to')?.value;
+  const property = document.getElementById('mer-property')?.value;
+  const category = document.getElementById('mer-category')?.value;
+  const status = document.getElementById('mer-status')?.value;
+  const params = {};
+  if (dateFrom || dateTo) {
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    else if (dateFrom && !dateTo) params.date_to = dateFrom;
+  } else if (month) {
+    params.month = month;
+  }
+  if (property) params.property = property;
+  if (category) params.category = category;
+  if (status) params.status = status;
+  return params;
+}
+
+async function downloadMgmtExpensesReport() {
+  const params = getReportParams();
+  if (!params.month && !params.date_from) { alert('Generate a report first, then download.'); return; }
+  try {
+    const result = await api.downloadManagementExpensesReport(params);
+    triggerFileDownload(result, null, 'Management expenses report downloaded');
+  } catch (err) {
+    alert('Failed to download report: ' + err.message);
+  }
+}
+
+async function shareMgmtExpensesReport() {
+  const params = getReportParams();
+  if (!params.month && !params.date_from) { alert('Generate a report first, then share.'); return; }
+  try {
+    const result = await api.downloadManagementExpensesReport(params);
+    if (result && result.filename) {
+      const blob = new Blob([result], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      if (navigator.share) {
+        const file = new File([blob], result.filename, { type: 'application/pdf' });
+        navigator.share({ files: [file], title: 'Management Expenses Report' }).catch(() => {});
+      } else {
+        window.open(url, '_blank');
+      }
+    }
+  } catch (err) {
+    alert('Failed to share report: ' + err.message);
+  }
+}
+
+async function downloadSalaryInvoice(recordId) {
+  try {
+    const result = await api.downloadSalaryInvoice(recordId);
+    triggerFileDownload(result, null, 'Salary invoice downloaded');
+  } catch (err) {
+    alert('Failed to download salary invoice: ' + err.message);
+  }
+}
+
+async function downloadReimbursementInvoice(invoiceId) {
+  try {
+    const result = await api.downloadReimbursementInvoice(invoiceId);
+    triggerFileDownload(result, null, 'Reimbursement invoice downloaded');
+  } catch (err) {
+    alert('Failed to download reimbursement invoice: ' + err.message);
+  }
+}
+
+async function downloadExpenseInvoice(invoiceId) {
+  try {
+    const result = await api.downloadExpenseInvoice(invoiceId);
+    triggerFileDownload(result, null, 'Expense invoice downloaded');
+  } catch (err) {
+    alert('Failed to download expense invoice: ' + err.message);
+  }
+}
+
+async function populatePropertyDropdowns() {
+  try {
+    const { houses } = await api.houses();
+    const propertyNames = [...new Set(houses.map(h => h.name).filter(Boolean))].sort();
+    ['meh-property', 'mer-property'].forEach(id => {
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      const current = sel.value;
+      sel.innerHTML = '<option value="">All Properties</option>' +
+        propertyNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+      sel.value = current;
+    });
+  } catch (_) { /* ignore — dropdowns will stay as "All Properties" */ }
 }
 
 let woItemCount = 0;
@@ -4296,20 +5795,64 @@ document.getElementById('btn-back-invoice-type')?.addEventListener('click', show
 document.getElementById('btn-back-exit-type')?.addEventListener('click', showInvoiceTypeSelector);
 document.getElementById('btn-back-rent-invoice')?.addEventListener('click', showInvoiceTypeSelector);
 document.getElementById('btn-back-maintenance-invoices')?.addEventListener('click', showInvoiceTypeSelector);
+document.getElementById('btn-back-salary')?.addEventListener('click', showInvoiceTypeSelector);
+document.getElementById('btn-new-salary')?.addEventListener('click', () => {
+  document.getElementById('sal-form-id').value = '';
+  document.getElementById('sal-employee').value = '';
+  document.getElementById('sal-month').value = document.getElementById('salary-month-select')?.value || new Date().toISOString().slice(0, 7);
+  document.getElementById('sal-previous-balance').value = '0';
+  document.getElementById('sal-expected').value = '';
+  document.getElementById('sal-notes').value = '';
+  updateSalaryPreview();
+  document.getElementById('salary-form-wrap').classList.toggle('hidden');
+});
+document.getElementById('btn-cancel-salary-form')?.addEventListener('click', () => {
+  document.getElementById('salary-form-wrap').classList.add('hidden');
+});
+document.getElementById('salary-form')?.addEventListener('submit', saveSalary);
+document.getElementById('salary-payment-form')?.addEventListener('submit', saveSalaryPayment);
+document.getElementById('btn-close-spm-modal')?.addEventListener('click', () => {
+  document.getElementById('salary-payment-modal').style.display = 'none';
+});
+document.getElementById('btn-close-sal-hist-modal')?.addEventListener('click', () => {
+  document.getElementById('salary-history-modal').style.display = 'none';
+});
+document.getElementById('btn-salary-rollover')?.addEventListener('click', runSalaryRollover);
+document.getElementById('sal-previous-balance')?.addEventListener('input', updateSalaryPreview);
+document.getElementById('sal-expected')?.addEventListener('input', updateSalaryPreview);
+document.getElementById('btn-meh-search')?.addEventListener('click', searchManagementExpensesHistory);
+document.getElementById('btn-meh-clear')?.addEventListener('click', clearManagementExpensesHistory);
+document.getElementById('btn-per-search')?.addEventListener('click', searchPropertyExpenseReport);
+document.getElementById('btn-mer-generate')?.addEventListener('click', generateMgmtExpensesReport);
+document.getElementById('btn-mer-print')?.addEventListener('click', printMgmtExpensesReport);
+document.getElementById('btn-mer-download')?.addEventListener('click', downloadMgmtExpensesReport);
+document.getElementById('btn-mer-share')?.addEventListener('click', shareMgmtExpensesReport);
+document.getElementById('salary-month-select')?.addEventListener('change', loadSalaryDashboard);
+// Set default salary month
+if (document.getElementById('salary-month-select')) {
+  document.getElementById('salary-month-select').value = new Date().toISOString().slice(0, 7);
+}
 document.getElementById('rent-invoice-tenant-search')?.addEventListener('change', loadRentInvoiceTenantInfo);
 document.getElementById('rent-invoice-form')?.addEventListener('submit', (e) => { e.preventDefault(); runRentInvoiceAction('send'); });
 document.getElementById('btn-rent-invoice-download')?.addEventListener('click', () => runRentInvoiceAction('download'));
 document.getElementById('btn-rent-invoice-both')?.addEventListener('click', () => runRentInvoiceAction('both'));
 document.getElementById('btn-new-maintenance-invoice')?.addEventListener('click', () => {
   resetMntForm();
-  document.getElementById('maintenance-invoice-form-wrap').classList.toggle('hidden');
+  document.getElementById('maintenance-invoice-form-wrap').classList.remove('hidden');
 });
-document.getElementById('btn-add-mnt-item')?.addEventListener('click', addMntItem);
-document.getElementById('btn-add-invoice-item')?.addEventListener('click', addInvoiceItem);
+document.getElementById('btn-add-wo-expense')?.addEventListener('click', showWoExpenseModal);
 document.getElementById('btn-cancel-mnt-form')?.addEventListener('click', () => {
   document.getElementById('maintenance-invoice-form-wrap').classList.add('hidden');
 });
 document.getElementById('maintenance-invoice-form')?.addEventListener('submit', saveMaintenanceInvoice);
+document.getElementById('mnt-category')?.addEventListener('change', (e) => {
+  renderMntDynamicFields(e.target.value);
+});
+document.getElementById('btn-close-wo-expense-modal')?.addEventListener('click', hideWoExpenseModal);
+document.getElementById('wo-expense-filter-house')?.addEventListener('change', filterWoExpenses);
+document.getElementById('wo-expense-modal')?.addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) hideWoExpenseModal();
+});
 document.getElementById('btn-new-work-order')?.addEventListener('click', () => {
   resetWoForm();
   document.getElementById('work-order-form-wrap').classList.toggle('hidden');
@@ -5361,3 +6904,297 @@ document.getElementById('btn-ir-share-send')?.addEventListener('click', async ()
     if (btn) btn.disabled = false;
   }
 });
+
+// ============================================================
+// DEPOSIT REFUNDS
+// ============================================================
+
+let drCurrentFilter = 'all';
+let drCurrentSort = 'status';
+let drCurrentSearch = '';
+let drDetailId = null;
+
+async function loadDepositRefunds() {
+  try {
+    const [{ summary }, { refunds }] = await Promise.all([
+      api.getDepositRefundSummary(),
+      api.listDepositRefunds({
+        status: drCurrentFilter,
+        sort: drCurrentSort,
+        search: drCurrentSearch,
+      }),
+    ]);
+    renderDepositRefundSummary(summary);
+    renderDepositRefundTable(refunds);
+  } catch (err) {
+    console.error('[DepositRefunds] Load failed:', err);
+  }
+}
+
+function renderDepositRefundSummary(s) {
+  setTextEl('dr-sum-pending', s.pending || 0);
+  setTextEl('dr-sum-pending-amt', formatKes(s.pending_amount || 0));
+  setTextEl('dr-sum-due-soon', s.due_soon || 0);
+  setTextEl('dr-sum-due-soon-amt', formatKes(s.due_soon_amount || 0));
+  setTextEl('dr-sum-due-today', s.due_today || 0);
+  setTextEl('dr-sum-due-today-amt', formatKes(s.due_today_amount || 0));
+  setTextEl('dr-sum-overdue', s.overdue || 0);
+  setTextEl('dr-sum-overdue-amt', formatKes(s.overdue_amount || 0));
+  setTextEl('dr-sum-refunded', s.refunded || 0);
+  setTextEl('dr-sum-refunded-amt', formatKes(s.refunded_amount || 0));
+}
+
+function getDrCountdown(refund) {
+  if (refund.refund_status === 'refunded') return '<span class="text-green-400">REFUNDED</span>';
+  if (refund.refund_status === 'no_refund_due') return '<span class="text-slate-500">N/A</span>';
+  if (!refund.refund_due_date) return '<span class="text-slate-500">—</span>';
+  const due = new Date(refund.refund_due_date);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  const diff = Math.floor((due - today) / (1000 * 60 * 60 * 24));
+  if (diff < 0) return '<span class="text-rose-400 font-bold">' + Math.abs(diff) + 'd overdue</span>';
+  if (diff === 0) return '<span class="text-amber-400 font-bold">Due today</span>';
+  if (diff <= 7) return '<span class="text-amber-400">' + diff + ' days</span>';
+  return '<span class="text-slate-300">' + diff + ' days</span>';
+}
+
+function getDrStatusBadge(status) {
+  const map = {
+    pending: '<span class="status-badge badge-pending"><span class="status-dot"></span>Pending</span>',
+    due_soon: '<span class="status-badge badge-pending"><span class="status-dot"></span>Due Soon</span>',
+    due_today: '<span class="status-badge badge-expired"><span class="status-dot"></span>Due Today</span>',
+    overdue: '<span class="status-badge badge-expired"><span class="status-dot"></span>Overdue</span>',
+    refunded: '<span class="status-badge badge-active"><span class="status-dot"></span>Refunded</span>',
+    partially_refunded: '<span class="status-badge badge-pending"><span class="status-dot"></span>Partial</span>',
+    no_refund_due: '<span class="status-badge badge-vacant"><span class="status-dot"></span>No Refund</span>',
+  };
+  return map[status] || status;
+}
+
+function renderDepositRefundTable(refunds) {
+  const tbody = document.getElementById('dr-tbody');
+  if (!tbody) return;
+  if (!refunds.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-500">' +
+      '<div class="text-lg mb-2">No Deposit Refunds</div>' +
+      '<div class="text-sm">There are currently no deposit refunds requiring action.</div>' +
+      '</td></tr>';
+    return;
+  }
+  tbody.innerHTML = refunds.map(r => {
+    const name = escapeHtml(r.tenant_name || r.tenant_code);
+    const code = escapeHtml(r.tenant_code);
+    const prop = escapeHtml(r.property_name || '—');
+    const unit = escapeHtml(r.unit_label || '—');
+    return '<tr class="hover:bg-slate-800/50">' +
+      '<td><p class="text-white font-semibold text-sm">' + name + '</p><p class="text-xs text-slate-400 font-mono">' + code + '</p></td>' +
+      '<td><p class="text-sm">' + prop + '</p><p class="text-xs text-purple-300 font-mono">' + unit + '</p></td>' +
+      '<td class="font-mono text-sm">' + fmtDate(r.exit_date) + '</td>' +
+      '<td class="text-right font-mono font-bold text-green-400">' + formatKes(r.refundable_amount) + '</td>' +
+      '<td class="font-mono text-sm">' + fmtDate(r.refund_due_date) + '</td>' +
+      '<td class="font-mono text-sm">' + getDrCountdown(r) + '</td>' +
+      '<td>' + getDrStatusBadge(r.refund_status) + '</td>' +
+      '<td class="text-right"><button type="button" data-dr-view="' + r.id + '" class="action-btn">View</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+document.getElementById('dr-tbody')?.addEventListener('click', async (e) => {
+  const viewId = e.target.dataset.drView;
+  if (viewId) openDrDetail(viewId);
+});
+
+document.getElementById('dr-search')?.addEventListener('input', (() => {
+  let t;
+  return () => { clearTimeout(t); t = setTimeout(() => {
+    drCurrentSearch = document.getElementById('dr-search').value;
+    loadDepositRefunds();
+  }, 400); };
+})());
+
+document.getElementById('dr-status-filter')?.addEventListener('change', (e) => {
+  drCurrentFilter = e.target.value;
+  loadDepositRefunds();
+});
+
+document.getElementById('dr-sort')?.addEventListener('change', (e) => {
+  drCurrentSort = e.target.value;
+  loadDepositRefunds();
+});
+
+document.getElementById('btn-dr-clear')?.addEventListener('click', () => {
+  drCurrentFilter = 'all';
+  drCurrentSort = 'status';
+  drCurrentSearch = '';
+  document.getElementById('dr-search').value = '';
+  document.getElementById('dr-status-filter').value = 'all';
+  document.getElementById('dr-sort').value = 'status';
+  loadDepositRefunds();
+});
+
+document.querySelectorAll('[data-dr-filter]').forEach(card => {
+  card.addEventListener('click', () => {
+    drCurrentFilter = card.dataset.drFilter;
+    document.getElementById('dr-status-filter').value = drCurrentFilter;
+    loadDepositRefunds();
+  });
+});
+
+async function openDrDetail(id) {
+  drDetailId = id;
+  const modal = document.getElementById('dr-detail-modal');
+  try {
+    const { refund } = await api.getDepositRefund(id);
+    if (!refund) return;
+
+    document.getElementById('dr-detail-status').innerHTML = getDrStatusBadge(refund.refund_status);
+    setTextEl('dr-detail-tenant', refund.tenant_name || refund.tenant_code);
+    setTextEl('dr-detail-phone', refund.tenant_phone || '—');
+    setTextEl('dr-detail-property', refund.property_name || '—');
+    setTextEl('dr-detail-unit', refund.unit_label || '—');
+    document.getElementById('dr-detail-exit-number').textContent = refund.exit_number || '—';
+    setTextEl('dr-detail-exit-date', fmtDate(refund.exit_date));
+    setTextEl('dr-detail-due-date', fmtDate(refund.refund_due_date));
+
+    const countdownEl = document.getElementById('dr-detail-countdown');
+    countdownEl.innerHTML = getDrCountdown(refund);
+    countdownEl.className = refund.refund_status === 'overdue' ? 'text-rose-400 font-bold' :
+      refund.refund_status === 'due_today' ? 'text-amber-400 font-bold' : 'font-bold';
+
+    setTextEl('dr-detail-deposit-paid', formatKes(refund.deposit_paid));
+    setTextEl('dr-detail-dep-rent', '-' + formatKes(refund.deposit_applied_to_rent));
+    setTextEl('dr-detail-dep-ded', '-' + formatKes(refund.deposit_applied_to_deductions));
+    setTextEl('dr-detail-deductions', formatKes(refund.deductions_total));
+    setTextEl('dr-detail-refundable', formatKes(refund.refundable_amount));
+
+    const linesPanel = document.getElementById('dr-detail-lines-panel');
+    const linesTbody = document.getElementById('dr-detail-lines-tbody');
+    let lines = [];
+    try { lines = typeof refund.ei_lines === 'string' ? JSON.parse(refund.ei_lines) : (refund.ei_lines || []); } catch (_) {}
+    if (lines.length) {
+      linesPanel.classList.remove('hidden');
+      linesTbody.innerHTML = lines.map(l => {
+        const cat = escapeHtml(l.category || l.label || '—');
+        const desc = escapeHtml(l.description || l.label || '—');
+        const amt = formatKes(l.amount);
+        return '<tr><td class="text-sm">' + cat + '</td><td class="text-sm">' + desc + '</td><td class="text-right font-mono text-rose-400">' + amt + '</td></tr>';
+      }).join('');
+    } else {
+      linesPanel.classList.add('hidden');
+    }
+
+    const txPanel = document.getElementById('dr-detail-transaction-panel');
+    if (refund.refund_status === 'refunded' || refund.refund_status === 'partially_refunded') {
+      txPanel.classList.remove('hidden');
+      setTextEl('dr-detail-amount-refunded', formatKes(refund.amount_refunded));
+      setTextEl('dr-detail-remaining', formatKes(refund.remaining_amount));
+      setTextEl('dr-detail-refund-date', refund.refund_date ? fmtDate(refund.refund_date) + (refund.refund_time ? ' ' + refund.refund_time.slice(0, 5) : '') : '—');
+      setTextEl('dr-detail-method', refund.payment_method || '—');
+      setTextEl('dr-detail-ref', refund.transaction_reference || '—');
+      setTextEl('dr-detail-refunded-by', refund.refunded_by || '—');
+      setTextEl('dr-detail-remarks', refund.remarks || '—');
+    } else {
+      txPanel.classList.add('hidden');
+    }
+
+    const canRefund = refund.refund_status !== 'refunded' && refund.refund_status !== 'no_refund_due' && Number(refund.refundable_amount) > 0;
+    document.getElementById('btn-dr-record-refund').style.display = canRefund ? '' : 'none';
+    document.getElementById('btn-dr-view-exit-invoice').style.display = refund.exit_invoice_id ? '' : 'none';
+
+    modal.classList.remove('hidden');
+  } catch (err) {
+    console.error('[DepositRefunds] Detail load failed:', err);
+  }
+}
+
+document.getElementById('btn-dr-detail-close')?.addEventListener('click', () => {
+  document.getElementById('dr-detail-modal').classList.add('hidden');
+});
+
+document.getElementById('dr-detail-modal')?.addEventListener('click', (e) => {
+  if (e.target === document.getElementById('dr-detail-modal')) {
+    document.getElementById('dr-detail-modal').classList.add('hidden');
+  }
+});
+
+document.getElementById('btn-dr-view-exit-invoice')?.addEventListener('click', async () => {
+  if (!drDetailId) return;
+  try {
+    const { refund } = await api.getDepositRefund(drDetailId);
+    if (refund?.exit_invoice_id) {
+      document.getElementById('dr-detail-modal').classList.add('hidden');
+      openExitInvoiceModal(refund.exit_invoice_id);
+    }
+  } catch (err) {
+    console.error('[DepositRefunds] Failed to load exit invoice:', err);
+  }
+});
+
+document.getElementById('btn-dr-record-refund')?.addEventListener('click', async () => {
+  if (!drDetailId) return;
+  try {
+    const { refund } = await api.getDepositRefund(drDetailId);
+    if (!refund) return;
+    const outstanding = Number(refund.refundable_amount || 0) - Number(refund.amount_refunded || 0);
+    document.getElementById('dr-record-id').value = refund.id;
+    setTextEl('dr-record-tenant', refund.tenant_name || refund.tenant_code);
+    setTextEl('dr-record-outstanding', formatKes(outstanding));
+    document.getElementById('dr-record-amount').max = outstanding;
+    document.getElementById('dr-record-amount').value = outstanding;
+    document.getElementById('dr-record-method').value = '';
+    document.getElementById('dr-record-ref').value = '';
+    document.getElementById('dr-record-date').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('dr-record-time').value = new Date().toISOString().slice(11, 16);
+    document.getElementById('dr-record-remarks').value = '';
+    document.getElementById('dr-detail-modal').classList.add('hidden');
+    document.getElementById('dr-record-modal').classList.remove('hidden');
+  } catch (err) {
+    console.error('[DepositRefunds] Record refund load failed:', err);
+  }
+});
+
+document.getElementById('btn-dr-record-cancel')?.addEventListener('click', () => {
+  document.getElementById('dr-record-modal').classList.add('hidden');
+  document.getElementById('dr-detail-modal').classList.remove('hidden');
+});
+
+document.getElementById('dr-record-modal')?.addEventListener('click', (e) => {
+  if (e.target === document.getElementById('dr-record-modal')) {
+    document.getElementById('dr-record-modal').classList.add('hidden');
+  }
+});
+
+document.getElementById('dr-record-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('dr-record-id').value;
+  const amount = document.getElementById('dr-record-amount').value;
+  const method = document.getElementById('dr-record-method').value;
+  const ref = document.getElementById('dr-record-ref').value;
+  const date = document.getElementById('dr-record-date').value;
+  const time = document.getElementById('dr-record-time').value;
+  const remarks = document.getElementById('dr-record-remarks').value;
+
+  if (!amount || Number(amount) <= 0) return alert('Please enter a valid refund amount.');
+  if (!method) return alert('Please select a payment method.');
+  if (method === 'M-Pesa' && !ref.trim()) return alert('M-Pesa transaction reference is required.');
+
+  try {
+    const result = await api.recordDepositRefund(id, {
+      amount: Number(amount),
+      payment_method: method,
+      transaction_reference: ref,
+      refund_date: date,
+      refund_time: time,
+      remarks,
+    });
+    if (result.error) return alert(result.error);
+    document.getElementById('dr-record-modal').classList.add('hidden');
+    loadDepositRefunds();
+    openDrDetail(id);
+  } catch (err) {
+    alert('Failed to record refund: ' + (err.message || err));
+  }
+});
+
+window.openDrDetail = openDrDetail;
