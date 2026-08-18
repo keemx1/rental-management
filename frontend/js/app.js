@@ -1231,17 +1231,18 @@ async function runStatementGeneration(mode) {
 function renderEiLines(lines) {
   const tbody = document.getElementById('ei-lines-tbody');
   if (!tbody) return;
-  const finalized = document.getElementById('ei-id').value
-    && (document.getElementById('ei-status-badge').textContent || '').toUpperCase() === 'FINALIZED';
+  const badge = (document.getElementById('ei-status-badge').textContent || '').toUpperCase();
+  const editing = badge === 'EDITING';
+  const locked = badge === 'FINALIZED' && !editing;
   const rows = (lines || []).map((l, i) => `
     <tr data-ei-line="${i}">
-      <td><select class="qc-input text-sm w-36" data-ei-cat ${finalized ? 'disabled' : ''}>
+      <td><select class="qc-input text-sm w-36" data-ei-cat ${locked ? 'disabled' : ''}>
         ${['maintenance','repair','cleaning','painting','utility','deduction','other'].map(c =>
           `<option value="${c}" ${(l.category || 'other') === c ? 'selected' : ''}>${c[0].toUpperCase() + c.slice(1)}</option>`).join('')}
       </select></td>
-      <td><input type="text" class="qc-input text-sm w-56" data-ei-desc value="${escapeHtml(l.description || '')}" ${finalized ? 'disabled' : ''} /></td>
-      <td><input type="number" min="0" class="qc-input text-sm w-32 text-right" data-ei-amt value="${Number(l.amount || 0)}" ${finalized ? 'disabled' : ''} /></td>
-      <td>${finalized ? '' : '<button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-ei-del>✕</button>'}</td>
+      <td><input type="text" class="qc-input text-sm w-56" data-ei-desc value="${escapeHtml(l.description || '')}" ${locked ? 'disabled' : ''} /></td>
+      <td><input type="number" min="0" class="qc-input text-sm w-32 text-right" data-ei-amt value="${Number(l.amount || 0)}" ${locked ? 'disabled' : ''} /></td>
+      <td>${locked ? '' : '<button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-ei-del>✕</button>'}</td>
     </tr>`).join('');
   tbody.innerHTML = rows || '<tr><td colspan="4" class="text-center py-4 text-slate-500">No deductions yet. Add charges below.</td></tr>';
   tbody.querySelectorAll('[data-ei-amt], [data-ei-desc]').forEach((el) => {
@@ -1319,16 +1320,33 @@ function recalcEiTotals() {
 function renderEiActions(invoice) {
   const draftActions = document.getElementById('ei-actions-draft');
   const finalActions = document.getElementById('ei-actions-final');
+  const editActions = document.getElementById('ei-actions-editing');
   const addLineWrap = document.getElementById('ei-add-line');
   const finalized = invoice && invoice.status === 'Finalized';
+  const editing = finalized && window._eiEditing;
   if (draftActions) draftActions.classList.toggle('hidden', finalized);
-  if (finalActions) finalActions.classList.toggle('hidden', !finalized);
-  if (addLineWrap) addLineWrap.style.display = finalized ? 'none' : '';
+  if (finalActions) finalActions.classList.toggle('hidden', !finalized || editing);
+  if (editActions) editActions.classList.toggle('hidden', !editing);
+  if (addLineWrap) addLineWrap.style.display = (!finalized || editing) ? '' : 'none';
+  // Disable/enable form fields based on editing state
+  const fields = ['ei-move-out-date', 'ei-exit-reason', 'ei-pro-rated-days', 'ei-rent-treatment-reason', 'ei-settlement-reason'];
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = finalized && !editing;
+  });
+  document.querySelectorAll('input[name="ei-rent-treatment"], input[name="ei-deposit-treatment"]').forEach(r => {
+    r.disabled = finalized && !editing;
+  });
   setTextEl('ei-number', invoice ? (invoice.exit_number || '—') : 'New Invoice');
   const badge = document.getElementById('ei-status-badge');
   if (badge) {
-    badge.textContent = finalized ? 'FINALIZED' : 'DRAFT';
-    badge.className = 'sys-tag text-[10px] ' + (finalized ? 'text-emerald-300' : 'text-amber-300');
+    if (editing) {
+      badge.textContent = 'EDITING';
+      badge.className = 'sys-tag text-[10px] text-amber-300';
+    } else {
+      badge.textContent = finalized ? 'FINALIZED' : 'DRAFT';
+      badge.className = 'sys-tag text-[10px] ' + (finalized ? 'text-emerald-300' : 'text-amber-300');
+    }
   }
 }
 
@@ -1362,6 +1380,8 @@ function setEiStatusMsg(msg) {
 }
 
 async function openExitInvoiceModal(tenantCode) {
+  window._eiEditing = false;
+  _lastEiInvoice = null;
   const modal = document.getElementById('exit-invoice-modal');
   if (modal) modal.classList.remove('hidden');
 
@@ -1396,6 +1416,7 @@ async function openExitInvoiceModal(tenantCode) {
   setTextEl('ei-tenant-unit', summary ? `${summary.tenant.unit_label || tenantCode} — ${summary.tenant.property_name || ''}` : tenantCode);
 
   if (existing) {
+    _lastEiInvoice = existing;
     document.getElementById('ei-id').value = existing.id;
     document.getElementById('ei-move-out-date').value = existing.move_out_date || '';
     document.getElementById('ei-exit-reason').value = existing.reason || '';
@@ -1492,6 +1513,7 @@ async function saveEiDraft() {
   }
   document.getElementById('ei-id').value = invoice.id;
   setTextEl('ei-number', invoice.exit_number);
+  _lastEiInvoice = invoice;
   renderEiActions(invoice);
   setEiStatusMsg('Draft saved. Finalize when all deductions are captured.');
   recalcEiTotals();
@@ -1511,6 +1533,7 @@ async function finalizeEi() {
       reason: document.getElementById('ei-exit-reason').value.trim() || null,
     });
     const fin = res.exit_invoice;
+    _lastEiInvoice = fin;
     document.getElementById('ei-id').value = fin.id;
     renderEiLines(fin.lines);
     renderEiActions(fin);
@@ -1579,6 +1602,109 @@ async function markVacantFromEi() {
     setEiStatusMsg('Error: ' + (err.message || err));
   }
 }
+
+// ---- Exit Invoice: Edit / Save / Delete (Finalized) ------------------------
+
+function startEditFinalizedEi() {
+  window._eiEditing = true;
+  const invoice = _lastEiInvoice;
+  if (!invoice) return;
+  renderEiActions(invoice);
+  renderEiLines(invoice.lines);
+  recalcEiTotals();
+  setEiStatusMsg('Editing finalized invoice. Make changes and click Save.');
+}
+
+function cancelEditEi() {
+  window._eiEditing = false;
+  const invoice = _lastEiInvoice;
+  if (!invoice) return;
+  renderEiActions(invoice);
+  renderEiLines(invoice.lines);
+  recalcEiTotals();
+  setEiStatusMsg('');
+}
+
+async function saveFinalizedEi() {
+  const id = document.getElementById('ei-id').value;
+  if (!id) return setEiStatusMsg('No exit invoice to save.');
+  const lines = collectEiLines();
+  const depositPaid = Number(document.getElementById('ei-deposit-paid')?.textContent.replace(/[^0-9]/g, '') || 0);
+  const rentAmount = Number(document.getElementById('ei-rent')?.textContent.replace(/[^0-9]/g, '') || 0);
+  const rentTreatment = document.querySelector('input[name="ei-rent-treatment"]:checked')?.value || 'full_month';
+  const depositTreatment = document.querySelector('input[name="ei-deposit-treatment"]:checked')?.value || 'apply_to_deductions';
+  const proRatedDays = rentTreatment === 'pro_rated' ? Number(document.getElementById('ei-pro-rated-days')?.value || 0) : null;
+  const rentTreatmentReason = document.getElementById('ei-rent-treatment-reason')?.value.trim() || null;
+  const settlementReason = document.getElementById('ei-settlement-reason')?.value.trim() || null;
+  let rentCharged = rentAmount;
+  if (rentTreatment === 'pro_rated' && proRatedDays) {
+    rentCharged = Math.round((rentAmount / 30) * proRatedDays);
+  } else if (rentTreatment === 'waived') {
+    rentCharged = 0;
+  }
+  let depToRent = 0, depToDed = 0;
+  if (depositTreatment === 'apply_to_rent') {
+    depToRent = Math.min(depositPaid, rentCharged);
+  } else if (depositTreatment === 'apply_to_deductions') {
+    depToDed = Math.min(depositPaid, lines.reduce((s, l) => s + Number(l.amount || 0), 0));
+  } else if (depositTreatment === 'apply_to_both') {
+    depToRent = Math.min(depositPaid, rentCharged);
+    depToDed = Math.min(depositPaid - depToRent, lines.reduce((s, l) => s + Number(l.amount || 0), 0));
+  }
+  const body = {
+    lines,
+    move_out_date: document.getElementById('ei-move-out-date').value || null,
+    reason: document.getElementById('ei-exit-reason').value.trim() || null,
+    rent_treatment: rentTreatment,
+    rent_charged_amount: rentCharged,
+    pro_rated_days: proRatedDays,
+    rent_treatment_reason: rentTreatmentReason,
+    deposit_treatment: depositTreatment,
+    deposit_applied_to_rent: depToRent,
+    deposit_applied_to_deductions: depToDed,
+    settlement_decision_reason: settlementReason,
+  };
+  try {
+    setEiStatusMsg('Saving changes…');
+    const res = await api.updateExitInvoice(id, body);
+    const updated = res.exit_invoice;
+    _lastEiInvoice = updated;
+    window._eiEditing = false;
+    document.getElementById('ei-id').value = updated.id;
+    setTextEl('ei-number', updated.exit_number);
+    renderEiActions(updated);
+    renderEiLines(updated.lines);
+    recalcEiTotals();
+    setEiStatusMsg('Changes saved successfully.');
+    loadEiDepositRefundInfo(updated.id);
+  } catch (err) {
+    setEiStatusMsg('Error saving: ' + (err.message || err));
+  }
+}
+
+async function deleteExitInvoice() {
+  const id = document.getElementById('ei-id').value;
+  const tenantCode = document.getElementById('ei-tenant-code').value;
+  if (!id) return;
+  if (!confirm('Are you sure you want to delete this Exit Invoice? This will also cancel the associated deposit refund process.')) return;
+  try {
+    setEiStatusMsg('Deleting exit invoice…');
+    await api.deleteExitInvoice(id);
+    document.getElementById('exit-invoice-modal').classList.add('hidden');
+    window._eiEditing = false;
+    _lastEiInvoice = null;
+    alert('Exit Invoice deleted. The associated deposit refund process has been cancelled.');
+    if (currentView === 'tenant-dashboard') {
+      loadTenantDashboard(tenantCode);
+    }
+    loadTenants();
+    if (currentView === 'dashboard') loadDashboard();
+  } catch (err) {
+    setEiStatusMsg('Error deleting: ' + (err.message || err));
+  }
+}
+
+var _lastEiInvoice = null;
 
 // ---- Tenancy Archive view ---------------------------------------------------
 
@@ -6010,6 +6136,15 @@ document.getElementById('btn-ei-cancel')?.addEventListener('click', () => {
 document.getElementById('btn-ei-close-final')?.addEventListener('click', () => {
   document.getElementById('exit-invoice-modal').classList.add('hidden');
 });
+document.getElementById('btn-ei-edit')?.addEventListener('click', startEditFinalizedEi);
+document.getElementById('btn-ei-save-finalized')?.addEventListener('click', async () => {
+  const btn = document.getElementById('btn-ei-save-finalized');
+  btn.disabled = true;
+  try { await saveFinalizedEi(); } catch (err) { setEiStatusMsg('Error: ' + (err.message || err)); }
+  finally { btn.disabled = false; }
+});
+document.getElementById('btn-ei-cancel-edit')?.addEventListener('click', cancelEditEi);
+document.getElementById('btn-ei-delete')?.addEventListener('click', deleteExitInvoice);
 document.getElementById('ei-move-out-date')?.addEventListener('change', () => {});
 document.getElementById('ei-exit-reason')?.addEventListener('input', () => {});
 

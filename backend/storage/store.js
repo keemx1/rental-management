@@ -4050,9 +4050,6 @@ async function listExitInvoices(tenantCode = null) {
 async function updateExitInvoice(id, patch = {}) {
   const existing = await getExitInvoice(id);
   if (!existing) return null;
-  if (existing.status !== 'Draft') {
-    return { error: 'Exit invoice is finalized and can no longer be edited' };
-  }
   const tenant = await getTenant(existing.tenant_code);
   const summary = tenant ? await getTenantExitSummary(existing.tenant_code) : null;
   const lines = Array.isArray(patch.lines) ? patch.lines : existing.lines;
@@ -4104,7 +4101,42 @@ async function updateExitInvoice(id, patch = {}) {
       patch.settlement_decision_reason || null,
     ]
   );
-  return getExitInvoice(id);
+  const updated = await getExitInvoice(id);
+  // If finalized, re-sync the deposit refund record
+  if (updated && updated.status === 'Finalized') {
+    const refundable = Number(updated.deposit_refund || 0);
+    const exitDate = updated.move_out_date || null;
+    let refundDueDate = null;
+    if (exitDate) {
+      const d = new Date(exitDate);
+      d.setDate(d.getDate() + 30);
+      refundDueDate = d.toISOString().slice(0, 10);
+    }
+    const refundStatus = refundable > 0 ? 'pending' : 'no_refund_due';
+    await query(
+      `INSERT INTO deposit_refunds
+        (tenant_code, exit_invoice_id, archive_id, deposit_amount, deposit_paid, deductions_total,
+         deposit_applied_to_rent, deposit_applied_to_deductions, refundable_amount, remaining_amount,
+         exit_date, refund_due_date, refund_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (exit_invoice_id) DO UPDATE SET
+         deposit_amount = EXCLUDED.deposit_amount, deposit_paid = EXCLUDED.deposit_paid,
+         deductions_total = EXCLUDED.deductions_total,
+         deposit_applied_to_rent = EXCLUDED.deposit_applied_to_rent,
+         deposit_applied_to_deductions = EXCLUDED.deposit_applied_to_deductions,
+         refundable_amount = EXCLUDED.refundable_amount, remaining_amount = EXCLUDED.refundable_amount,
+         exit_date = EXCLUDED.exit_date, refund_due_date = EXCLUDED.refund_due_date,
+         refund_status = EXCLUDED.refund_status`,
+      [
+        updated.tenant_code, updated.id, updated.archive_id || null,
+        Number(updated.deposit_amount || 0), Number(updated.deposit_paid || 0),
+        Number(updated.deductions_total || 0),
+        Number(updated.deposit_applied_to_rent || 0), Number(updated.deposit_applied_to_deductions || 0),
+        refundable, refundable, exitDate, refundDueDate, refundStatus,
+      ]
+    );
+  }
+  return updated;
 }
 
 async function finalizeExitInvoice(id, patch = {}, actor = null) {
@@ -4139,7 +4171,14 @@ async function finalizeExitInvoice(id, patch = {}, actor = null) {
          deposit_applied_to_rent, deposit_applied_to_deductions, refundable_amount, remaining_amount,
          exit_date, refund_due_date, refund_status, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       ON CONFLICT (exit_invoice_id) DO NOTHING`,
+       ON CONFLICT (exit_invoice_id) DO UPDATE SET
+         deposit_amount = EXCLUDED.deposit_amount, deposit_paid = EXCLUDED.deposit_paid,
+         deductions_total = EXCLUDED.deductions_total,
+         deposit_applied_to_rent = EXCLUDED.deposit_applied_to_rent,
+         deposit_applied_to_deductions = EXCLUDED.deposit_applied_to_deductions,
+         refundable_amount = EXCLUDED.refundable_amount, remaining_amount = EXCLUDED.refundable_amount,
+         exit_date = EXCLUDED.exit_date, refund_due_date = EXCLUDED.refund_due_date,
+         refund_status = EXCLUDED.refund_status`,
       [
         updated.tenant_code, id, updated.archive_id || null,
         Number(updated.deposit_amount || 0), Number(updated.deposit_paid || 0),
@@ -4156,7 +4195,7 @@ async function finalizeExitInvoice(id, patch = {}, actor = null) {
 async function deleteExitInvoice(id) {
   const existing = await getExitInvoice(id);
   if (!existing) return false;
-  if (existing.status !== 'Draft') return false;
+  await query('DELETE FROM deposit_refunds WHERE exit_invoice_id = $1', [id]);
   await query('DELETE FROM exit_invoices WHERE id = $1', [id]);
   return true;
 }

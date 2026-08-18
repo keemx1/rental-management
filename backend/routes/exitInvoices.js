@@ -28,15 +28,17 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { tenant_code, lines, move_out_date, reason, outstanding_balance } = req.body || {};
+    const { tenant_code, lines, move_out_date, reason, outstanding_balance,
+      rent_treatment, rent_charged_amount, pro_rated_days, rent_treatment_reason,
+      deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason } = req.body || {};
     if (!tenant_code) {
       return res.status(400).json({ error: 'tenant_code required' });
     }
     const invoice = await store.createExitInvoice(tenant_code, {
       lines: Array.isArray(lines) ? lines : [],
-      move_out_date,
-      reason,
-      outstanding_balance,
+      move_out_date, reason, outstanding_balance,
+      rent_treatment, rent_charged_amount, pro_rated_days, rent_treatment_reason,
+      deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason,
     });
     if (!invoice) return res.status(404).json({ error: 'Tenant not found' });
     await store.logAudit({
@@ -54,13 +56,16 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const { lines, move_out_date, reason, outstanding_balance } = req.body || {};
-    const invoice = await store.updateExitInvoice(req.params.id, {
+    const { lines, move_out_date, reason, outstanding_balance,
+      rent_treatment, rent_charged_amount, pro_rated_days, rent_treatment_reason,
+      deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason } = req.body || {};
+    const patch = {
       lines: lines !== undefined ? lines : undefined,
-      move_out_date,
-      reason,
-      outstanding_balance,
-    });
+      move_out_date, reason, outstanding_balance,
+      rent_treatment, rent_charged_amount, pro_rated_days, rent_treatment_reason,
+      deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason,
+    };
+    const invoice = await store.updateExitInvoice(req.params.id, patch);
     if (!invoice) return res.status(404).json({ error: 'Exit invoice not found' });
     if (invoice.error) return res.status(400).json({ error: invoice.error });
     res.json({ exit_invoice: invoice });
@@ -91,7 +96,7 @@ router.post('/:id/finalize', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const ok = await store.deleteExitInvoice(req.params.id);
-    if (!ok) return res.status(404).json({ error: 'Exit invoice not found or already finalized' });
+    if (!ok) return res.status(404).json({ error: 'Exit invoice not found' });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete exit invoice' });

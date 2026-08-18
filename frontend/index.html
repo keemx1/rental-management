@@ -3522,6 +3522,10 @@
       </div>
       <div id="ei-actions-final" class="hidden flex flex-col gap-2">
         <div class="flex flex-wrap gap-2">
+          <button type="button" id="btn-ei-edit" class="qc-btn flex-1">✏️ Edit Invoice</button>
+          <button type="button" id="btn-ei-delete" class="qc-btn qc-btn-danger flex-1">🗑️ Delete Invoice</button>
+        </div>
+        <div class="flex flex-wrap gap-2">
           <button type="button" id="btn-ei-download" class="qc-btn flex-1">⬇ Download PDF</button>
           <button type="button" id="btn-ei-send" class="qc-btn qc-btn-primary flex-1">📲 Send via WhatsApp</button>
           <button type="button" id="btn-ei-both" class="qc-btn qc-btn-secondary flex-1">Both</button>
@@ -3535,6 +3539,12 @@
           </div>
         </div>
         <button type="button" id="btn-ei-close-final" class="qc-btn flex-1">Close</button>
+      </div>
+      <div id="ei-actions-editing" class="hidden flex flex-col gap-2">
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="btn-ei-save-finalized" class="qc-btn qc-btn-primary flex-1">💾 Save Changes</button>
+          <button type="button" id="btn-ei-cancel-edit" class="qc-btn flex-1">Cancel</button>
+        </div>
       </div>
     </div>
   </div>
