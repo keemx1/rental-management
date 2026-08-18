@@ -449,6 +449,9 @@ export const api = {
   deleteSalaryRecord(id) {
     return request(`/salary/${id}`, { method: 'DELETE' });
   },
+  getSalaryRecord(id) {
+    return request(`/salary/${id}`);
+  },
   recordSalaryPayment(recordId, payment) {
     return request(`/salary/${recordId}/payments`, { method: 'POST', body: JSON.stringify(payment) });
   },
@@ -484,7 +487,7 @@ export const api = {
     return request('/management-expenses-report' + (qs ? '?' + qs : ''));
   },
   downloadManagementExpensesReport(params = {}) {
-    return blobRequest('/management-expenses-report/pdf', { method: 'POST', body: JSON.stringify(params) });
+    return blobRequest('/management-expenses-report/pdf', params);
   },
   getPropertyExpenseReport(property, month) {
     const params = new URLSearchParams({ property });

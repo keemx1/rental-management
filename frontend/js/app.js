@@ -49,6 +49,8 @@ function showView(name) {
   });
   // Desktop sidebar: hide on login
   document.getElementById('sidebar')?.classList.toggle('hidden', name === 'login');
+  // Login mode: collapse grid so login centers on full width
+  document.querySelector('.app-shell')?.classList.toggle('login-mode', name === 'login');
   // Mobile header: hide on login
   document.getElementById('main-nav')?.classList.toggle('hidden', name === 'login');
   // Mobile drawer: also hide on login
@@ -63,6 +65,7 @@ function showView(name) {
   if (name === 'tenants') loadTenants();
   if (name === 'payments') loadPayments();
   if (name === 'broadcasts') loadBroadcastCenter();
+  if (name === 'whatsapp') refreshWhatsappBeacon();
   if (name === 'invoices') loadInvoicesCenter();
   if (name === 'work-orders') loadWorkOrders();
   if (name === 'documents') loadDocuments();
@@ -998,8 +1001,6 @@ async function loadDashboard() {
     document.getElementById('metric-pending').textContent = r.pending_count ?? 0;
     document.getElementById('metric-revenue').textContent = `KES ${Number(r.revenue_mtd || 0).toLocaleString()}`;
     document.getElementById('metric-arrears').textContent = `KES ${Number(r.total_arrears || 0).toLocaleString()}`;
-    const el = document.getElementById('wa-beacon-slot');
-    if (el && data.whatsapp) el.innerHTML = renderWhatsappPanel(data.whatsapp);
   } catch (err) {
     console.error(err);
   }
@@ -1361,10 +1362,7 @@ function setEiStatusMsg(msg) {
 }
 
 async function openExitInvoiceModal(tenantCode) {
-  // Works with both the Invoice Center panel and the standalone modal
-  const content = document.getElementById('exit-invoice-content');
   const modal = document.getElementById('exit-invoice-modal');
-  if (content) content.classList.remove('hidden');
   if (modal) modal.classList.remove('hidden');
 
   document.getElementById('ei-id').value = '';
@@ -1588,7 +1586,7 @@ async function refreshHouseSelects(selectId) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
   try {
-    const { houses } = await api.listHouses();
+    const { houses } = await api.houses();
     sel.innerHTML = '<option value="">All Properties</option>' + houses.map(h =>
       `<option value="${escapeHtml(h.paybill_number || h.id || '')}">${escapeHtml(h.house_name)}</option>`).join('');
   } catch (_) { /* keep empty */ }
@@ -2352,7 +2350,9 @@ function startPolls() {
   metricsPoll = setInterval(() => {
     if (currentView === 'dashboard') loadDashboard();
   }, 30000);
-  waPoll = setInterval(refreshWhatsappBeacon, 4000);
+  waPoll = setInterval(() => {
+    if (currentView === 'whatsapp') refreshWhatsappBeacon();
+  }, 4000);
 }
 
 function stopPolls() {
@@ -3636,11 +3636,17 @@ window.runStaffAdvanceRollover = runStaffAdvanceRollover;
 window.runEmployeeRentRollover = runEmployeeRentRollover;
 
 async function downloadStaffAdvancePdf(id) {
-  try { await api.downloadStaffAdvanceInvoice(id); } catch (e) { alert('Error: ' + e.message); }
+  try {
+    const result = await api.downloadStaffAdvanceInvoice(id);
+    triggerFileDownload(result, null, 'Staff advance invoice downloaded');
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function downloadEmployeeRentPdf(id) {
-  try { await api.downloadEmployeeRentInvoice(id); } catch (e) { alert('Error: ' + e.message); }
+  try {
+    const result = await api.downloadEmployeeRentInvoice(id);
+    triggerFileDownload(result, null, 'Employee rent invoice downloaded');
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 window.downloadStaffAdvancePdf = downloadStaffAdvancePdf;
@@ -4120,6 +4126,7 @@ function removeExitDeduction(id) {
     calculateExitSettlement();
   }
 }
+window.removeExitDeduction = removeExitDeduction;
 
 function calculateExitSettlement() {
   const depositPaid = Number(document.getElementById('exit-deposit-paid')?.value) || 0;
@@ -4590,7 +4597,7 @@ async function showWoExpenseModal() {
     const { houses } = await api.houses();
     if (houseFilter && houses.length) {
       houseFilter.innerHTML = '<option value="">All Properties</option>' +
-        houses.map(h => `<option value="${escapeHtml(h.paybill_number)}">${escapeHtml(h.name)}</option>`).join('');
+        houses.map(h => `<option value="${escapeHtml(h.paybill_number)}">${escapeHtml(h.house_name)}</option>`).join('');
     }
   } catch (_) { /* ignore */ }
 
@@ -4653,6 +4660,35 @@ function filterWoExpenses() {
   api.listEligibleManagementExpenses(house || null).then(({ expenses }) => {
     renderWoExpenseList(expenses);
   }).catch(() => {});
+}
+
+async function runMntGenerate(id, mode, phone_number) {
+  const resEl = document.getElementById('mnt-list-result');
+  try {
+    if (mode === 'download') {
+      const result = await api.downloadMaintenanceInvoice(id);
+      triggerFileDownload(result, resEl, `Downloaded ${result.filename}`);
+    } else {
+      const phone = phone_number || prompt('Send via WhatsApp to phone number:');
+      if (!phone) return;
+      if (mode === 'both') {
+        const result = await api.sendAndDownloadMaintenanceInvoice(id, phone);
+        triggerFileDownload(result, resEl, `Sent via WhatsApp & downloaded ${result.filename}`);
+      } else {
+        const result = await api.generateMaintenanceInvoice(id, 'send', phone);
+        if (resEl) {
+          resEl.textContent = `Invoice sent successfully!`;
+          resEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+        }
+        loadMaintenanceInvoices();
+      }
+    }
+  } catch (err) {
+    if (resEl) {
+      resEl.textContent = 'Error: ' + err.message;
+      resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    }
+  }
 }
 
 window.editMaintenanceInvoice = editMaintenanceInvoice;
@@ -5162,11 +5198,11 @@ async function shareMgmtExpensesReport() {
   if (!params.month && !params.date_from) { alert('Generate a report first, then share.'); return; }
   try {
     const result = await api.downloadManagementExpensesReport(params);
-    if (result && result.filename) {
-      const blob = new Blob([result], { type: 'application/pdf' });
+    if (result && result.blob) {
+      const blob = result.blob;
       const url = URL.createObjectURL(blob);
       if (navigator.share) {
-        const file = new File([blob], result.filename, { type: 'application/pdf' });
+        const file = new File([blob], result.filename || 'report.pdf', { type: 'application/pdf' });
         navigator.share({ files: [file], title: 'Management Expenses Report' }).catch(() => {});
       } else {
         window.open(url, '_blank');
@@ -5845,6 +5881,7 @@ document.getElementById('btn-cancel-mnt-form')?.addEventListener('click', () => 
   document.getElementById('maintenance-invoice-form-wrap').classList.add('hidden');
 });
 document.getElementById('maintenance-invoice-form')?.addEventListener('submit', saveMaintenanceInvoice);
+document.getElementById('btn-add-invoice-item')?.addEventListener('click', addInvoiceItem);
 document.getElementById('mnt-category')?.addEventListener('change', (e) => {
   renderMntDynamicFields(e.target.value);
 });
@@ -7124,7 +7161,7 @@ document.getElementById('btn-dr-view-exit-invoice')?.addEventListener('click', a
     const { refund } = await api.getDepositRefund(drDetailId);
     if (refund?.exit_invoice_id) {
       document.getElementById('dr-detail-modal').classList.add('hidden');
-      openExitInvoiceModal(refund.exit_invoice_id);
+      openExitInvoiceModal(refund.tenant_code);
     }
   } catch (err) {
     console.error('[DepositRefunds] Failed to load exit invoice:', err);

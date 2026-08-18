@@ -1577,14 +1577,21 @@ async function allocateCreditBalance(tenantCode, excessAmount) {
   if (!tenant) return null;
   const newCredit = Number(tenant.credit_balance || 0) + excessAmount;
 
-  // Credit balance is untouched: it does NOT reduce the current month's rent
-  // and is NOT applied automatically during monthly rollover. It remains until
-  // management applies it on the tenant's instruction.
-  await updateTenant(tenantCode, {
-    credit_balance: newCredit,
-  });
+  // Undo the auto-applied advance rent that was set during approvePayment.
+  // The overpayment was already added to advance_rent_balance; subtract it back.
+  const currentAdvance = Number(tenant.advance_rent_balance || 0);
+  const newAdvance = Math.max(0, currentAdvance - excessAmount);
+  const updates = { credit_balance: newCredit };
+  if (newAdvance <= 0) {
+    updates.advance_rent_balance = 0;
+    updates.advance_rent_until = null;
+  } else {
+    updates.advance_rent_balance = newAdvance;
+  }
 
-  return { creditBalance: newCredit };
+  await updateTenant(tenantCode, updates);
+
+  return { creditBalance: newCredit, advanceRentBalance: newAdvance };
 }
 
 async function getReceiptMode() {
@@ -3189,7 +3196,9 @@ async function getRentInvoiceData(tenantCode, billingPeriod) {
   const creditBalance = Number(tenant.credit_balance || 0);
   const advanceRent = Number(tenant.advance_rent_balance || 0);
   const appliedCredits = creditBalance + advanceRent;
-  const closingBalance = Math.max(0, totalDue - paymentsReceived - appliedCredits);
+  const rawBalance = totalDue - paymentsReceived - appliedCredits;
+  const closingBalance = Math.max(0, rawBalance);
+  const overpayment = Math.max(0, -rawBalance);
 
   return {
     tenant: {
@@ -3216,6 +3225,7 @@ async function getRentInvoiceData(tenantCode, billingPeriod) {
     payments_received: paymentsReceived,
     credit_balance: creditBalance,
     advance_rent: advanceRent,
+    overpayment,
     closing_balance: closingBalance,
     payments,
     pending_items: pending,

@@ -660,6 +660,18 @@ div[id$="modal"] label {
   padding: 2rem 1rem;
 }
 
+@media (min-width: 1024px) {
+  .app-shell.login-mode {
+    grid-template-columns: 1fr;
+  }
+  .app-shell.login-mode #sidebar {
+    display: none !important;
+  }
+  .login-wrap {
+    grid-column: 1 / -1;
+  }
+}
+
 .login-logo {
   width: 220px;
   max-width: 70vw;

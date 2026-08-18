@@ -387,6 +387,9 @@ function buildRentInvoiceHtml(data, invoiceNo, dateISO) {
     total_due: KES(data.total_due).replace('KES ', ''),
     payments_received: KES(data.payments_received).replace('KES ', ''),
     applied_credits: KES(data.credit_balance + data.advance_rent).replace('KES ', ''),
+    overpayment_row: (data.overpayment || 0) > 0
+      ? `<tr><td>OVERPAYMENT / CREDIT</td><td style="color: #166534; font-weight: bold;">KES ${KES(data.overpayment).replace('KES ', '')}</td></tr>`
+      : '',
     closing_balance: KES(data.closing_balance).replace('KES ', ''),
     payments_section: paymentsSection,
     pending_section: pendingSection,

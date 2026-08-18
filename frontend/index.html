@@ -100,6 +100,10 @@
             <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <span class="sidebar-label">Broadcasts</span>
           </a>
+          <a href="#" data-nav="whatsapp" class="sidebar-link" title="WhatsApp">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            <span class="sidebar-label">WhatsApp</span>
+          </a>
 
           <!-- OPERATIONS -->
           <div class="sidebar-section-label">Operations</div>
@@ -208,6 +212,7 @@
         <a href="#" data-nav="tenants" class="nav-link block py-3 px-4 rounded">Tenants</a>
         <a href="#" data-nav="payments" class="nav-link block py-3 px-4 rounded">Payments</a>
         <a href="#" data-nav="broadcasts" class="nav-link block py-3 px-4 rounded">Broadcasts</a>
+        <a href="#" data-nav="whatsapp" class="nav-link block py-3 px-4 rounded">WhatsApp</a>
         <a href="#" data-nav="invoices" class="nav-link block py-3 px-4 rounded">Invoices</a>
         <a href="#" data-nav="work-orders" class="nav-link block py-3 px-4 rounded">Work Orders</a>
         <a href="#" data-nav="reports" class="nav-link block py-3 px-4 rounded">Reports</a>
@@ -315,12 +320,18 @@
           </button>
         </div>
 
-        <div class="wa-gateway-section">
-          <p class="section-num mb-3">WHATSAPP GATEWAY</p>
-          <div id="wa-beacon-slot">
-            <div class="whatsapp-module glass-panel p-5">
-              <p class="text-slate-500 font-mono text-sm text-center py-4">Loading WhatsApp…</p>
-            </div>
+      </section>
+
+      <!-- WHATSAPP GATEWAY -->
+      <section data-view="whatsapp" class="hidden space-y-6">
+        <header class="section-head">
+          <p class="section-num">COMMUNICATIONS</p>
+          <h2 class="section-title text-2xl">WhatsApp Gateway</h2>
+          <p class="section-desc">Connection status and configuration for Meta Cloud API</p>
+        </header>
+        <div id="wa-beacon-slot">
+          <div class="whatsapp-module glass-panel p-5">
+            <p class="text-slate-500 font-mono text-sm text-center py-4">Loading WhatsApp…</p>
           </div>
         </div>
       </section>
@@ -1126,214 +1137,6 @@
                 <label class="form-label">Invoice Date</label>
                 <input type="date" id="exit-date" class="cyber-input" />
               </div>
-            </div>
-
-            <!-- Exit Invoice Content (full-featured, replaces old modal) -->
-            <div id="exit-invoice-content" class="hidden">
-              <input type="hidden" id="ei-id" />
-              <input type="hidden" id="ei-tenant-code" />
-              <div id="ei-status-msg" class="hidden text-sm font-mono text-amber-400 mb-3"></div>
-
-              <!-- Tenant info cards -->
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                <div class="bg-slate-900 border border-slate-700 rounded p-3">
-                  <p class="text-xs text-slate-500 font-mono">Tenant</p>
-                  <p id="ei-tenant-name" class="font-mono text-white font-bold text-sm">—</p>
-                </div>
-                <div class="bg-slate-900 border border-slate-700 rounded p-3">
-                  <p class="text-xs text-slate-500 font-mono">Unit / Property</p>
-                  <p id="ei-tenant-unit" class="font-mono text-white font-bold text-sm">—</p>
-                </div>
-                <div class="bg-slate-900 border border-slate-700 rounded p-3">
-                  <p class="text-xs text-slate-500 font-mono">Deposit Paid</p>
-                  <p id="ei-deposit-paid" class="font-mono text-cyan-400 font-bold text-lg">KES 0</p>
-                </div>
-                <div class="bg-slate-900 border border-slate-700 rounded p-3">
-                  <p class="text-xs text-slate-500 font-mono">Monthly Rent</p>
-                  <p id="ei-rent" class="font-mono text-green-400 font-bold text-lg">KES 0</p>
-                </div>
-              </div>
-
-              <!-- Status badge + invoice number -->
-              <div class="flex items-center gap-3 mb-4">
-                <span id="ei-status-badge" class="sys-tag text-[10px]"></span>
-                <span id="ei-number" class="font-mono text-purple-300 text-sm">—</span>
-              </div>
-
-              <!-- Move-out Date + Exit Reason -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label class="form-label">Move-out Date</label>
-                  <input type="date" id="ei-move-out-date" class="cyber-input" />
-                </div>
-                <div>
-                  <label class="form-label">Exit Reason</label>
-                  <input type="text" id="ei-exit-reason" class="cyber-input" placeholder="e.g. Relocation / Eviction / End of contract" />
-                </div>
-              </div>
-
-              <!-- Deductions / Charges on Exit -->
-              <div class="glass-panel overflow-hidden mb-4">
-                <div class="p-4 border-b border-slate-700 flex flex-wrap items-center justify-between gap-2">
-                  <span class="sys-tag">[DEDUCTIONS]</span>
-                  <h4 class="font-orbitron text-white">Deductions / Charges on Exit</h4>
-                </div>
-                <table class="data-grid w-full min-w-[500px]">
-                  <thead>
-                    <tr>
-                      <th>Category</th>
-                      <th>Description</th>
-                      <th class="text-right">Amount</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="ei-lines-tbody"></tbody>
-                </table>
-                <div id="ei-add-line" class="p-4 border-t border-slate-700 flex flex-wrap gap-2">
-                  <select id="ei-line-category" class="qc-input text-sm w-36">
-                    <option value="maintenance">Maintenance</option>
-                    <option value="repair">Repair</option>
-                    <option value="cleaning">Cleaning</option>
-                    <option value="painting">Painting</option>
-                    <option value="utility">Utility / Water</option>
-                    <option value="deduction">Final Deduction</option>
-                    <option value="other">Other</option>
-                  </select>
-                  <input type="text" id="ei-line-desc" placeholder="Description" class="qc-input text-sm w-56" />
-                  <input type="number" id="ei-line-amount" placeholder="Amount" class="qc-input text-sm w-32" min="0" />
-                  <button type="button" id="btn-ei-add-line" class="qc-btn qc-btn-primary text-sm">+ Add</button>
-                </div>
-              </div>
-
-              <!-- Management Decision: Rent Treatment -->
-              <div class="glass-panel p-4 mb-4">
-                <span class="sys-tag">[SETTLEMENT_DECISION]</span>
-                <h4 class="font-orbitron text-white mt-1 mb-3">Rent Treatment</h4>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-                  <label class="flex items-center gap-2 p-3 bg-slate-900 border border-slate-700 rounded cursor-pointer hover:border-cyan-600 transition-colors">
-                    <input type="radio" name="ei-rent-treatment" value="full_month" class="accent-cyan-500" checked />
-                    <div>
-                      <p class="text-sm text-white font-semibold">Full Month Rent</p>
-                      <p class="text-xs text-slate-500">Charge the full monthly rent</p>
-                    </div>
-                  </label>
-                  <label class="flex items-center gap-2 p-3 bg-slate-900 border border-slate-700 rounded cursor-pointer hover:border-cyan-600 transition-colors">
-                    <input type="radio" name="ei-rent-treatment" value="pro_rated" class="accent-cyan-500" />
-                    <div>
-                      <p class="text-sm text-white font-semibold">Pro-rated / Overstayed Days</p>
-                      <p class="text-xs text-slate-500">Charge only for days stayed</p>
-                    </div>
-                  </label>
-                  <label class="flex items-center gap-2 p-3 bg-slate-900 border border-slate-700 rounded cursor-pointer hover:border-cyan-600 transition-colors">
-                    <input type="radio" name="ei-rent-treatment" value="waived" class="accent-cyan-500" />
-                    <div>
-                      <p class="text-sm text-white font-semibold">Waive Monthly Rent</p>
-                      <p class="text-xs text-slate-500">Do not charge rent for this period</p>
-                    </div>
-                  </label>
-                </div>
-                <div id="ei-pro-rated-row" class="hidden grid grid-cols-2 gap-3 mb-3">
-                  <div>
-                    <label class="form-label text-xs">Overstayed Days</label>
-                    <input type="number" id="ei-pro-rated-days" class="cyber-input" min="1" max="31" value="1" />
-                  </div>
-                  <div>
-                    <label class="form-label text-xs">Pro-rated Amount (KES)</label>
-                    <input type="number" id="ei-pro-rated-amount" class="cyber-input" min="0" readonly />
-                  </div>
-                </div>
-                <div>
-                  <label class="form-label text-xs">Reason / Notes (optional)</label>
-                  <input type="text" id="ei-rent-treatment-reason" class="cyber-input w-full" placeholder="e.g. Tenant overstayed by 5 days, management agreed to waive rent" />
-                </div>
-              </div>
-
-              <!-- Management Decision: Deposit Treatment -->
-              <div class="glass-panel p-4 mb-4">
-                <span class="sys-tag">[DEPOSIT_DECISION]</span>
-                <h4 class="font-orbitron text-white mt-1 mb-3">Deposit Treatment</h4>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-                  <label class="flex items-center gap-2 p-3 bg-slate-900 border border-slate-700 rounded cursor-pointer hover:border-cyan-600 transition-colors">
-                    <input type="radio" name="ei-deposit-treatment" value="apply_to_rent" class="accent-cyan-500" />
-                    <div>
-                      <p class="text-sm text-white font-semibold">Apply to Rent</p>
-                      <p class="text-xs text-slate-500">Use deposit to cover rent charges</p>
-                    </div>
-                  </label>
-                  <label class="flex items-center gap-2 p-3 bg-slate-900 border border-slate-700 rounded cursor-pointer hover:border-cyan-600 transition-colors">
-                    <input type="radio" name="ei-deposit-treatment" value="apply_to_deductions" class="accent-cyan-500" checked />
-                    <div>
-                      <p class="text-sm text-white font-semibold">Apply to Deductions</p>
-                      <p class="text-xs text-slate-500">Use deposit to cover exit deductions</p>
-                    </div>
-                  </label>
-                  <label class="flex items-center gap-2 p-3 bg-slate-900 border border-slate-700 rounded cursor-pointer hover:border-cyan-600 transition-colors">
-                    <input type="radio" name="ei-deposit-treatment" value="apply_to_both" class="accent-cyan-500" />
-                    <div>
-                      <p class="text-sm text-white font-semibold">Apply to Both</p>
-                      <p class="text-xs text-slate-500">Split deposit between rent and deductions</p>
-                    </div>
-                  </label>
-                  <label class="flex items-center gap-2 p-3 bg-slate-900 border border-slate-700 rounded cursor-pointer hover:border-cyan-600 transition-colors">
-                    <input type="radio" name="ei-deposit-treatment" value="refund" class="accent-cyan-500" />
-                    <div>
-                      <p class="text-sm text-white font-semibold">Refund Remaining Deposit</p>
-                      <p class="text-xs text-slate-500">Return unused deposit to tenant</p>
-                    </div>
-                  </label>
-                  <label class="flex items-center gap-2 p-3 bg-slate-900 border border-slate-700 rounded cursor-pointer hover:border-cyan-600 transition-colors">
-                    <input type="radio" name="ei-deposit-treatment" value="other" class="accent-cyan-500" />
-                    <div>
-                      <p class="text-sm text-white font-semibold">Other Adjustment</p>
-                      <p class="text-xs text-slate-500">Custom management decision</p>
-                    </div>
-                  </label>
-                </div>
-                <div>
-                  <label class="form-label text-xs">Settlement Decision Notes (optional)</label>
-                  <input type="text" id="ei-settlement-reason" class="cyber-input w-full" placeholder="e.g. Deposit partially used for repairs, remainder refunded" />
-                </div>
-              </div>
-
-              <!-- Final Settlement Totals -->
-              <div class="bg-slate-900 border border-slate-700 rounded p-4 mb-4 space-y-1 font-mono text-sm">
-                <div class="flex justify-between text-slate-400">
-                  <span>Total Deductions</span>
-                  <span id="ei-total-deductions" class="text-rose-400 font-bold">KES 0</span>
-                </div>
-                <div class="flex justify-between text-slate-400">
-                  <span>Deposit Refund</span>
-                  <span id="ei-deposit-refund" class="text-cyan-400 font-bold">KES 0</span>
-                </div>
-                <div class="flex justify-between text-white font-bold text-lg border-t border-slate-700 pt-2 mt-1">
-                  <span>Final Settlement</span>
-                  <span id="ei-final-settlement" class="text-green-400">KES 0</span>
-                </div>
-              </div>
-
-              <!-- Draft Actions -->
-              <div id="ei-actions-draft" class="flex flex-wrap gap-2 mb-2">
-                <button type="button" id="btn-ei-save-draft" class="qc-btn flex-1">💾 Save Draft</button>
-                <button type="button" id="btn-ei-finalize" class="qc-btn qc-btn-primary flex-1">🔒 Finalize Invoice</button>
-              </div>
-
-              <!-- Final Actions (shown after finalization) -->
-              <div id="ei-actions-final" class="hidden flex flex-col gap-2">
-                <div class="flex flex-wrap gap-2">
-                  <button type="button" id="btn-ei-download" class="qc-btn flex-1">⬇ Download PDF</button>
-                  <button type="button" id="btn-ei-send" class="qc-btn qc-btn-primary flex-1">📲 Send via WhatsApp</button>
-                  <button type="button" id="btn-ei-both" class="qc-btn qc-btn-secondary flex-1">Both</button>
-                </div>
-                <div id="ei-mark-vacant-panel" class="hidden bg-slate-900 border border-emerald-700 rounded p-4">
-                  <p class="text-sm text-white font-semibold mb-2">Exit Invoice completed. Mark unit as VACANT?</p>
-                  <p class="text-xs text-slate-400 mb-3">The tenancy will be permanently archived.</p>
-                  <div class="flex gap-2">
-                    <button type="button" id="btn-ei-mark-vacant-yes" class="qc-btn qc-btn-primary flex-1">YES — Mark Vacant</button>
-                    <button type="button" id="btn-ei-mark-vacant-no" class="qc-btn flex-1">NO — Keep Occupied</button>
-                  </div>
-                </div>
-              </div>
-              <p id="exit-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
             </div>
           </div>
         </div>
