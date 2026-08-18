@@ -4603,6 +4603,162 @@ async function createDepositRefund(data) {
 }
 
 // ============================================================
+// MANAGEMENT EXPENSES REPORT
+// ============================================================
+
+async function getManagementExpensesReport({ month, date_from, date_to, property, category, status, source, employee, wo_number, invoice_number } = {}) {
+  const conditions = [];
+  const params = [];
+  let idx = 1;
+
+  if (month) {
+    conditions.push(`date_reported >= $${idx} AND date_reported < $${idx + 1}`);
+    params.push(`${month}-01`);
+    const [y, m] = month.split('-').map(Number);
+    const nextM = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+    params.push(nextM);
+    idx += 2;
+  } else if (date_from || date_to) {
+    if (date_from) { conditions.push(`date_reported >= $${idx++}`); params.push(date_from); }
+    if (date_to) { conditions.push(`date_reported <= $${idx++}`); params.push(date_to); }
+  }
+
+  if (property) { conditions.push(`property_name ILIKE $${idx++}`); params.push(`%${property}%`); }
+  if (status) { conditions.push(`status = $${idx++}`); params.push(status); }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const invRes = await query(`SELECT * FROM maintenance_invoices ${where} ORDER BY date_reported DESC, id DESC`, params);
+  let expenses = invRes.rows;
+
+  if (category) {
+    expenses = expenses.filter(inv => {
+      const item = Array.isArray(inv.items) && inv.items.length ? inv.items[0] : {};
+      return (item.work_required || 'other') === category;
+    });
+  }
+
+  if (source === 'Salary') expenses = [];
+
+  let salary_records = [];
+  if (month || (!date_from && !date_to)) {
+    const salWhere = month ? `WHERE salary_month = $1` : (date_from || date_to ? `WHERE salary_month >= $1` : '');
+    const salParams = month ? [month] : (date_from ? [date_from.slice(0, 7)] : []);
+    if (salWhere && salParams.length) {
+      const salRes = await query(`SELECT * FROM salary_records ${salWhere} ORDER BY salary_month DESC, employee_name ASC`, salParams);
+      salary_records = salRes.rows;
+    }
+  }
+  if (employee) salary_records = salary_records.filter(s => s.employee_name && s.employee_name.toLowerCase().includes(employee.toLowerCase()));
+
+  const expensesMapped = expenses.map(inv => {
+    const item = Array.isArray(inv.items) && inv.items.length ? inv.items[0] : {};
+    const catKey = item.work_required || 'other';
+    const notes = inv.notes || '';
+    const isWoSource = notes.startsWith('WO Source: ');
+    return {
+      invoice_number: inv.mnt_number,
+      date_reported: inv.date_reported,
+      category: catKey,
+      description: item.problem || notes || 'Management expense',
+      property_name: inv.property_name,
+      source: isWoSource ? 'Work Order' : 'Manual',
+      amount: Number(inv.grand_total || 0),
+      status: inv.status || 'Pending',
+    };
+  });
+
+  const salaryMapped = salary_records.map(s => ({
+    employee: s.employee_name,
+    description: `Salary - ${s.employee_name}`,
+    amount: Number(s.expected_salary || 0),
+    previous_balance: Number(s.previous_balance || 0),
+    total_paid: Number(s.total_paid || 0),
+    outstanding: Number(s.outstanding || 0),
+    status: s.status || 'Pending',
+    source: 'Salary',
+    salary_month: s.salary_month,
+  }));
+
+  const allExpenses = [...expensesMapped, ...salaryMapped];
+
+  const totalIncurred = allExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalPaid = expensesMapped.reduce((s, e) => s + Number(e.amount || 0), 0) + salaryMapped.reduce((s, e) => s + Number(e.total_paid || 0), 0);
+  const totalOutstanding = salaryMapped.reduce((s, e) => s + Number(e.outstanding || 0), 0);
+
+  const byCategory = {};
+  allExpenses.forEach(e => { byCategory[e.category] = (byCategory[e.category] || 0) + Number(e.amount || 0); });
+
+  const bySource = {};
+  allExpenses.forEach(e => { bySource[e.source || 'Manual'] = (bySource[e.source || 'Manual'] || 0) + Number(e.amount || 0); });
+
+  const propertyExpenses = expensesMapped.filter(e => e.property_name).reduce((s, e) => s + Number(e.amount || 0), 0);
+  const generalExpenses = totalIncurred - propertyExpenses;
+
+  return {
+    month: month || `${date_from || ''} to ${date_to || ''}`,
+    summary: {
+      total_incurred: totalIncurred,
+      total_paid: totalPaid,
+      total_outstanding: totalOutstanding,
+      property_expenses: propertyExpenses,
+      general_expenses: generalExpenses,
+    },
+    by_category: byCategory,
+    by_source: bySource,
+    expenses: expensesMapped,
+    salary_records: salaryMapped,
+  };
+}
+
+async function getPropertyExpenseReport(property, month, date_from, date_to) {
+  const report = await getManagementExpensesReport({ month, date_from, date_to, property });
+  return report;
+}
+
+// ============================================================
+// ELIGIBLE MANAGEMENT EXPENSES (WO expenses not yet in an invoice)
+// ============================================================
+
+async function getEligibleManagementExpenses(house) {
+  let q = `
+    SELECT mc.*, wo.wo_number, wo.house_paybill_number, wo.house_name
+    FROM maintenance_charges mc
+    JOIN work_orders wo ON mc.work_order_id = wo.id
+    WHERE mc.recovery_status = 'N/A'
+      AND mc.management_expense_invoice_id IS NULL
+  `;
+  const params = [];
+  if (house) {
+    params.push(house);
+    q += ` AND wo.house_paybill_number = $1`;
+  }
+  q += ` ORDER BY mc.created_at DESC`;
+  const res = await query(q, params);
+  return res.rows;
+}
+
+// ============================================================
+// LINK WO EXPENSES TO MANAGEMENT INVOICE
+// ============================================================
+
+async function createManagementExpenseFromWO(woId, issueNos, invoiceId) {
+  let q = `UPDATE maintenance_charges SET management_expense_invoice_id = $1, updated_at = NOW() WHERE work_order_id = $2`;
+  const params = [invoiceId, woId];
+  if (issueNos && issueNos.length) {
+    q += ` AND issue_no = ANY($3)`;
+    params.push(issueNos);
+  }
+  q += ` RETURNING *`;
+  const res = await query(q, params);
+  return res.rows;
+}
+
+async function unlinkManagementExpenseCharges(invoiceId) {
+  await query(`UPDATE maintenance_charges SET management_expense_invoice_id = NULL, updated_at = NOW() WHERE management_expense_invoice_id = $1`, [invoiceId]);
+}
+
+// ============================================================
 // MANAGEMENT EXPENSE PAYMENTS
 // ============================================================
 
@@ -5089,4 +5245,9 @@ module.exports = {
   recordDepositRefund,
   getDepositRefundSummary,
   createDepositRefund,
+  getManagementExpensesReport,
+  getPropertyExpenseReport,
+  getEligibleManagementExpenses,
+  createManagementExpenseFromWO,
+  unlinkManagementExpenseCharges,
 };
