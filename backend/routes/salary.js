@@ -10,7 +10,7 @@ router.use(requireAuthActive);
 router.get('/', async (req, res) => {
   try {
     const month = req.query.month || new Date().toISOString().slice(0, 7);
-    const records = await store.listSalaryRecords(month);
+    const records = await store.listSalaryRecords({ salary_month: month });
     res.json({ records, month });
   } catch (err) {
     res.status(500).json({ error: 'Failed to list salary records: ' + err.message });

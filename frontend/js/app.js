@@ -3424,6 +3424,16 @@ function showErForm(record) {
   const wrap = document.getElementById('er-form-wrap');
   if (!wrap) return;
   wrap.classList.remove('hidden');
+
+  const propSel = document.getElementById('er-property');
+  if (propSel && propSel.options.length <= 1) {
+    api.houses().then(({ houses }) => {
+      propSel.innerHTML = '<option value="">Select property</option>' +
+        houses.map(h => `<option value="${escapeHtml(h.house_name)}">${escapeHtml(h.house_name)}</option>`).join('');
+      if (record && record.property_name) propSel.value = record.property_name;
+    }).catch(() => {});
+  }
+
   document.getElementById('er-form-id').value = record ? record.id : '';
   document.getElementById('er-employee').value = record ? record.employee_name : '';
   document.getElementById('er-unit').value = record ? record.unit_code : '';
