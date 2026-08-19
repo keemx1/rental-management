@@ -457,58 +457,19 @@ async function approvePaymentOnce(id) {
     const receiptNumber = await generateReceiptNumber(run);
 
     // Compute billing_period from tenant's ledger position, not just payment date.
-    // Rule: payment date ≠ billing period. Allocate to the next unpaid cycle.
+    // Rule: payment date ≠ billing period. Allocate to the current billing cycle
+    // at time of approval. The allocation chain (arrears → penalties → rent)
+    // handles where the money actually goes. The billing_period is metadata
+    // indicating which cycle this payment is for.
     const preRes = await run(`SELECT payment_type, payment_date::text AS payment_date, amount, tenant_code FROM payments WHERE id = $1`, [id]);
     const prePay = preRes.rows[0];
-    const paymentMonth = prePay ? monthKey(prePay.payment_date) : new Date().toISOString().slice(0, 7);
-    let billingPeriod = paymentMonth;
+    let billingPeriod = currentMonth;
 
     if (prePay && prePay.payment_type === 'advance_rent') {
-      // Explicit advance rent → next month
-      billingPeriod = nextMonthKey(paymentMonth);
-    } else if (prePay && prePay.payment_type !== 'deposit') {
-      // Regular rent payment → allocate to next unpaid billing period.
-      // Rule: payment date ≠ billing period. Check the tenant's ledger
-      // to find which month this payment should cover.
-      const tenantForAlloc = await getTenant(prePay.tenant_code, run);
-      if (tenantForAlloc) {
-        const rentAmount = Number(tenantForAlloc.rent_amount || 0);
-
-        // Check if the current billing period is already covered
-        const currentMonthPaidRes = await run(
-          `SELECT COALESCE(SUM(amount), 0) AS total FROM payments
-           WHERE tenant_code = $1 AND status = 'Approved'
-             AND (billing_period = $2 OR (billing_period IS NULL AND payment_date >= $3 AND payment_date < $4))`,
-          [prePay.tenant_code, currentMonth, `${currentMonth}-01`, `${nextMonthKey(currentMonth)}-01`]
-        );
-        const currentMonthPaid = Number(currentMonthPaidRes.rows[0]?.total || 0);
-        const currentCoveredByPayments = currentMonthPaid >= rentAmount && rentAmount > 0;
-        const currentCoveredByAdvance = isAdvanceCoveringMonth(tenantForAlloc, currentMonth);
-
-        if (currentCoveredByPayments || currentCoveredByAdvance) {
-          // Current month is paid — find the next unpaid month
-          let candidate = nextMonthKey(currentMonth);
-          for (let i = 0; i < 12; i++) {
-            const alreadyPaid = await run(
-              `SELECT COALESCE(SUM(amount), 0) AS total FROM payments
-               WHERE tenant_code = $1 AND status = 'Approved'
-                 AND (billing_period = $2 OR (billing_period IS NULL AND payment_date >= $3 AND payment_date < $4))`,
-              [prePay.tenant_code, candidate, `${candidate}-01`, `${nextMonthKey(candidate)}-01`]
-            );
-            const paidForMonth = Number(alreadyPaid.rows[0]?.total || 0);
-            const advanceCovers = isAdvanceCoveringMonth(tenantForAlloc, candidate);
-            if (paidForMonth < rentAmount && !advanceCovers) {
-              billingPeriod = candidate;
-              break;
-            }
-            candidate = nextMonthKey(candidate);
-          }
-        } else {
-          // Current month is NOT paid — allocate to current month (not payment month)
-          billingPeriod = currentMonth;
-        }
-      }
+      // Explicit advance rent → next billing cycle
+      billingPeriod = nextMonthKey(currentMonth);
     }
+    // For regular rent and deposit: billingPeriod stays as currentMonth (set above)
 
     const res = await run(
       `UPDATE payments SET status = 'Approved', approved_at = NOW(), receipt_number = $2, sync_status = 'pending_sync', billing_period = $3 WHERE id = $1 AND status = 'Pending' RETURNING *, tenant_code AS tenant_id, payment_date::text AS payment_date`,
