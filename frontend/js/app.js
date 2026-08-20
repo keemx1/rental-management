@@ -5380,7 +5380,7 @@ async function populatePropertyDropdowns() {
   try {
     const { houses } = await api.houses();
     const propertyNames = [...new Set(houses.map(h => h.house_name).filter(Boolean))].sort();
-    ['meh-property', 'mer-property'].forEach(id => {
+    ['meh-property', 'mer-property', 'mnt-property'].forEach(id => {
       const sel = document.getElementById(id);
       if (!sel) return;
       const current = sel.value;
