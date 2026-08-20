@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { tenant_id, amount, mpesa_reference, notes, payment_type } = req.body;
+    const { tenant_id, amount, mpesa_reference, notes, payment_type, payment_mode, sender_account, receiver_account, cheque_number, payment_datetime } = req.body;
     if (!tenant_id || amount == null) {
       return res.status(400).json({ error: 'tenant_id and amount required' });
     }
@@ -48,6 +48,11 @@ router.post('/', async (req, res) => {
       notes,
       payment_type: payment_type || 'rent',
       status: 'Pending',
+      payment_mode,
+      sender_account,
+      receiver_account,
+      cheque_number,
+      payment_datetime,
     });
     res.status(201).json({ payment });
   } catch (err) {
@@ -480,6 +485,9 @@ router.post('/approve-from-message', async (req, res) => {
       notes: parsed.raw ? `Parsed from message: ${parsed.raw}` : null,
       status: 'Pending',
       payment_date: req.body?.payment_date || parsed.payment_date || undefined,
+      payment_mode: 'M-Pesa',
+      sender_account: parsed.phone_number || null,
+      payment_datetime: parsed.payment_date ? new Date(parsed.payment_date + 'T12:00:00').toISOString() : null,
     });
 
     const approved = await store.approvePayment(payment.id);

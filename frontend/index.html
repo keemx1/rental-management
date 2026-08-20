@@ -875,7 +875,7 @@
                 <th>Receipt No.</th>
                 <th>Tenant</th>
                 <th>Amount</th>
-                <th>M-Pesa ref</th>
+                <th>Mode / Ref</th>
                 <th>Date</th>
                 <th>Status</th>
                 <th></th>
@@ -3278,8 +3278,8 @@
 
   <!-- Payment modal -->
   <div id="payment-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-    <div class="glass-panel p-6 w-full max-w-md">
-      <h3 class="font-orbitron text-xl text-white mb-4">Record payment</h3>
+    <div class="glass-panel p-6 w-full max-w-lg max-h-[92vh] overflow-y-auto">
+      <h3 class="font-orbitron text-xl text-white mb-4">Record Payment</h3>
       <form id="payment-form" class="space-y-3">
         <div>
           <label class="form-label">Tenant</label>
@@ -3297,11 +3297,82 @@
           <input name="amount" type="number" min="1" required class="cyber-input" />
         </div>
         <div>
-          <label class="form-label">M-Pesa reference</label>
-          <input name="mpesa_reference" class="cyber-input" placeholder="Optional" />
+          <label class="form-label">Payment Mode</label>
+          <select name="payment_mode" id="payment-mode-select" class="cyber-input font-mono">
+            <option value="">Select mode</option>
+            <option value="M-Pesa">M-Pesa</option>
+            <option value="Bank">Bank</option>
+            <option value="Cheque">Cheque</option>
+            <option value="Cash">Cash</option>
+          </select>
         </div>
+
+        <!-- M-Pesa fields -->
+        <div id="payment-fields-mpesa" class="hidden space-y-3">
+          <div>
+            <label class="form-label">M-Pesa Reference</label>
+            <input name="mpesa_reference" id="pay-mpesa-ref" class="cyber-input" placeholder="e.g. QGH7B1YKP4" />
+          </div>
+          <div>
+            <label class="form-label">Sender's M-Pesa Number</label>
+            <input name="sender_account" id="pay-sender" class="cyber-input" placeholder="e.g. 254712345678" />
+          </div>
+          <div>
+            <label class="form-label">Receiver's M-Pesa Number</label>
+            <input name="receiver_account" id="pay-receiver" class="cyber-input" placeholder="e.g. 254798765432" />
+          </div>
+        </div>
+
+        <!-- Bank fields -->
+        <div id="payment-fields-bank" class="hidden space-y-3">
+          <div>
+            <label class="form-label">Sender's Account Number</label>
+            <input name="sender_account" id="pay-sender" class="cyber-input" placeholder="Sender account number" />
+          </div>
+          <div>
+            <label class="form-label">Receiver's Account Number</label>
+            <input name="receiver_account" id="pay-receiver" class="cyber-input" placeholder="Receiver account number" />
+          </div>
+        </div>
+
+        <!-- Cheque fields -->
+        <div id="payment-fields-cheque" class="hidden space-y-3">
+          <div>
+            <label class="form-label">Cheque Number</label>
+            <input name="cheque_number" id="pay-cheque" class="cyber-input" placeholder="Cheque number" />
+          </div>
+          <div>
+            <label class="form-label">Sender's Account Number</label>
+            <input name="sender_account" id="pay-sender" class="cyber-input" placeholder="Sender account number" />
+          </div>
+          <div>
+            <label class="form-label">Receiver's Account Number</label>
+            <input name="receiver_account" id="pay-receiver" class="cyber-input" placeholder="Receiver account number" />
+          </div>
+        </div>
+
+        <!-- Cash fields -->
+        <div id="payment-fields-cash" class="hidden space-y-3">
+          <div>
+            <label class="form-label">Cash Received By</label>
+            <input name="sender_account" id="pay-sender" class="cyber-input" placeholder="Name of person receiving cash" />
+          </div>
+          <div>
+            <label class="form-label">Received At</label>
+            <input name="receiver_account" id="pay-receiver" class="cyber-input" placeholder="Location / office" />
+          </div>
+        </div>
+
+        <!-- Payment Date & Time (all modes) -->
+        <div id="payment-datetime-section" class="hidden">
+          <div>
+            <label class="form-label">Payment Date & Time</label>
+            <input name="payment_datetime" id="pay-datetime" type="datetime-local" class="cyber-input" />
+          </div>
+        </div>
+
         <div class="flex gap-2 pt-2">
-          <button type="submit" class="qc-btn qc-btn-primary flex-1">Save as pending</button>
+          <button type="submit" class="qc-btn qc-btn-primary flex-1">Save as Pending</button>
           <button type="button" id="payment-modal-cancel" class="qc-btn flex-1">Cancel</button>
         </div>
       </form>

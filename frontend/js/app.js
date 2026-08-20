@@ -311,7 +311,7 @@ async function loadTenantDashboard(code) {
           <tr>
             <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.receipt_number || '—')}</td>
             <td class="font-mono text-green-400">KES ${Number(p.amount).toLocaleString()}</td>
-            <td class="font-mono text-xs">${escapeHtml(p.mpesa_reference || '—')}</td>
+            <td class="font-mono text-xs">${p.payment_mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.payment_mode)}</span> ` : ''}${escapeHtml(p.mpesa_reference || p.cheque_number || '—')}</td>
             <td class="text-slate-400 text-xs">${p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '—'}</td>
             <td>${statusBadge(p.status)}</td>
             <td><button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-td-delete-payment="${p.id}">Delete</button></td>
@@ -1063,7 +1063,7 @@ async function loadPayments() {
         <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.receipt_number || '—')}</td>
         <td class="text-white">${escapeHtml(p.tenant_name || '—')} <span class="text-slate-500 font-mono text-xs">${escapeHtml(p.tenant_code || '')}</span></td>
         <td class="font-mono text-green-400">KES ${Number(p.amount).toLocaleString()}</td>
-        <td class="font-mono text-xs">${p.payment_type === 'deposit' ? '<span class="text-cyan-400">DEPOSIT</span>' : ''} ${escapeHtml(p.mpesa_reference || '—')}</td>
+        <td class="font-mono text-xs">${p.payment_type === 'deposit' ? '<span class="text-cyan-400">DEPOSIT</span> ' : ''}${p.payment_mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.payment_mode)}</span>` : ''} ${escapeHtml(p.mpesa_reference || p.cheque_number || '—')}</td>
         <td class="font-mono text-sm text-slate-400">${escapeHtml(p.payment_date)}</td>
         <td>${paymentStatusBadge(p)}</td>
         <td>
@@ -2137,6 +2137,17 @@ async function openPaymentModal() {
   const { tenants } = await api.tenants();
   select.innerHTML = tenants.map((t) => `<option value="${t.id}">${escapeHtml(t.name)} (${escapeHtml(t.tenant_code)})</option>`).join('');
   document.getElementById('payment-form').reset();
+  ['mpesa', 'bank', 'cheque', 'cash'].forEach(m => {
+    const el = document.getElementById('payment-fields-' + m);
+    if (el) el.classList.add('hidden');
+  });
+  document.getElementById('payment-datetime-section')?.classList.add('hidden');
+  const dtEl = document.getElementById('pay-datetime');
+  if (dtEl) {
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    dtEl.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  }
   modal.classList.remove('hidden');
 }
 
@@ -2923,16 +2934,43 @@ document.getElementById('payment-modal-cancel')?.addEventListener('click', () =>
   document.getElementById('payment-modal').classList.add('hidden');
 });
 
+document.getElementById('payment-mode-select')?.addEventListener('change', (e) => {
+  const mode = e.target.value;
+  ['mpesa', 'bank', 'cheque', 'cash'].forEach(m => {
+    const el = document.getElementById('payment-fields-' + m);
+    if (el) el.classList.toggle('hidden', m !== (mode || '').toLowerCase().replace('-', ''));
+  });
+  document.getElementById('payment-datetime-section')?.classList.toggle('hidden', !mode);
+  if (mode === 'M-Pesa') {
+    document.getElementById('payment-fields-mpesa')?.classList.remove('hidden');
+  } else if (mode === 'Bank') {
+    document.getElementById('payment-fields-bank')?.classList.remove('hidden');
+  } else if (mode === 'Cheque') {
+    document.getElementById('payment-fields-cheque')?.classList.remove('hidden');
+  } else if (mode === 'Cash') {
+    document.getElementById('payment-fields-cash')?.classList.remove('hidden');
+  }
+});
+
 document.getElementById('payment-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
+  const mode = form.payment_mode?.value || '';
   try {
-    await api.createPayment({
+    const payload = {
       tenant_id: form.tenant_id.value,
       amount: Number(form.amount.value),
       payment_type: form.payment_type?.value || 'rent',
-      mpesa_reference: form.mpesa_reference.value.trim() || null,
-    });
+      payment_mode: mode || null,
+      sender_account: form.sender_account?.value?.trim() || null,
+      receiver_account: form.receiver_account?.value?.trim() || null,
+      cheque_number: form.cheque_number?.value?.trim() || null,
+      payment_datetime: form.payment_datetime?.value || null,
+    };
+    if (mode === 'M-Pesa') {
+      payload.mpesa_reference = form.mpesa_reference?.value?.trim() || null;
+    }
+    await api.createPayment(payload);
     document.getElementById('payment-modal').classList.add('hidden');
     loadPayments();
     if (currentView === 'dashboard') loadDashboard();

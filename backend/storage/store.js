@@ -385,8 +385,8 @@ async function findPaymentById(id) {
 async function createPayment(data) {
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const res = await query(
-    `INSERT INTO payments (tenant_code, amount, mpesa_reference, status, payment_date, notes, payment_type)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO payments (tenant_code, amount, mpesa_reference, status, payment_date, notes, payment_type, payment_mode, sender_account, receiver_account, cheque_number, payment_datetime)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING *, tenant_code AS tenant_id, payment_date::text AS payment_date`,
     [
       String(data.tenant_id),
@@ -395,7 +395,12 @@ async function createPayment(data) {
       data.status || 'Pending',
       data.payment_date || todayISO(),
       data.notes || null,
-      data.payment_type || 'rent'
+      data.payment_type || 'rent',
+      data.payment_mode || null,
+      data.sender_account || null,
+      data.receiver_account || null,
+      data.cheque_number || null,
+      data.payment_datetime || null
     ]
   );
   return { ...res.rows[0], amount: Number(res.rows[0].amount) };

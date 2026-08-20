@@ -1235,3 +1235,18 @@ CREATE INDEX IF NOT EXISTS idx_dep_ref_tenant ON deposit_refunds (tenant_code);
 CREATE INDEX IF NOT EXISTS idx_dep_ref_exit_invoice ON deposit_refunds (exit_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_dep_ref_status ON deposit_refunds (refund_status);
 CREATE INDEX IF NOT EXISTS idx_dep_ref_due_date ON deposit_refunds (refund_due_date);
+
+-- Payment mode details (Invoice 5)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'payments' AND column_name = 'payment_mode'
+  ) THEN
+    ALTER TABLE payments ADD COLUMN payment_mode VARCHAR(20) NULL;
+    ALTER TABLE payments ADD COLUMN sender_account VARCHAR(128) NULL;
+    ALTER TABLE payments ADD COLUMN receiver_account VARCHAR(128) NULL;
+    ALTER TABLE payments ADD COLUMN cheque_number VARCHAR(64) NULL;
+    ALTER TABLE payments ADD COLUMN payment_datetime TIMESTAMPTZ NULL;
+  END IF;
+END $$;
