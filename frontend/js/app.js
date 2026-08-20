@@ -698,6 +698,10 @@ document.getElementById('btn-advance-months-confirm')?.addEventListener('click',
     if (pendingId) loadPendingOverpayments();
     const tenantCode = result.tenant?.tenant_code || '';
     if (tenantCode) loadTenantDashboard(tenantCode);
+    const pmHint = document.getElementById('payment-message-hint');
+    const pmApproveBtn = document.getElementById('btn-approve-from-message');
+    if (pmHint) pmHint.textContent = 'Overpayment resolved successfully.';
+    if (pmApproveBtn) pmApproveBtn.disabled = false;
     showOverpaymentReview(result.messageBody, tenantId);
   } catch (err) {
     hint.textContent = err.message;
@@ -772,6 +776,10 @@ document.getElementById('btn-overpayment-credit')?.addEventListener('click', asy
     loadDashboard();
     const tenantCode = result.tenant?.tenant_code || modal.dataset.tenantCode;
     if (tenantCode) loadTenantDashboard(tenantCode);
+    const pmHint = document.getElementById('payment-message-hint');
+    const pmApproveBtn = document.getElementById('btn-approve-from-message');
+    if (pmHint) pmHint.textContent = 'Overpayment resolved successfully.';
+    if (pmApproveBtn) pmApproveBtn.disabled = false;
     showOverpaymentReview(result.messageBody, tenantId);
   } catch (err) {
     hint.textContent = err.message;
@@ -806,6 +814,10 @@ document.getElementById('btn-skip-overpayment-confirm')?.addEventListener('click
     skipModal.style.display = 'none';
     loadPayments();
     loadDashboard();
+    const pmHint = document.getElementById('payment-message-hint');
+    const pmApproveBtn = document.getElementById('btn-approve-from-message');
+    if (pmHint) pmHint.textContent = 'Overpayment skipped. Pending overpayment recorded.';
+    if (pmApproveBtn) pmApproveBtn.disabled = false;
     if (tenantId) {
       loadTenantDashboard(tenantId);
       showOverpaymentReview(result.messageBody, tenantId);
@@ -3091,6 +3103,7 @@ async function approvePaymentFromMessageFlow() {
       return;
     }
 
+    if (approveBtn) approveBtn.disabled = false;
     let hintMsg = `Approved. WhatsApp: ${waStatus}`;
     if (waStatus === 'Failed' && wa.failureReason) hintMsg += ` (${wa.failureReason})`;
     if (waStatus === 'Pending') hintMsg += ' (awaiting delivery confirmation)';
