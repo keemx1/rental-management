@@ -4803,6 +4803,15 @@ async function updateSalaryRecord(id, patch) {
   if (fields.length === 0) return getSalaryRecord(id);
   fields.push(`updated_at = NOW()`); vals.push(id);
   await query(`UPDATE salary_records SET ${fields.join(', ')} WHERE id = $${idx}`, vals);
+  if (patch.expected_salary !== undefined || patch.previous_balance !== undefined) {
+    const rec = await getSalaryRecord(id);
+    if (rec) {
+      const totalPaid = Number(rec.total_paid || 0);
+      const outstanding = Math.max(0, Number(rec.expected_salary || 0) + Number(rec.previous_balance || 0) - totalPaid);
+      const status = outstanding <= 0 ? 'Fully Paid' : totalPaid > 0 ? 'Partially Paid' : 'Pending';
+      await query(`UPDATE salary_records SET outstanding = $1, status = $2 WHERE id = $3`, [outstanding, status, id]);
+    }
+  }
   return getSalaryRecord(id);
 }
 
@@ -4894,6 +4903,15 @@ async function updateStaffAdvance(id, patch) {
   if (fields.length === 0) return getStaffAdvance(id);
   fields.push(`updated_at = NOW()`); vals.push(id);
   await query(`UPDATE staff_advances SET ${fields.join(', ')} WHERE id = $${idx}`, vals);
+  if (patch.amount !== undefined) {
+    const adv = await getStaffAdvance(id);
+    if (adv) {
+      const recovered = Number(adv.amount_recovered || 0);
+      const outstanding = Math.max(0, Number(adv.amount || 0) - recovered);
+      const status = outstanding <= 0 ? 'Fully Recovered' : recovered > 0 ? 'Partially Recovered' : 'Pending';
+      await query(`UPDATE staff_advances SET outstanding = $1, status = $2 WHERE id = $3`, [outstanding, status, id]);
+    }
+  }
   return getStaffAdvance(id);
 }
 
@@ -4968,6 +4986,15 @@ async function updateEmployeeRent(id, patch) {
   if (fields.length === 0) return getEmployeeRent(id);
   fields.push(`updated_at = NOW()`); vals.push(id);
   await query(`UPDATE employee_rent SET ${fields.join(', ')} WHERE id = $${idx}`, vals);
+  if (patch.monthly_rent !== undefined || patch.previous_balance !== undefined) {
+    const rec = await getEmployeeRent(id);
+    if (rec) {
+      const totalPaid = Number(rec.total_paid || 0);
+      const outstanding = Math.max(0, Number(rec.previous_balance || 0) + Number(rec.monthly_rent || 0) - totalPaid - Number(rec.total_deducted || 0));
+      const status = outstanding <= 0 ? 'Fully Paid' : totalPaid > 0 ? 'Partially Paid' : 'Pending';
+      await query(`UPDATE employee_rent SET outstanding = $1, status = $2 WHERE id = $3`, [outstanding, status, id]);
+    }
+  }
   return getEmployeeRent(id);
 }
 
