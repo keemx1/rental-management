@@ -4919,10 +4919,10 @@ async function deleteStaffAdvance(id) {
   await query(`DELETE FROM staff_advances WHERE id = $1`, [id]);
 }
 
-async function recordStaffAdvancePayment(staffAdvanceId, { amount, payment_date, payment_method, reference, notes, recorded_by }) {
+async function recordStaffAdvancePayment(staffAdvanceId, { amount, payment_date, payment_time, payment_method, sender_account, reference, notes, recorded_by }) {
   const adv = await getStaffAdvance(staffAdvanceId);
   if (!adv) return null;
-  const res = await query(`INSERT INTO staff_advance_payments (staff_advance_id, amount, payment_date, payment_method, reference, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [staffAdvanceId, amount, payment_date || new Date().toISOString().slice(0, 10), payment_method || null, reference || null, notes || null, recorded_by || null]);
+  const res = await query(`INSERT INTO staff_advance_payments (staff_advance_id, amount, payment_date, payment_time, payment_method, sender_account, reference, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [staffAdvanceId, amount, payment_date || new Date().toISOString().slice(0, 10), payment_time || null, payment_method || null, sender_account || null, reference || null, notes || null, recorded_by || null]);
   const recovered = Number(adv.amount_recovered || 0) + Number(amount || 0);
   const outstanding = Math.max(0, Number(adv.amount || 0) - recovered);
   const status = outstanding <= 0 ? 'Fully Recovered' : recovered > 0 ? 'Partially Recovered' : 'Pending';

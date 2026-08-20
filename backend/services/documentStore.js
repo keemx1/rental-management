@@ -1310,9 +1310,11 @@ function buildStaffAdvanceHtml(advance, payments) {
 
   let paymentsHtml = '';
   if (payments && payments.length) {
-    paymentsHtml = '<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th style="text-align:right">Amount</th></tr></thead><tbody>';
+    paymentsHtml = '<table><thead><tr><th>Date</th><th>Method</th><th>From</th><th>Ref</th><th style="text-align:right">Amount</th></tr></thead><tbody>';
     for (const p of payments) {
-      paymentsHtml += `<tr><td>${p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-KE') : ''}</td><td>${p.payment_method || ''}</td><td>${p.reference || ''}</td><td style="text-align:right;font-weight:600;">${formatKes(p.amount)}</td></tr>`;
+      const dt = p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-KE') : '';
+      const tm = p.payment_time ? ' ' + p.payment_time.slice(0, 5) : '';
+      paymentsHtml += `<tr><td>${dt}${tm}</td><td>${p.payment_method || ''}</td><td>${p.sender_account || ''}</td><td>${p.reference || ''}</td><td style="text-align:right;font-weight:600;">${formatKes(p.amount)}</td></tr>`;
     }
     paymentsHtml += '</tbody></table>';
   } else {

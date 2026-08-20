@@ -1729,31 +1729,37 @@
           <p class="text-sm text-slate-400 mb-4" id="sa-pay-subtitle"></p>
           <form id="sa-payment-form" class="space-y-4">
             <input type="hidden" id="sapm-advance-id" />
+            <div>
+              <label class="form-label">Amount (KES)</label>
+              <input type="number" id="sapm-amount" class="cyber-input" min="0.01" step="0.01" required />
+            </div>
+            <div>
+              <label class="form-label">Payment Method</label>
+              <select id="sapm-method" class="cyber-input" required>
+                <option value="">Select method</option>
+                <option value="M-PESA">M-PESA</option>
+                <option value="Bank Transfer">Bank Transfer</option>
+                <option value="Cash">Cash</option>
+                <option value="Salary Deduction">Salary Deduction</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div id="sapm-sender-row" class="hidden">
+              <label class="form-label" id="sapm-sender-label">M-Pesa Number</label>
+              <input type="text" id="sapm-sender" class="cyber-input" placeholder="e.g. 254712345678" />
+            </div>
+            <div id="sapm-ref-row" class="hidden">
+              <label class="form-label" id="sapm-ref-label">Reference Code</label>
+              <input type="text" id="sapm-reference" class="cyber-input" placeholder="e.g. QGH7B1YKP4" />
+            </div>
             <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label class="form-label">Amount (KES)</label>
-                <input type="number" id="sapm-amount" class="cyber-input" min="0.01" step="0.01" required />
-              </div>
               <div>
                 <label class="form-label">Payment Date</label>
                 <input type="date" id="sapm-date" class="cyber-input" />
               </div>
-            </div>
-            <div class="grid grid-cols-2 gap-4">
               <div>
-                <label class="form-label">Payment Method</label>
-                <select id="sapm-method" class="cyber-input">
-                  <option value="">Select method</option>
-                  <option value="M-PESA">M-PESA</option>
-                  <option value="Bank Transfer">Bank Transfer</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Salary Deduction">Salary Deduction</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label class="form-label">Reference (optional)</label>
-                <input type="text" id="sapm-reference" class="cyber-input" placeholder="Receipt no, M-PESA code" />
+                <label class="form-label">Payment Time</label>
+                <input type="time" id="sapm-time" class="cyber-input" />
               </div>
             </div>
             <div>

@@ -3310,10 +3310,13 @@ async function showSaPayments(advanceId) {
   document.getElementById('sapm-advance-id').value = advanceId;
   document.getElementById('sapm-amount').value = '';
   document.getElementById('sapm-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('sapm-time').value = new Date().toTimeString().slice(0, 5);
   document.getElementById('sapm-method').value = '';
-  document.getElementById('sapm-reference').value = '';
   document.getElementById('sapm-notes').value = '';
   document.getElementById('sapm-result').textContent = '';
+  document.getElementById('sapm-sender-row').classList.add('hidden');
+  document.getElementById('sapm-ref-row').classList.add('hidden');
+  clearSapmSenderRef();
   try {
     const adv = await api.getStaffAdvance(advanceId);
     if (adv) {
@@ -3323,6 +3326,59 @@ async function showSaPayments(advanceId) {
     }
     await loadSaPaymentHistory(advanceId);
   } catch (e) { console.error(e); }
+}
+
+function clearSapmSenderRef() {
+  const senderEl = document.getElementById('sapm-sender');
+  const refEl = document.getElementById('sapm-reference');
+  if (senderEl) senderEl.value = '';
+  if (refEl) refEl.value = '';
+}
+
+function onSaMethodChange() {
+  const method = document.getElementById('sapm-method').value;
+  const senderRow = document.getElementById('sapm-sender-row');
+  const refRow = document.getElementById('sapm-ref-row');
+  const senderLabel = document.getElementById('sapm-sender-label');
+  const refLabel = document.getElementById('sapm-ref-label');
+  const senderEl = document.getElementById('sapm-sender');
+  const refEl = document.getElementById('sapm-reference');
+  senderRow.classList.add('hidden');
+  refRow.classList.add('hidden');
+  clearSapmSenderRef();
+  if (method === 'M-PESA') {
+    senderRow.classList.remove('hidden');
+    refRow.classList.remove('hidden');
+    senderLabel.textContent = 'M-Pesa Number';
+    senderEl.placeholder = 'e.g. 254712345678';
+    refLabel.textContent = 'M-Pesa Code';
+    refEl.placeholder = 'e.g. QGH7B1YKP4';
+  } else if (method === 'Bank Transfer') {
+    senderRow.classList.remove('hidden');
+    refRow.classList.remove('hidden');
+    senderLabel.textContent = 'Bank Account Number';
+    senderEl.placeholder = 'Sender account number';
+    refLabel.textContent = 'Transaction Reference';
+    refEl.placeholder = 'Reference number';
+  } else if (method === 'Cash') {
+    senderRow.classList.remove('hidden');
+    senderLabel.textContent = 'Received By';
+    senderEl.placeholder = 'Name of person receiving cash';
+  } else if (method === 'Salary Deduction' || method === 'Other') {
+    refRow.classList.remove('hidden');
+    refLabel.textContent = 'Reference (optional)';
+    refEl.placeholder = 'Reference number';
+  }
+}
+
+function getSapmSenderRef() {
+  const method = document.getElementById('sapm-method').value;
+  const senderEl = document.getElementById('sapm-sender');
+  const refEl = document.getElementById('sapm-reference');
+  return {
+    sender_account: senderEl ? senderEl.value.trim() || null : null,
+    reference: refEl ? refEl.value.trim() || null : null,
+  };
 }
 
 async function loadSaPaymentHistory(advanceId) {
@@ -3335,14 +3391,22 @@ async function loadSaPaymentHistory(advanceId) {
       return;
     }
     container.innerHTML = `<table class="w-full text-xs">
-      <thead><tr><th>Date</th><th>Method</th><th class="text-right">Amount</th><th>Ref</th><th></th></tr></thead>
-      <tbody>${payments.map(p => `<tr>
-        <td>${p.payment_date ? new Date(p.payment_date).toLocaleDateString() : ''}</td>
-        <td>${p.payment_method || ''}</td>
-        <td class="text-right font-mono">${formatKes(p.amount)}</td>
-        <td>${p.reference || ''}</td>
-        <td class="text-right"><button onclick="deleteSaPayment(${advanceId}, ${p.id})" class="text-rose-400 hover:text-rose-300 text-xs">Del</button></td>
-      </tr>`).join('')}</tbody>
+      <thead><tr><th>Date</th><th>Method</th><th>From</th><th>Ref</th><th class="text-right">Amount</th><th></th></tr></thead>
+      <tbody>${payments.map(p => {
+        const dt = p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '';
+        const tm = p.payment_time ? ' ' + p.payment_time.slice(0, 5) : '';
+        const method = p.payment_method || '';
+        const from = p.sender_account || '';
+        const ref = p.reference || '';
+        return `<tr>
+          <td>${dt}${tm}</td>
+          <td>${method}</td>
+          <td>${from}</td>
+          <td>${ref}</td>
+          <td class="text-right font-mono">${formatKes(p.amount)}</td>
+          <td class="text-right"><button onclick="deleteSaPayment(${advanceId}, ${p.id})" class="text-rose-400 hover:text-rose-300 text-xs">Del</button></td>
+        </tr>`;
+      }).join('')}</tbody>
     </table>`;
   } catch (e) { container.textContent = 'Error loading payments'; }
 }
@@ -3350,11 +3414,14 @@ async function loadSaPaymentHistory(advanceId) {
 async function saveSaPayment(e) {
   e.preventDefault();
   const advanceId = document.getElementById('sapm-advance-id').value;
+  const { sender_account, reference } = getSapmSenderRef();
   const data = {
     amount: document.getElementById('sapm-amount').value,
     payment_date: document.getElementById('sapm-date').value,
+    payment_time: document.getElementById('sapm-time').value || null,
     payment_method: document.getElementById('sapm-method').value || null,
-    reference: document.getElementById('sapm-reference').value.trim() || null,
+    sender_account,
+    reference,
     notes: document.getElementById('sapm-notes').value.trim() || null,
   };
   const resultEl = document.getElementById('sapm-result');
@@ -3363,8 +3430,11 @@ async function saveSaPayment(e) {
     resultEl.textContent = 'Payment recorded.';
     resultEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
     document.getElementById('sapm-amount').value = '';
-    document.getElementById('sapm-reference').value = '';
     document.getElementById('sapm-notes').value = '';
+    document.getElementById('sapm-method').value = '';
+    document.getElementById('sapm-sender-row').classList.add('hidden');
+    document.getElementById('sapm-ref-row').classList.add('hidden');
+    clearSapmSenderRef();
     await loadSaPaymentHistory(advanceId);
     loadStaffAdvances();
   } catch (err) {
@@ -3768,6 +3838,7 @@ document.getElementById('btn-cancel-sa-form')?.addEventListener('click', hideSaF
 document.getElementById('staff-advance-form')?.addEventListener('submit', saveStaffAdvance);
 document.getElementById('sa-employee-filter')?.addEventListener('change', loadStaffAdvances);
 document.getElementById('sa-payment-form')?.addEventListener('submit', saveSaPayment);
+document.getElementById('sapm-method')?.addEventListener('change', onSaMethodChange);
 document.getElementById('btn-close-sapm-modal')?.addEventListener('click', () => {
   document.getElementById('sa-payment-modal').style.display = 'none';
 });
