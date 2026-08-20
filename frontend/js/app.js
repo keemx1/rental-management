@@ -4719,7 +4719,7 @@ async function loadMaintenanceInvoices() {
   try {
     const { invoices } = await api.listMaintenanceInvoices();
     if (!invoices.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">No management expenses recorded yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="text-center text-slate-500 py-6">No management expenses recorded yet.</td></tr>';
       return;
     }
     tbody.innerHTML = invoices.map(inv => {
@@ -4728,6 +4728,8 @@ async function loadMaintenanceInvoices() {
       const category = MNT_CATEGORY_LABELS[catKey] || catKey;
       const description = item.problem || '—';
       const amount = Number(inv.grand_total || 0);
+      const paid = Number(inv.paid_total || 0);
+      const outstanding = Math.max(0, amount - paid);
       const notes = (inv.notes || '');
       const isWoSource = notes.startsWith('WO Source: ');
       const sourceLabel = isWoSource ? 'WO' : 'Manual';
@@ -4740,6 +4742,8 @@ async function loadMaintenanceInvoices() {
         '<td><span class="' + (isWoSource ? 'text-emerald-400' : 'text-slate-400') + '">' + sourceLabel + '</span>' + (sourceDetail ? ' <span class="text-slate-500 text-xs">' + escapeHtml(sourceDetail) + '</span>' : '') + '</td>' +
         '<td>' + escapeHtml(inv.property_name || inv.unit_codes || '—') + '</td>' +
         '<td class="text-right font-mono">' + money(amount) + '</td>' +
+        '<td class="text-right font-mono text-green-400">' + (paid > 0 ? money(paid) : '—') + '</td>' +
+        '<td class="text-right font-mono ' + (outstanding > 0 ? 'text-rose-400' : 'text-green-400') + '">' + (outstanding > 0 ? money(outstanding) : '—') + '</td>' +
         '<td>' + escapeHtml(inv.status || 'Pending') + '</td>' +
         '<td class="text-right whitespace-nowrap">' +
         '<button type="button" class="action-btn px-2 py-1 text-xs" onclick="editMaintenanceInvoice(' + inv.id + ')">Edit</button> ' +
@@ -4748,7 +4752,7 @@ async function loadMaintenanceInvoices() {
         '</td></tr>';
     }).join('');
   } catch (err) {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-rose-400 py-6">Failed to load: ' + escapeHtml(err.message) + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="text-center text-rose-400 py-6">Failed to load: ' + escapeHtml(err.message) + '</td></tr>';
   }
 }
 
@@ -5323,6 +5327,8 @@ async function generateMgmtExpensesReport() {
         '<td>' + escapeHtml(e.property_name || e.employee || '—') + '</td>' +
         '<td>' + srcBadge + '</td>' +
         '<td class="text-right font-mono">' + money(e.amount) + '</td>' +
+        '<td class="text-right font-mono text-green-400">' + (e.paid ? money(e.paid) : '—') + '</td>' +
+        '<td class="text-right font-mono ' + ((e.outstanding || 0) > 0 ? 'text-rose-400' : 'text-green-400') + '">' + ((e.outstanding || 0) > 0 ? money(e.outstanding) : '—') + '</td>' +
         '<td>' + escapeHtml(e.status || '—') + '</td></tr>';
     }).join('');
 

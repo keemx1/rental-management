@@ -3737,6 +3737,14 @@ async function updateMaintenanceInvoice(id, data) {
     ? items.reduce((s, it) => s + Number(it.material_cost || 0), 0)
     : Number(existing.material_total || 0);
   const grandTotal = labourTotal + materialTotal;
+  const paidTotal = Number(existing.paid_total || 0);
+
+  let newStatus = data.status || existing.status;
+  if (grandTotal !== Number(existing.grand_total || 0)) {
+    if (paidTotal <= 0) newStatus = data.status || 'Pending';
+    else if (paidTotal >= grandTotal) newStatus = 'Paid';
+    else newStatus = 'Partially Paid';
+  }
 
   const res = await query(
     `UPDATE maintenance_invoices SET
@@ -3749,7 +3757,7 @@ async function updateMaintenanceInvoice(id, data) {
        date_completed = COALESCE($8, date_completed),
        technician_name = COALESCE($9, technician_name),
        technician_phone = COALESCE($10, technician_phone),
-       status = COALESCE($11, status),
+       status = $17,
        items = $12,
        labour_total = $13,
        material_total = $14,
@@ -3763,6 +3771,7 @@ async function updateMaintenanceInvoice(id, data) {
       data.date_reported, data.date_work_started, data.date_completed,
       data.technician_name, data.technician_phone, data.status, JSON.stringify(items),
       labourTotal, materialTotal, grandTotal, data.notes,
+      newStatus,
     ]
   );
   return res.rows[0] || null;
@@ -4622,6 +4631,8 @@ async function getManagementExpensesReport({ month, date_from, date_to, property
     const catKey = item.work_required || 'other';
     const notes = inv.notes || '';
     const isWoSource = notes.startsWith('WO Source: ');
+    const amount = Number(inv.grand_total || 0);
+    const paid = Number(inv.paid_total || 0);
     return {
       invoice_number: inv.mnt_number,
       date_reported: inv.date_reported,
@@ -4629,7 +4640,9 @@ async function getManagementExpensesReport({ month, date_from, date_to, property
       description: item.problem || notes || 'Management expense',
       property_name: inv.property_name,
       source: isWoSource ? 'Work Order' : 'Manual',
-      amount: Number(inv.grand_total || 0),
+      amount,
+      paid,
+      outstanding: Math.max(0, amount - paid),
       status: inv.status || 'Pending',
     };
   });
@@ -4649,8 +4662,8 @@ async function getManagementExpensesReport({ month, date_from, date_to, property
   const allExpenses = [...expensesMapped, ...salaryMapped];
 
   const totalIncurred = allExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const totalPaid = expensesMapped.reduce((s, e) => s + Number(e.amount || 0), 0) + salaryMapped.reduce((s, e) => s + Number(e.total_paid || 0), 0);
-  const totalOutstanding = salaryMapped.reduce((s, e) => s + Number(e.outstanding || 0), 0);
+  const totalPaid = expensesMapped.reduce((s, e) => s + Number(e.paid || 0), 0) + salaryMapped.reduce((s, e) => s + Number(e.total_paid || 0), 0);
+  const totalOutstanding = expensesMapped.reduce((s, e) => s + Number(e.outstanding || 0), 0) + salaryMapped.reduce((s, e) => s + Number(e.outstanding || 0), 0);
 
   const byCategory = {};
   allExpenses.forEach(e => { byCategory[e.category] = (byCategory[e.category] || 0) + Number(e.amount || 0); });
@@ -4730,6 +4743,7 @@ async function unlinkManagementExpenseCharges(invoiceId) {
 
 async function recordExpensePayment(invoiceId, { amount, payment_method, reference, notes, recorded_by }) {
   const res = await query(`INSERT INTO management_expense_payments (invoice_id, amount, payment_method, reference, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [invoiceId, amount, payment_method || null, reference || null, notes || null, recorded_by || null]);
+  await recalcExpensePaidTotal(invoiceId);
   return res.rows[0];
 }
 
@@ -4739,7 +4753,22 @@ async function getExpensePayments(invoiceId) {
 }
 
 async function deleteExpensePayment(id) {
+  const row = await query(`SELECT invoice_id FROM management_expense_payments WHERE id = $1`, [id]);
+  const invoiceId = row.rows[0]?.invoice_id;
   await query(`DELETE FROM management_expense_payments WHERE id = $1`, [id]);
+  if (invoiceId) await recalcExpensePaidTotal(invoiceId);
+}
+
+async function recalcExpensePaidTotal(invoiceId) {
+  const sumRes = await query(`SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM management_expense_payments WHERE invoice_id = $1`, [invoiceId]);
+  const paidTotal = Number(sumRes.rows[0]?.total || 0);
+  const invRes = await query(`SELECT grand_total FROM maintenance_invoices WHERE id = $1`, [invoiceId]);
+  const grandTotal = Number(invRes.rows[0]?.grand_total || 0);
+  const newStatus = paidTotal <= 0 ? 'Pending' : paidTotal >= grandTotal ? 'Paid' : 'Partially Paid';
+  await query(
+    `UPDATE maintenance_invoices SET paid_total = $2, status = $3, updated_at = NOW() WHERE id = $1`,
+    [invoiceId, paidTotal, newStatus]
+  );
 }
 
 // ============================================================

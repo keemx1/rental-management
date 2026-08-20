@@ -535,11 +535,12 @@ CREATE TABLE IF NOT EXISTS maintenance_invoices (
   technician_name VARCHAR(128) NULL,
   technician_phone VARCHAR(32) NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'Pending'
-    CHECK (status IN ('Pending', 'Approved', 'Assigned', 'In Progress', 'Completed')),
+    CHECK (status IN ('Pending', 'Approved', 'Paid', 'Partially Paid', 'Assigned', 'In Progress', 'Completed', 'Pending Reimbursement', 'Partially Reimbursed', 'Fully Reimbursed')),
   items JSONB NOT NULL DEFAULT '[]',
   labour_total DECIMAL(10, 2) NOT NULL DEFAULT 0,
   material_total DECIMAL(10, 2) NOT NULL DEFAULT 0,
   grand_total DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  paid_total DECIMAL(10, 2) NOT NULL DEFAULT 0,
   notes TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1250,3 +1251,30 @@ BEGIN
     ALTER TABLE payments ADD COLUMN payment_datetime TIMESTAMPTZ NULL;
   END IF;
 END $$;
+
+-- Maintenance invoices: add paid_total column and expand status CHECK
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'maintenance_invoices' AND column_name = 'paid_total'
+  ) THEN
+    ALTER TABLE maintenance_invoices ADD COLUMN paid_total DECIMAL(10, 2) NOT NULL DEFAULT 0;
+  END IF;
+END $$;
+
+-- Drop old CHECK constraint and add expanded one (handles status values from all categories)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname LIKE '%maintenance_invoices%status%'
+      AND conrelid = 'maintenance_invoices'::regclass
+  ) THEN
+    ALTER TABLE maintenance_invoices DROP CONSTRAINT IF EXISTS maintenance_invoices_status_check;
+  END IF;
+END $$;
+
+ALTER TABLE maintenance_invoices
+  ADD CONSTRAINT maintenance_invoices_status_check
+  CHECK (status IN ('Pending', 'Approved', 'Paid', 'Partially Paid', 'Assigned', 'In Progress', 'Completed', 'Pending Reimbursement', 'Partially Reimbursed', 'Fully Reimbursed'));
