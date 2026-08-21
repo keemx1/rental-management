@@ -6946,7 +6946,7 @@ async function loadMonthlyReports() {
   }
 
   const propSel = document.getElementById('mr-property-select');
-  if (propSel && !propSel.options.length > 1) {
+  if (propSel && propSel.options.length <= 1) {
     try {
       const { houses } = await api.houses();
       propSel.innerHTML = '<option value="">All Properties</option>';

@@ -3727,11 +3727,15 @@ async function generateMonthlyReport(month, housePaybill) {
     ? (await getHouse(housePaybill))?.house_name || null
     : null;
 
+  // Delete any existing row first (handles NULL house_paybill_number since NULL != NULL in UNIQUE)
+  await query(
+    `DELETE FROM monthly_reports WHERE month = $1 AND (house_paybill_number = $2 OR ($2 IS NULL AND house_paybill_number IS NULL))`,
+    [month, housePaybill || null]
+  );
+
   const res = await query(
     `INSERT INTO monthly_reports (month, property_name, house_paybill_number, status, report_data, updated_at)
      VALUES ($1, $2, $3, 'Active', $4, NOW())
-     ON CONFLICT (month, house_paybill_number)
-     DO UPDATE SET report_data = $4, property_name = $2, status = 'Active', updated_at = NOW()
      RETURNING *`,
     [month, propertyName, housePaybill || null, JSON.stringify(data, (_, v) => typeof v === 'bigint' ? Number(v) : v)]
   );
@@ -3744,7 +3748,10 @@ async function generateMonthlyReport(month, housePaybill) {
 async function closeMonthlyReport(month, housePaybill) {
   const res = await query(
     `UPDATE monthly_reports SET status = 'Closed', closed_at = NOW(), updated_at = NOW()
-     WHERE month = $1 AND (house_paybill_number = $2 OR ($2 IS NULL AND house_paybill_number IS NULL))
+     WHERE id = (
+       SELECT id FROM monthly_reports WHERE month = $1 AND (house_paybill_number = $2 OR ($2 IS NULL AND house_paybill_number IS NULL))
+       ORDER BY generated_at DESC LIMIT 1
+     )
      RETURNING *`,
     [month, housePaybill || null]
   );
@@ -3761,7 +3768,8 @@ async function listMonthlyReports() {
 
 async function getMonthlyReport(month, housePaybill) {
   const res = await query(
-    `SELECT * FROM monthly_reports WHERE month = $1 AND (house_paybill_number = $2 OR ($2 IS NULL AND house_paybill_number IS NULL))`,
+    `SELECT * FROM monthly_reports WHERE month = $1 AND (house_paybill_number = $2 OR ($2 IS NULL AND house_paybill_number IS NULL))
+     ORDER BY generated_at DESC LIMIT 1`,
     [month, housePaybill || null]
   );
   return res.rows[0] || null;
