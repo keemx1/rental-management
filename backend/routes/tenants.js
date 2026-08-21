@@ -43,6 +43,8 @@ router.post('/', async (req, res) => {
       water_charge_amount,
       arrears,
       opening_advance_rent,
+      agreement_charge,
+      agreement_paid,
       rent_due_date,
       rent_due_time,
       status,
@@ -74,6 +76,8 @@ router.post('/', async (req, res) => {
       water_charge_amount,
       arrears: openingArrears,
       opening_advance_rent: openingAdvance,
+      agreement_charge,
+      agreement_paid,
       rent_due_date,
       rent_due_time,
       status,
@@ -117,6 +121,8 @@ router.put('/:id', async (req, res) => {
       'rent_due_time',
       'status',
       'opening_advance_rent',
+      'agreement_charge',
+      'agreement_paid',
     ];
     const patch = {};
     for (const k of allowed) {

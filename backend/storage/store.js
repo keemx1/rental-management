@@ -165,17 +165,17 @@ async function listTenants(filters = {}) {
   q += ' ORDER BY name ASC';
   
   const res = await query(q, params);
-  return res.rows.map(r => ({ ...r, rent_amount: Number(r.rent_amount), arrears: Number(r.arrears || 0), deposit_amount: Number(r.deposit_amount || 0), deposit_paid: Number(r.deposit_paid || 0), garbage_fee_amount: Number(r.garbage_fee_amount || 0), garbage_fee_paid: Number(r.garbage_fee_paid || 0), water_charge_amount: Number(r.water_charge_amount || 0), water_charge_paid: Number(r.water_charge_paid || 0), rent_paid_this_month: Number(r.rent_paid_this_month || 0), credit_balance: Number(r.credit_balance || 0), advance_rent_balance: Number(r.advance_rent_balance || 0), opening_advance_rent: Number(r.opening_advance_rent || 0) }));
+  return res.rows.map(r => ({ ...r, rent_amount: Number(r.rent_amount), arrears: Number(r.arrears || 0), deposit_amount: Number(r.deposit_amount || 0), deposit_paid: Number(r.deposit_paid || 0), garbage_fee_amount: Number(r.garbage_fee_amount || 0), garbage_fee_paid: Number(r.garbage_fee_paid || 0), water_charge_amount: Number(r.water_charge_amount || 0), water_charge_paid: Number(r.water_charge_paid || 0), rent_paid_this_month: Number(r.rent_paid_this_month || 0), credit_balance: Number(r.credit_balance || 0), advance_rent_balance: Number(r.advance_rent_balance || 0), opening_advance_rent: Number(r.opening_advance_rent || 0), agreement_charge: Number(r.agreement_charge || 0), agreement_paid: Number(r.agreement_paid || 0), agreement_outstanding: Number(r.agreement_outstanding || 0) }));
 }
 
 async function getTenant(id, run) {
   const res = await runOrQuery(run,
-    `SELECT t.tenant_code AS id, t.tenant_code, t.name, t.phone_number, t.national_id, t.house_paybill_number AS house_id, t.property_name, t.unit_label, t.rent_amount, t.arrears, t.deposit_amount, t.deposit_paid, t.garbage_fee_amount, t.garbage_fee_paid, t.water_charge_amount, t.water_charge_paid, t.rent_paid_this_month, t.credit_balance, t.advance_rent_until::text AS advance_rent_until, t.advance_rent_balance, t.opening_advance_rent, t.move_in_date::text AS move_in_date, t.move_out_date::text AS move_out_date, t.notice_to_vacate_date::text AS notice_to_vacate_date, t.exit_reason, t.rent_due_date::text AS rent_due_date, t.rent_due_time, t.status, t.created_at, t.updated_at, t.guardian_name, t.guardian_id, t.guardian_phone, t.guardian_relationship, t.standard_monthly_rent, t.first_billing_method, t.first_billing_charge, t.first_billing_reason, t.first_billing_days, h.payment_method, h.payment_paybill, h.account_number_format, h.till_number, h.till_name
+    `SELECT t.tenant_code AS id, t.tenant_code, t.name, t.phone_number, t.national_id, t.house_paybill_number AS house_id, t.property_name, t.unit_label, t.rent_amount, t.arrears, t.deposit_amount, t.deposit_paid, t.garbage_fee_amount, t.garbage_fee_paid, t.water_charge_amount, t.water_charge_paid, t.rent_paid_this_month, t.credit_balance, t.advance_rent_until::text AS advance_rent_until, t.advance_rent_balance, t.opening_advance_rent, t.agreement_charge, t.agreement_paid, t.agreement_outstanding, t.move_in_date::text AS move_in_date, t.move_out_date::text AS move_out_date, t.notice_to_vacate_date::text AS notice_to_vacate_date, t.exit_reason, t.rent_due_date::text AS rent_due_date, t.rent_due_time, t.status, t.created_at, t.updated_at, t.guardian_name, t.guardian_id, t.guardian_phone, t.guardian_relationship, t.standard_monthly_rent, t.first_billing_method, t.first_billing_charge, t.first_billing_reason, t.first_billing_days, h.payment_method, h.payment_paybill, h.account_number_format, h.till_number, h.till_name
      FROM tenants t LEFT JOIN houses h ON t.house_paybill_number = h.paybill_number WHERE t.tenant_code = $1`,
     [id]
   );
   if (!res.rows[0]) return null;
-  return { ...res.rows[0], rent_amount: Number(res.rows[0].rent_amount), arrears: Number(res.rows[0].arrears || 0), deposit_amount: Number(res.rows[0].deposit_amount || 0), deposit_paid: Number(res.rows[0].deposit_paid || 0), garbage_fee_amount: Number(res.rows[0].garbage_fee_amount || 0), garbage_fee_paid: Number(res.rows[0].garbage_fee_paid || 0), water_charge_amount: Number(res.rows[0].water_charge_amount || 0), water_charge_paid: Number(res.rows[0].water_charge_paid || 0), rent_paid_this_month: Number(res.rows[0].rent_paid_this_month || 0), credit_balance: Number(res.rows[0].credit_balance || 0), advance_rent_balance: Number(res.rows[0].advance_rent_balance || 0), opening_advance_rent: Number(res.rows[0].opening_advance_rent || 0) };
+  return { ...res.rows[0], rent_amount: Number(res.rows[0].rent_amount), arrears: Number(res.rows[0].arrears || 0), deposit_amount: Number(res.rows[0].deposit_amount || 0), deposit_paid: Number(res.rows[0].deposit_paid || 0), garbage_fee_amount: Number(res.rows[0].garbage_fee_amount || 0), garbage_fee_paid: Number(res.rows[0].garbage_fee_paid || 0), water_charge_amount: Number(res.rows[0].water_charge_amount || 0), water_charge_paid: Number(res.rows[0].water_charge_paid || 0), rent_paid_this_month: Number(res.rows[0].rent_paid_this_month || 0), credit_balance: Number(res.rows[0].credit_balance || 0), advance_rent_balance: Number(res.rows[0].advance_rent_balance || 0), opening_advance_rent: Number(res.rows[0].opening_advance_rent || 0), agreement_charge: Number(res.rows[0].agreement_charge || 0), agreement_paid: Number(res.rows[0].agreement_paid || 0), agreement_outstanding: Number(res.rows[0].agreement_outstanding || 0) };
 }
 
 async function createTenant(data) {
@@ -199,9 +199,13 @@ async function createTenant(data) {
     throw new Error('A tenant cannot have both Opening Arrears and Opening Advance Rent at the same time');
   }
 
+  const agreementCharge = Number(data.agreement_charge || 0);
+  const agreementPaid = Number(data.agreement_paid || 0);
+  const agreementOutstanding = Math.max(0, agreementCharge - agreementPaid);
+
   const res = await query(
-    `INSERT INTO tenants (tenant_code, name, phone_number, national_id, house_paybill_number, property_name, rent_amount, deposit_amount, garbage_fee_amount, water_charge_amount, move_in_date, rent_due_date, rent_due_time, status, arrears, opening_advance_rent)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    `INSERT INTO tenants (tenant_code, name, phone_number, national_id, house_paybill_number, property_name, rent_amount, deposit_amount, garbage_fee_amount, water_charge_amount, move_in_date, rent_due_date, rent_due_time, status, arrears, opening_advance_rent, agreement_charge, agreement_paid, agreement_outstanding)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
      RETURNING *, tenant_code AS id, house_paybill_number AS house_id, rent_due_date::text AS rent_due_date, move_in_date::text AS move_in_date`,
     [
       data.tenant_code,
@@ -219,7 +223,10 @@ async function createTenant(data) {
       data.rent_due_time || '23:59:00',
       data.status || 'Active',
       openingArrears,
-      openingAdvance
+      openingAdvance,
+      agreementCharge,
+      agreementPaid,
+      agreementOutstanding
     ]
   );
 
@@ -285,6 +292,16 @@ async function updateTenant(id, patch, run) {
   
   // Remove unit_label from updatePatch if present (since we don't store it anymore)
   delete updatePatch.unit_label;
+
+  // Recalculate agreement_outstanding if agreement_charge or agreement_paid changes
+  if (updatePatch.agreement_charge !== undefined || updatePatch.agreement_paid !== undefined) {
+    const current = await getTenant(id, run);
+    if (current) {
+      const charge = Number(updatePatch.agreement_charge !== undefined ? updatePatch.agreement_charge : current.agreement_charge);
+      const paid = Number(updatePatch.agreement_paid !== undefined ? updatePatch.agreement_paid : current.agreement_paid);
+      updatePatch.agreement_outstanding = Math.max(0, charge - paid);
+    }
+  }
   
   const fields = [];
   const values = [];
@@ -324,7 +341,7 @@ async function markUnitVacant(tenantCode) {
        name = '', phone_number = '', status = 'Vacant',
        arrears = 0, deposit_paid = 0, garbage_fee_paid = 0, rent_paid_this_month = 0,
        credit_balance = 0, advance_rent_until = NULL, advance_rent_balance = 0,
-       opening_advance_rent = 0,
+       opening_advance_rent = 0, agreement_charge = 0, agreement_paid = 0, agreement_outstanding = 0,
        move_in_date = NULL, updated_at = NOW()
      WHERE tenant_code = $1
      RETURNING *, tenant_code AS id, house_paybill_number AS house_id, rent_due_date::text AS rent_due_date, move_in_date::text AS move_in_date`,
@@ -580,6 +597,15 @@ async function approvePaymentOnce(id) {
       const hasRentPaymentBefore = await hasApprovedRentPaymentFor(payment.tenant_id, payment.id, run);
       const onboarding = !hasRentPaymentBefore && depositShortfall > 0;
 
+      // 0) Tenancy agreement fee — one-time charge, deducted before everything else
+      let agreementSettled = 0;
+      let agreementOutstanding = Number(tenant.agreement_outstanding || 0);
+      if (agreementOutstanding > 0 && remaining > 0) {
+        agreementSettled = Math.min(agreementOutstanding, remaining);
+        remaining -= agreementSettled;
+        agreementOutstanding -= agreementSettled;
+      }
+
       // 1) Opening balances / arrears
       if (arrears > 0 && remaining > 0) {
         const settle = Math.min(arrears, remaining);
@@ -651,6 +677,8 @@ async function approvePaymentOnce(id) {
         water_charge_paid: Math.min(waterChargePaid, waterChargeAmount),
         arrears: Math.max(0, arrears),
         rent_paid_this_month: newRentPaidThisMonth,
+        agreement_paid: Number(tenant.agreement_paid || 0) + agreementSettled,
+        agreement_outstanding: agreementOutstanding,
         status: 'Active'
       }, run);
       expected.deposit_paid = Math.min(depositPaid, depositAmount);
@@ -675,6 +703,7 @@ async function approvePaymentOnce(id) {
         arrearsBefore: Number(tenant.arrears || 0),
         garbageFeeBefore: garbageFeeShortfall,
         waterChargeBefore: waterChargeShortfall,
+        agreementBefore: Number(tenant.agreement_outstanding || 0),
         rentDue: remainingRentForMonth,
         rentAmount,
         rentPaidBefore: rentPaidThisMonth,
@@ -682,6 +711,7 @@ async function approvePaymentOnce(id) {
         penaltyBefore,
         maintenanceBefore,
         otherBefore,
+        agreementSettled,
         depositSettled,
         arrearsSettled,
         garbageFeeSettled,
@@ -690,6 +720,7 @@ async function approvePaymentOnce(id) {
         penaltySettled,
         maintenanceSettled,
         otherSettled,
+        remainingAgreement: agreementOutstanding,
         remainingArrears,
         remainingPenalties,
         remainingMaintenance,

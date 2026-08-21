@@ -275,6 +275,43 @@ async function loadTenantDashboard(code) {
       }
     }
 
+    // Tenancy agreement fee
+    const agreementCharge = Number(s.agreement_charge || 0);
+    const agreementPaid = Number(s.agreement_paid || 0);
+    const agreementOutstanding = Number(s.agreement_outstanding || 0);
+    const agreementRow = document.getElementById('td-agreement-row');
+    const agreementDetail = document.getElementById('td-agreement-detail');
+    if (agreementRow) {
+      if (agreementCharge > 0) {
+        agreementRow.style.display = '';
+        if (agreementDetail) agreementDetail.style.display = '';
+        setText('td-agreement-charged', `KES ${Number(agreementCharge).toLocaleString()}`);
+        setText('td-agreement-paid-label', `KES ${Number(agreementPaid).toLocaleString()}`);
+        setText('td-agreement-balance', `KES ${Number(agreementOutstanding).toLocaleString()}`);
+        const agreementToggle = document.getElementById('td-agreement-toggle');
+        if (agreementToggle) {
+          const isPaid = agreementOutstanding <= 0;
+          agreementToggle.textContent = isPaid ? 'PAID' : 'NOT PAID';
+          agreementToggle.className = isPaid
+            ? 'px-2 py-0.5 rounded text-xs font-mono cursor-pointer border border-green-500 bg-green-500/20 text-green-400 transition-all'
+            : 'px-2 py-0.5 rounded text-xs font-mono cursor-pointer border border-amber-500 bg-amber-500/20 text-amber-400 transition-all';
+        }
+      } else {
+        agreementRow.style.display = 'none';
+        if (agreementDetail) agreementDetail.style.display = 'none';
+      }
+    }
+
+    // Tenant info — agreement fee
+    const agreementChargeInfo = Number(tenant.agreement_charge || 0);
+    const agreementPaidInfo = Number(tenant.agreement_paid || 0);
+    const agreementOutstandingInfo = Number(tenant.agreement_outstanding || 0);
+    if (agreementChargeInfo > 0) {
+      setText('td-info-agreement', `KES ${Number(agreementChargeInfo).toLocaleString()} ${agreementOutstandingInfo > 0 ? `(Outstanding: KES ${agreementOutstandingInfo.toLocaleString()})` : '(Paid)'}`);
+    } else {
+      setText('td-info-agreement', '—');
+    }
+
     // Credit balance and advance rent
     const creditBalance = Number(s.credit_balance || 0);
     const advanceRentBalance = Number(s.advance_rent_balance || 0);
@@ -1021,13 +1058,13 @@ async function loadDashboard() {
 async function loadTenants() {
   const tbody = document.getElementById('tenants-tbody');
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-500">Loading...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500">Loading...</td></tr>`;
   try {
     const q = document.getElementById('tenant-search')?.value?.trim();
     const status = document.getElementById('tenant-filter-status')?.value;
     const { tenants } = await api.tenants({ ...(q ? { q } : {}), ...(status ? { status } : {}) });
     if (!tenants.length) {
-      tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-500">No tenants yet</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500">No tenants yet</td></tr>`;
       return;
     }
     tbody.innerHTML = tenants
@@ -1041,6 +1078,7 @@ async function loadTenants() {
         <td class="font-mono text-sm">${escapeHtml(t.phone_number)}</td>
         <td class="text-slate-400">${escapeHtml(t.property_name)}</td>
         <td class="font-mono text-green-400">${Number(t.rent_amount).toLocaleString()}</td>
+        <td class="font-mono text-sm">${t.agreement_outstanding > 0 ? `<span class="text-amber-400 font-semibold">KES ${Number(t.agreement_outstanding).toLocaleString()}</span>` : `<span class="text-emerald-400">✓</span>`}</td>
         <td class="font-mono text-sm text-slate-400">${escapeHtml(formatExpiryDisplay(t))}</td>
         <td>${statusBadge(t.status)}</td>
         <td class="space-x-1">
@@ -1053,7 +1091,7 @@ async function loadTenants() {
       )
       .join('');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="8" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -1158,6 +1196,8 @@ async function openTenantModal(id = null) {
       form.garbage_fee_amount.value = t.garbage_fee_amount || 0;
       form.water_charge_amount.value = t.water_charge_amount || 0;
       form.arrears.value = t.arrears || 0;
+      form.agreement_charge.value = t.agreement_charge || 0;
+      form.agreement_paid.value = t.agreement_paid || 0;
       const openingAdvance = Number(t.opening_advance_rent || 0);
       form.opening_advance_rent.value = openingAdvance;
       // An already-recorded opening advance can never be changed or re-applied.
@@ -2691,6 +2731,12 @@ document.getElementById('tenant-form')?.addEventListener('submit', async (e) => 
     alert('A new tenant cannot have both Opening Arrears and Opening Advance Rent at the same time.');
     return;
   }
+  const agreementCharge = Number(form.agreement_charge?.value || 0);
+  const agreementPaid = Number(form.agreement_paid?.value || 0);
+  if (agreementPaid > agreementCharge) {
+    alert('Agreement Paid cannot exceed Agreement Charge.');
+    return;
+  }
   const body = {
     name: form.name.value,
     tenant_code: form.tenant_code.value.trim(),
@@ -2713,6 +2759,8 @@ document.getElementById('tenant-form')?.addEventListener('submit', async (e) => 
     water_charge_amount: Number(form.water_charge_amount?.value || 0),
     arrears: openingArrears,
     opening_advance_rent: openingAdvance,
+    agreement_charge: agreementCharge,
+    agreement_paid: agreementPaid,
     move_in_date: form.move_in_date?.value || null,
     rent_due_date: form.rent_due_date.value,
     rent_due_time: form.rent_due_time.value,

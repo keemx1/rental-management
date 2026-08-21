@@ -382,6 +382,15 @@
             <span>Garbage Fee: <span id="td-garbage-label" class="text-orange-400 font-bold"></span></span>
             <button type="button" id="td-garbage-toggle" class="px-2 py-0.5 rounded text-xs font-mono cursor-pointer border transition-all"></button>
           </div>
+          <div class="flex justify-between items-center text-xs font-mono text-slate-400 mt-1" id="td-agreement-row" style="display:none">
+            <span>Agreement: <span id="td-agreement-label" class="text-amber-400 font-bold"></span></span>
+            <button type="button" id="td-agreement-toggle" class="px-2 py-0.5 rounded text-xs font-mono cursor-pointer border transition-all"></button>
+          </div>
+          <div class="flex justify-between text-xs font-mono text-slate-400 mt-1" id="td-agreement-detail" style="display:none">
+            <span>Charged: <span id="td-agreement-charged" class="text-amber-300">KES 0</span></span>
+            <span>Paid: <span id="td-agreement-paid-label" class="text-green-400">KES 0</span></span>
+            <span>Balance: <span id="td-agreement-balance" class="text-rose-400 font-bold">KES 0</span></span>
+          </div>
           <div class="flex justify-between text-xs font-mono text-slate-400 mt-1" id="td-garbage-detail" style="display:none">
             <span>Charged: <span id="td-garbage-charged" class="text-orange-300">KES 0</span></span>
             <span>Paid: <span id="td-garbage-paid-label" class="text-green-400">KES 0</span></span>
@@ -449,6 +458,10 @@
                 <tr>
                   <td class="py-2 text-slate-400 font-mono">Move-in Date</td>
                   <td id="td-info-movein" class="py-2 font-mono text-slate-300">—</td>
+                </tr>
+                <tr>
+                  <td class="py-2 text-slate-400 font-mono">Agreement Fee</td>
+                  <td id="td-info-agreement" class="py-2 font-mono text-amber-400">—</td>
                 </tr>
                 <tr>
                   <td class="py-2 text-slate-400 font-mono">Water Charges</td>
@@ -802,6 +815,7 @@
                 <th>Phone</th>
                 <th>House</th>
                 <th>Rent (KES)</th>
+                <th>Agreement</th>
                 <th>Due date</th>
                 <th>Status</th>
                 <th></th>
@@ -3230,6 +3244,17 @@
             <label class="form-label">Opening Advance Rent (KES)</label>
             <input name="opening_advance_rent" type="number" min="0" value="0" class="cyber-input" title="Advance/prepayment not captured in the system (e.g. from before adoption). Reduces the current month's rent. Can be added to existing clients once — after it is recorded it becomes read-only to prevent double-application." />
             <p id="opening-advance-hint" class="hidden text-xs text-slate-400 mt-1">Opening Advance Rent recorded for this tenancy. This balance is preserved as an opening financial credit and will be automatically consumed against eligible future billing periods during each billing rollover until fully utilized.</p>
+          </div>
+          <div class="col-span-2 mt-2 border-t border-slate-700 pt-3">
+            <p class="text-xs text-cyan-400 font-bold uppercase mb-2">Tenancy Agreement Fee</p>
+          </div>
+          <div>
+            <label class="form-label">Agreement Charge (KES)</label>
+            <input name="agreement_charge" type="number" min="0" step="100" value="0" class="cyber-input" title="One-time tenancy agreement fee. Deducted automatically from the tenant's first payment(s)." />
+          </div>
+          <div>
+            <label class="form-label">Agreement Paid (KES)</label>
+            <input name="agreement_paid" type="number" min="0" step="100" value="0" class="cyber-input" title="Amount already paid toward the agreement fee at registration." />
           </div>
           <div>
             <label class="form-label">Due date</label>

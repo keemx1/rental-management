@@ -1280,3 +1280,30 @@ END $$;
 ALTER TABLE maintenance_invoices
   ADD CONSTRAINT maintenance_invoices_status_check
   CHECK (status IN ('Pending', 'Approved', 'Paid', 'Partially Paid', 'Assigned', 'In Progress', 'Completed', 'Pending Reimbursement', 'Partially Reimbursed', 'Fully Reimbursed'));
+
+-- =====================================================================
+-- TENANCY AGREEMENT CHARGE
+-- One-time charge entered at registration. Deducted automatically from
+-- incoming payments until fully settled. NOT refundable on exit.
+-- =====================================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tenants' AND column_name = 'agreement_charge'
+  ) THEN
+    ALTER TABLE tenants ADD COLUMN agreement_charge DECIMAL(10, 2) NOT NULL DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tenants' AND column_name = 'agreement_paid'
+  ) THEN
+    ALTER TABLE tenants ADD COLUMN agreement_paid DECIMAL(10, 2) NOT NULL DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tenants' AND column_name = 'agreement_outstanding'
+  ) THEN
+    ALTER TABLE tenants ADD COLUMN agreement_outstanding DECIMAL(10, 2) NOT NULL DEFAULT 0;
+  END IF;
+END $$;
