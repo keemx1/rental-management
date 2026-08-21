@@ -121,17 +121,21 @@ function buildPaymentConfirmation(tenant, payment, allocation) {
     depositShortfallBefore,
     arrearsBefore,
     garbageFeeBefore,
+    waterChargeBefore,
     penaltiesBefore,
     penaltyBefore,
     maintenanceBefore,
     otherBefore,
+    agreementBefore,
     depositSettled,
     arrearsSettled,
     garbageFeeSettled,
+    waterSettled,
     rentSettled,
     penaltySettled,
     maintenanceSettled,
     otherSettled,
+    agreementSettled,
     remainingRent,
     remainingDeposit,
     remainingArrears,
@@ -139,28 +143,34 @@ function buildPaymentConfirmation(tenant, payment, allocation) {
     remainingMaintenance,
     remainingOther,
     remainingGarbage,
+    remainingWater,
+    remainingAgreement,
     remainingBalance,
   } = allocation;
 
-  const totalDueBefore = num(depositShortfallBefore) + num(arrearsBefore) + num(penaltyBefore) + num(maintenanceBefore) + num(otherBefore) + num(garbageFeeBefore) + num(rentDue);
+  const totalDueBefore = num(depositShortfallBefore) + num(arrearsBefore) + num(penaltyBefore) + num(maintenanceBefore) + num(otherBefore) + num(garbageFeeBefore) + num(waterChargeBefore || 0) + num(rentDue) + num(agreementBefore || 0);
 
   const dueParts = [];
+  if (num(agreementBefore || 0) > 0) dueParts.push(`Agreement Fee: KES ${formatKes(agreementBefore)}`);
   if (num(depositShortfallBefore) > 0) dueParts.push(`Deposit: KES ${formatKes(depositShortfallBefore)}`);
   if (num(arrearsBefore) > 0) dueParts.push(`Arrears: KES ${formatKes(arrearsBefore)}`);
   if (num(penaltyBefore) > 0) dueParts.push(`Penalties: KES ${formatKes(penaltyBefore)}`);
   if (num(maintenanceBefore) > 0) dueParts.push(`Maintenance Invoices: KES ${formatKes(maintenanceBefore)}`);
   if (num(otherBefore) > 0) dueParts.push(`Other Charges: KES ${formatKes(otherBefore)}`);
   if (num(garbageFeeBefore) > 0) dueParts.push(`Garbage Fee: KES ${formatKes(garbageFeeBefore)}`);
+  if (num(waterChargeBefore || 0) > 0) dueParts.push(`Water Charges: KES ${formatKes(waterChargeBefore)}`);
   dueParts.push(`Monthly Rent: KES ${formatKes(rentDue)}`);
   msg += ` Rent Due for ${billingMonth} ${billingYear} was KES ${formatKes(totalDueBefore)} (${dueParts.join(', ')}).`;
 
   const allocParts = [];
+  if (num(agreementSettled || 0) > 0) allocParts.push(`Agreement Fee: KES ${formatKes(agreementSettled)}`);
   if (num(depositSettled) > 0) allocParts.push(`Deposit: KES ${formatKes(depositSettled)}`);
   if (num(arrearsSettled) > 0) allocParts.push(`Arrears: KES ${formatKes(arrearsSettled)}`);
   if (num(penaltySettled) > 0) allocParts.push(`Penalties: KES ${formatKes(penaltySettled)}`);
   if (num(maintenanceSettled) > 0) allocParts.push(`Maintenance Invoices: KES ${formatKes(maintenanceSettled)}`);
   if (num(otherSettled) > 0) allocParts.push(`Other Charges: KES ${formatKes(otherSettled)}`);
   if (num(garbageFeeSettled) > 0) allocParts.push(`Garbage Fee: KES ${formatKes(garbageFeeSettled)}`);
+  if (num(waterSettled || 0) > 0) allocParts.push(`Water Charges: KES ${formatKes(waterSettled)}`);
   if (num(rentSettled) > 0) allocParts.push(`Monthly Rent: KES ${formatKes(rentSettled)}`);
   if (allocParts.length > 0) {
     msg += ` Your payment has been allocated as follows: ${allocParts.join(' and ')}.`;
@@ -168,12 +178,14 @@ function buildPaymentConfirmation(tenant, payment, allocation) {
 
   if (num(remainingBalance) > 0) {
     const remParts = [];
+    if (num(remainingAgreement || 0) > 0) remParts.push(`Agreement Fee: KES ${formatKes(remainingAgreement)}`);
     if (num(remainingDeposit) > 0) remParts.push(`Deposit: KES ${formatKes(remainingDeposit)}`);
     if (num(remainingArrears) > 0) remParts.push(`Arrears: KES ${formatKes(remainingArrears)}`);
     if (num(remainingPenalties) > 0) remParts.push(`Penalties: KES ${formatKes(remainingPenalties)}`);
     if (num(remainingMaintenance) > 0) remParts.push(`Maintenance Invoices: KES ${formatKes(remainingMaintenance)}`);
     if (num(remainingOther) > 0) remParts.push(`Other Charges: KES ${formatKes(remainingOther)}`);
     if (num(remainingGarbage) > 0) remParts.push(`Garbage Fee: KES ${formatKes(remainingGarbage)}`);
+    if (num(remainingWater || 0) > 0) remParts.push(`Water Charges: KES ${formatKes(remainingWater)}`);
     if (num(remainingRent) > 0) remParts.push(`Monthly Rent: KES ${formatKes(remainingRent)}`);
     msg += ` Your remaining balance is KES ${formatKes(remainingBalance)} (${remParts.join(', ')}).`;
   } else {
@@ -213,6 +225,8 @@ function buildNewTenancyConfirmation(tenant, payment, allocation) {
 
   const num = (v) => Number(v || 0);
   const {
+    agreementOutstanding,
+    agreementSettled,
     depositShortfallBefore,
     rentDue,
     garbageFeeBefore,
@@ -222,6 +236,7 @@ function buildNewTenancyConfirmation(tenant, payment, allocation) {
     garbageFeeSettled,
     waterSettled,
     otherSettled,
+    remainingAgreement,
     remainingDeposit,
     remainingRent,
     remainingGarbage,
@@ -235,12 +250,14 @@ function buildNewTenancyConfirmation(tenant, payment, allocation) {
     || (num(depositShortfallBefore) + num(rentDue) + num(garbageFeeBefore) + num(waterChargeBefore));
 
   const dueParts = [];
+  if (num(agreementOutstanding) > 0) dueParts.push(`Agreement Fee: KES ${formatKes(agreementOutstanding)}`);
   if (num(depositShortfallBefore) > 0) dueParts.push(`Deposit: KES ${formatKes(depositShortfallBefore)}`);
   dueParts.push(`Monthly Rent: KES ${formatKes(rentDue)}`);
   if (num(garbageFeeBefore) > 0) dueParts.push(`Garbage Fee: KES ${formatKes(garbageFeeBefore)}`);
   if (num(waterChargeBefore) > 0) dueParts.push(`Water Charges: KES ${formatKes(waterChargeBefore)}`);
 
   const allocParts = [];
+  if (num(agreementSettled) > 0) allocParts.push(`Agreement Fee: KES ${formatKes(agreementSettled)}`);
   if (num(depositSettled) > 0) allocParts.push(`Deposit: KES ${formatKes(depositSettled)}`);
   if (num(rentSettled) > 0) allocParts.push(`Monthly Rent: KES ${formatKes(rentSettled)}`);
   if (num(garbageFeeSettled) > 0) allocParts.push(`Garbage Fee: KES ${formatKes(garbageFeeSettled)}`);
@@ -265,11 +282,11 @@ function buildNewTenancyConfirmation(tenant, payment, allocation) {
 
   if (num(remainingBalance) > 0) {
     const remParts = [];
+    if (num(remainingAgreement) > 0) remParts.push(`Agreement Fee: KES ${formatKes(remainingAgreement)}`);
     if (num(remainingDeposit) > 0) remParts.push(`Deposit: KES ${formatKes(remainingDeposit)}`);
     if (num(remainingRent) > 0) remParts.push(`Monthly Rent: KES ${formatKes(remainingRent)}`);
     if (num(remainingGarbage) > 0) remParts.push(`Garbage Fee: KES ${formatKes(remainingGarbage)}`);
     if (num(remainingWater) > 0) remParts.push(`Water Charges: KES ${formatKes(remainingWater)}`);
-    if (num(remainingOther) > 0) remParts.push(`Other Charges: KES ${formatKes(remainingOther)}`);
     msg += ` Your remaining balance is KES ${formatKes(remainingBalance)} (${remParts.join(', ')}).`;
   } else {
     msg += ` Your account is fully paid with no outstanding balance.`;

@@ -228,13 +228,21 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
   const totalPenalties = penaltyTotal + maintenanceTotal + otherTotal;
 
   let remaining = amount;
+  let agreementSettled = 0;
   let depositSettled = 0;
   let arrearsSettled = 0;
   let garbageFeeSettled = 0;
+  let waterSettled = 0;
   let rentSettled = 0;
   let penaltySettled = 0;
   let maintenanceSettled = 0;
   let otherSettled = 0;
+
+  const agreementOutstanding = Number(tenant.agreement_outstanding || 0);
+  if (agreementOutstanding > 0 && remaining > 0) {
+    agreementSettled = Math.min(agreementOutstanding, remaining);
+    remaining -= agreementSettled;
+  }
 
   if (currentArrears > 0 && remaining > 0) {
     arrearsSettled = Math.min(currentArrears, remaining);
@@ -266,14 +274,15 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
     remaining -= rentSettled;
   }
 
+  const futureAgreement = Math.max(0, agreementOutstanding - agreementSettled);
   const futureArrears = Math.max(0, currentArrears - arrearsSettled);
   const futurePenalties = Math.max(0, penaltyTotal - penaltySettled);
   const futureMaintenance = Math.max(0, maintenanceTotal - maintenanceSettled);
   const futureOther = Math.max(0, otherTotal - otherSettled);
   const futureGarbage = Math.max(0, garbageFeeShortfall - garbageFeeSettled);
   const futureRent = Math.max(0, remainingRentForMonth - rentSettled);
-  const futureOutstanding = futureArrears + futurePenalties + futureMaintenance + futureOther + futureGarbage + futureRent;
-  const totalDue = currentArrears + totalPenalties + garbageFeeShortfall + remainingRentForMonth;
+  const futureOutstanding = futureAgreement + futureArrears + futurePenalties + futureMaintenance + futureOther + futureGarbage + futureRent;
+  const totalDue = agreementOutstanding + currentArrears + totalPenalties + garbageFeeShortfall + remainingRentForMonth;
 
   const now = payment.payment_date ? new Date(payment.payment_date + 'T12:00:00') : new Date();
   const fullMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -289,6 +298,7 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
   msg += ` has been successfully received by GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS.`;
 
   const dueParts = [];
+  if (agreementOutstanding > 0) dueParts.push(`Agreement Fee: KES ${agreementOutstanding.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (currentArrears > 0) dueParts.push(`Arrears: KES ${currentArrears.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (penaltyTotal > 0) dueParts.push(`Penalties: KES ${penaltyTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (maintenanceTotal > 0) dueParts.push(`Maintenance Invoices: KES ${maintenanceTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
@@ -298,6 +308,7 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
   msg += ` Rent Due for ${fullMonth} ${fullYear} was KES ${totalDue.toLocaleString('en-KE', { maximumFractionDigits: 0 })} (${dueParts.join(', ')}).`;
 
   const allocParts = [];
+  if (agreementSettled > 0) allocParts.push(`Agreement Fee: KES ${agreementSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (arrearsSettled > 0) allocParts.push(`Arrears: KES ${arrearsSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (penaltySettled > 0) allocParts.push(`Penalties: KES ${penaltySettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (maintenanceSettled > 0) allocParts.push(`Maintenance Invoices: KES ${maintenanceSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
@@ -310,6 +321,7 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
 
   if (futureOutstanding > 0) {
     const remParts = [];
+    if (futureAgreement > 0) remParts.push(`Agreement Fee: KES ${futureAgreement.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     if (futureArrears > 0) remParts.push(`Arrears: KES ${futureArrears.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     if (futurePenalties > 0) remParts.push(`Penalties: KES ${futurePenalties.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     if (futureMaintenance > 0) remParts.push(`Maintenance Invoices: KES ${futureMaintenance.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
@@ -331,27 +343,33 @@ function buildOnboardingPreview(tenant, amount) {
   const rentDue = Math.max(0, num(tenant.rent_amount) - num(tenant.rent_paid_this_month));
   const garbageFeeBefore = Math.max(0, num(tenant.garbage_fee_amount) - num(tenant.garbage_fee_paid));
   const waterChargeBefore = Math.max(0, num(tenant.water_charge_amount) - num(tenant.water_charge_paid));
+  const agreementOutstanding = num(tenant.agreement_outstanding);
   let remaining = num(amount);
+  let agreementSettled = 0;
   let depositSettled = 0;
   let rentSettled = 0;
   let garbageFeeSettled = 0;
   let waterSettled = 0;
+  if (agreementOutstanding > 0 && remaining > 0) { agreementSettled = Math.min(agreementOutstanding, remaining); remaining -= agreementSettled; }
   if (depositShortfall > 0 && remaining > 0) { depositSettled = Math.min(depositShortfall, remaining); remaining -= depositSettled; }
   if (rentDue > 0 && remaining > 0) { rentSettled = Math.min(rentDue, remaining); remaining -= rentSettled; }
   if (garbageFeeBefore > 0 && remaining > 0) { garbageFeeSettled = Math.min(garbageFeeBefore, remaining); remaining -= garbageFeeSettled; }
   if (waterChargeBefore > 0 && remaining > 0) { waterSettled = Math.min(waterChargeBefore, remaining); remaining -= waterSettled; }
   const otherSettled = remaining;
-  const totalDue = depositShortfall + rentDue + garbageFeeBefore + waterChargeBefore;
+  const totalDue = agreementOutstanding + depositShortfall + rentDue + garbageFeeBefore + waterChargeBefore;
   return {
+    agreementOutstanding,
     depositShortfallBefore: depositShortfall,
     rentDue,
     garbageFeeBefore,
     waterChargeBefore,
+    agreementSettled,
     depositSettled,
     rentSettled,
     garbageFeeSettled,
     waterSettled,
     otherSettled,
+    remainingAgreement: Math.max(0, agreementOutstanding - agreementSettled),
     remainingDeposit: Math.max(0, depositShortfall - depositSettled),
     remainingRent: Math.max(0, rentDue - rentSettled),
     remainingGarbage: Math.max(0, garbageFeeBefore - garbageFeeSettled),
