@@ -3536,11 +3536,10 @@ async function buildMonthlyReportData(month, housePaybill) {
   const expectedRes = await query(expectedQ, expectedParams);
   const totalExpectedRent = Number(expectedRes.rows[0]?.total || 0);
 
-  // Maintenance charges for this month
-  let mcQ = `SELECT * FROM maintenance_charges WHERE charge_month = $1`;
+  // Maintenance charges for this month — exclude orphaned charges (deleted work orders)
+  let mcQ = `SELECT mc.* FROM maintenance_charges mc LEFT JOIN work_orders wo ON mc.work_order_id = wo.id WHERE mc.charge_month = $1 AND wo.id IS NOT NULL`;
   const mcParams = [month];
   if (housePaybill) {
-    // Filter by work order's house
     mcQ = `SELECT mc.* FROM maintenance_charges mc JOIN work_orders wo ON mc.work_order_id = wo.id WHERE mc.charge_month = $1 AND wo.house_paybill_number = $2`;
     mcParams.push(housePaybill);
   }
@@ -3568,7 +3567,7 @@ async function buildMonthlyReportData(month, housePaybill) {
   const chargesRaised = allCharges.reduce((s, c) => s + Number(c.amount_charged || 0), 0);
   const chargesPaid = allCharges.reduce((s, c) => s + Number(c.amount_recovered || 0), 0);
 
-  // Work order details
+  // Work order details — skip deleted work orders
   const woDetails = [];
   const woIds = [...new Set(allCharges.map(c => c.work_order_id))];
   for (const woId of woIds) {
@@ -3590,6 +3589,80 @@ async function buildMonthlyReportData(month, housePaybill) {
       })),
     });
   }
+
+  // Occupancy stats
+  let occQ = `SELECT
+    COUNT(*) FILTER (WHERE status != 'Vacant') AS occupied,
+    COUNT(*) FILTER (WHERE status = 'Vacant') AS vacant,
+    COUNT(*) FILTER (WHERE move_in_date >= $1 AND move_in_date < $2) AS new_tenants,
+    COUNT(*) FILTER (WHERE notice_to_vacate_date IS NOT NULL AND notice_to_vacate_date >= $1 AND notice_to_vacate_date < $2) AS exiting_tenants
+    FROM tenants`;
+  const occParams = [monthStart, monthEnd];
+  if (housePaybill) {
+    occQ += ` WHERE house_paybill_number = $3`;
+    occParams.push(housePaybill);
+  }
+  const occRes = await query(occQ, occParams);
+  const or = occRes.rows[0] || {};
+  const occ = { occupied: Number(or.occupied || 0), vacant: Number(or.vacant || 0), new_tenants: Number(or.new_tenants || 0), exiting_tenants: Number(or.exiting_tenants || 0) };
+
+  // Collection stats (paid / partial / unpaid)
+  let colQ = `SELECT
+    COUNT(*) FILTER (WHERE rent_paid_this_month >= rent_amount) AS paid,
+    COUNT(*) FILTER (WHERE rent_paid_this_month > 0 AND rent_paid_this_month < rent_amount) AS partial,
+    COUNT(*) FILTER (WHERE rent_paid_this_month = 0 OR rent_paid_this_month IS NULL) AS unpaid
+    FROM tenants WHERE status != 'Vacant'`;
+  const colParams = [];
+  if (housePaybill) {
+    colQ += ` AND house_paybill_number = $1`;
+    colParams.push(housePaybill);
+  }
+  const colRes = await query(colQ, colParams);
+  const cr = colRes.rows[0] || {};
+  const col = { paid: Number(cr.paid || 0), partial: Number(cr.partial || 0), unpaid: Number(cr.unpaid || 0) };
+  const totalActive = Number(col.paid || 0) + Number(col.partial || 0) + Number(col.unpaid || 0);
+  const collectionPct = totalActive > 0 ? Math.round((Number(col.paid || 0) / totalActive) * 100) : 0;
+
+  // Penalties for this month
+  let penQ = `SELECT p.*, t.name AS tenant_name FROM penalties p LEFT JOIN tenants t ON p.tenant_code = t.tenant_code WHERE p.created_at >= $1 AND p.created_at < $2`;
+  const penParams = [monthStart, monthEnd];
+  if (housePaybill) {
+    penQ += ` AND p.tenant_code IN (SELECT tenant_code FROM tenants WHERE house_paybill_number = $3)`;
+    penParams.push(housePaybill);
+  }
+  penQ += ` ORDER BY p.created_at DESC`;
+  const penRes = await query(penQ, penParams);
+  const penalties = penRes.rows.map(p => ({
+    tenant_name: p.tenant_name, description: p.description, category: p.category,
+    amount: Number(p.amount || 0), status: p.status,
+  }));
+
+  // Exit invoices finalized this month
+  let exitQ = `SELECT ei.*, t.name AS tenant_name FROM exit_invoices ei LEFT JOIN tenants t ON ei.tenant_code = t.tenant_code WHERE ei.finalized_at >= $1 AND ei.finalized_at < $2`;
+  const exitParams = [monthStart, monthEnd];
+  if (housePaybill) {
+    exitQ += ` AND ei.house_paybill_number = $3`;
+    exitParams.push(housePaybill);
+  }
+  exitQ += ` ORDER BY ei.finalized_at DESC`;
+  const exitRes = await query(exitQ, exitParams);
+  const exitInvoices = exitRes.rows.map(e => ({
+    exit_number: e.exit_number, tenant_name: e.tenant_name, unit_label: e.unit_label,
+    rent_treatment: e.rent_treatment, deductions_total: Number(e.deductions_total || 0),
+    deposit_refund: Number(e.deposit_refund || 0), final_settlement: Number(e.final_settlement || 0),
+    status: e.status,
+  }));
+
+  // Notices to vacate given this month
+  let noticeQ = `SELECT name AS tenant_name, tenant_code, notice_to_vacate_date::text AS notice_date, move_out_date::text AS expected_vacate, status FROM tenants WHERE notice_to_vacate_date >= $1 AND notice_to_vacate_date < $2`;
+  const noticeParams = [monthStart, monthEnd];
+  if (housePaybill) {
+    noticeQ += ` AND house_paybill_number = $3`;
+    noticeParams.push(housePaybill);
+  }
+  noticeQ += ` ORDER BY notice_to_vacate_date DESC`;
+  const noticeRes = await query(noticeQ, noticeParams);
+  const noticesToVacate = noticeRes.rows;
 
   return {
     period: month,
@@ -3627,6 +3700,19 @@ async function buildMonthlyReportData(month, housePaybill) {
       recovery_status: c.recovery_status,
     })),
     work_orders: woDetails,
+    occupancy: {
+      occupied: Number(occ.occupied || 0),
+      vacant: Number(occ.vacant || 0),
+      new_tenants: Number(occ.new_tenants || 0),
+      exiting_tenants: Number(occ.exiting_tenants || 0),
+      paid_count: Number(col.paid || 0),
+      partial_count: Number(col.partial || 0),
+      unpaid_count: Number(col.unpaid || 0),
+      collection_pct: collectionPct,
+    },
+    penalties,
+    exit_invoices: exitInvoices,
+    notices_to_vacate: noticesToVacate,
     generated_at: new Date().toISOString(),
   };
 }
@@ -3647,7 +3733,7 @@ async function generateMonthlyReport(month, housePaybill) {
      ON CONFLICT (month, house_paybill_number)
      DO UPDATE SET report_data = $4, property_name = $2, status = 'Active', updated_at = NOW()
      RETURNING *`,
-    [month, propertyName, housePaybill || null, JSON.stringify(data)]
+    [month, propertyName, housePaybill || null, JSON.stringify(data, (_, v) => typeof v === 'bigint' ? Number(v) : v)]
   );
   return res.rows[0];
 }

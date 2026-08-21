@@ -6927,18 +6927,36 @@ async function loadMonthlyReports() {
   if (!sel) return;
   try {
     const { reports } = await api.listMonthlyReports();
+    window._mrReports = reports;
     const existing = sel.value;
+    const seen = new Set();
     sel.innerHTML = '<option value="">Select month...</option>';
     (reports || []).forEach(r => {
+      if (seen.has(r.month)) return;
+      seen.add(r.month);
       const opt = document.createElement('option');
       opt.value = r.month;
       const [y, m] = r.month.split('-');
-      opt.textContent = `${FULL_MONTHS_MR[parseInt(m, 10) - 1]} ${y}` + (r.property_name ? ` — ${r.property_name}` : ' — All Properties') + (r.status === 'Closed' ? ' (Closed)' : '');
+      opt.textContent = `${FULL_MONTHS_MR[parseInt(m, 10) - 1]} ${y}`;
       sel.appendChild(opt);
     });
     if (existing) sel.value = existing;
   } catch (err) {
     sel.innerHTML = '<option value="">Failed to load</option>';
+  }
+
+  const propSel = document.getElementById('mr-property-select');
+  if (propSel && !propSel.options.length > 1) {
+    try {
+      const { houses } = await api.houses();
+      propSel.innerHTML = '<option value="">All Properties</option>';
+      (houses || []).forEach(h => {
+        const opt = document.createElement('option');
+        opt.value = h.paybill_number;
+        opt.textContent = h.house_name;
+        propSel.appendChild(opt);
+      });
+    } catch (_) {}
   }
 }
 
@@ -6947,7 +6965,8 @@ async function loadReportData(month) {
   const empty = document.getElementById('mr-empty');
   if (!month) { if (view) view.classList.add('hidden'); if (empty) empty.classList.remove('hidden'); return; }
   try {
-    const { report } = await api.getMonthlyReport(month);
+    const housePaybill = document.getElementById('mr-property-select')?.value || '';
+    const { report } = await api.getMonthlyReport(month, housePaybill || undefined);
     const data = typeof report.report_data === 'string' ? JSON.parse(report.report_data) : report.report_data;
     if (view) view.classList.remove('hidden');
     if (empty) empty.classList.add('hidden');
@@ -6997,6 +7016,62 @@ async function loadReportData(month) {
       <div><span class="text-slate-400">Labour Costs:</span> <span class="font-mono">${money(mnt.total_labour_costs)}</span></div>
       <div><span class="text-slate-400">Charges Raised:</span> <span class="font-mono">${money(mnt.charges_raised)}</span></div>
     `;
+
+    // Property / Unit Performance
+    const occ = data.occupancy || {};
+    document.getElementById('mr-occupied').textContent = occ.occupied || 0;
+    document.getElementById('mr-vacant').textContent = occ.vacant || 0;
+    document.getElementById('mr-new-tenants').textContent = occ.new_tenants || 0;
+    document.getElementById('mr-exiting').textContent = occ.exiting_tenants || 0;
+    document.getElementById('mr-paid-count').textContent = occ.paid_count || 0;
+    document.getElementById('mr-partial-count').textContent = occ.partial_count || 0;
+    document.getElementById('mr-unpaid-count').textContent = occ.unpaid_count || 0;
+    document.getElementById('mr-collection-pct').textContent = (occ.collection_pct || 0) + '%';
+
+    // Penalties
+    const penalties = data.penalties || [];
+    document.getElementById('mr-penalty-summary').innerHTML = `
+      <div><span class="text-slate-400">Total Penalties:</span> <span class="font-mono">${money(penalties.reduce((s, p) => s + Number(p.amount || 0), 0))}</span></div>
+      <div><span class="text-slate-400">Paid:</span> <span class="font-mono text-green-400">${money(penalties.filter(p => p.status === 'Paid').reduce((s, p) => s + Number(p.amount || 0), 0))}</span></div>
+      <div><span class="text-slate-400">Outstanding:</span> <span class="font-mono text-rose-400">${money(penalties.filter(p => p.status !== 'Paid').reduce((s, p) => s + Number(p.amount || 0), 0))}</span></div>
+    `;
+    document.getElementById('mr-penalties-tbody').innerHTML = penalties.length ? penalties.map(p => `<tr>
+      <td>${escapeHtml(p.tenant_name || '')}</td>
+      <td>${escapeHtml(p.description || '')}</td>
+      <td>${escapeHtml(p.category || '')}</td>
+      <td class="text-right font-mono">${money(p.amount)}</td>
+      <td><span class="status-badge ${p.status === 'Paid' ? 'badge-active' : 'badge-pending'}">${escapeHtml(p.status || '')}</span></td>
+    </tr>`).join('') : '<tr><td colspan="5" class="text-center text-slate-500 py-4">No penalties this month</td></tr>';
+
+    // Exit Invoices
+    const exits = data.exit_invoices || [];
+    document.getElementById('mr-exit-summary').innerHTML = exits.length
+      ? `<span class="text-slate-400">${exits.length} exit invoice(s) finalized this month</span>`
+      : '';
+    document.getElementById('mr-exits-tbody').innerHTML = exits.length ? exits.map(e => `<tr>
+      <td class="font-mono text-xs">${escapeHtml(e.exit_number || '')}</td>
+      <td>${escapeHtml(e.tenant_name || '')}</td>
+      <td>${escapeHtml(e.unit_label || '')}</td>
+      <td>${escapeHtml(e.rent_treatment || '')}</td>
+      <td class="text-right font-mono">${money(e.deductions_total)}</td>
+      <td class="text-right font-mono">${money(e.deposit_refund)}</td>
+      <td class="text-right font-mono font-semibold">${money(e.final_settlement)}</td>
+      <td><span class="status-badge ${e.status === 'Finalized' ? 'badge-active' : 'badge-pending'}">${escapeHtml(e.status || '')}</span></td>
+    </tr>`).join('') : '<tr><td colspan="8" class="text-center text-slate-500 py-4">No exit invoices this month</td></tr>';
+
+    // Notices to Vacate
+    const notices = data.notices_to_vacate || [];
+    document.getElementById('mr-notices-summary').innerHTML = notices.length
+      ? `<span class="text-slate-400">${notices.length} tenant(s) gave notice this month</span>`
+      : '';
+    document.getElementById('mr-notices-tbody').innerHTML = notices.length ? notices.map(n => `<tr>
+      <td>${escapeHtml(n.tenant_name || '')}</td>
+      <td>${escapeHtml(n.tenant_code || '')}</td>
+      <td class="font-mono text-xs">${escapeHtml(n.notice_date || '')}</td>
+      <td class="font-mono text-xs">${escapeHtml(n.expected_vacate || '')}</td>
+      <td><span class="status-badge badge-pending">${escapeHtml(n.status || '')}</span></td>
+    </tr>`).join('') : '<tr><td colspan="5" class="text-center text-slate-500 py-4">No notices to vacate this month</td></tr>';
+
   } catch (err) {
     if (view) view.classList.add('hidden');
     if (empty) { empty.classList.remove('hidden'); empty.textContent = 'No report found for this month. Run monthly rollover first.'; }
@@ -7004,13 +7079,17 @@ async function loadReportData(month) {
 }
 
 document.getElementById('mr-month-select')?.addEventListener('change', (e) => loadReportData(e.target.value));
+document.getElementById('mr-property-select')?.addEventListener('change', () => {
+  const month = document.getElementById('mr-month-select')?.value;
+  if (month) loadReportData(month);
+});
 document.getElementById('btn-refresh-report')?.addEventListener('click', async () => {
   const month = document.getElementById('mr-month-select')?.value;
+  const housePaybill = document.getElementById('mr-property-select')?.value || '';
   if (!month) return;
   try {
-    await api.refreshMonthlyReport(month);
+    await api.refreshMonthlyReport(month, housePaybill || undefined);
     await loadReportData(month);
-    await loadMonthlyReports();
   } catch (err) { alert(err.message); }
 });
 
