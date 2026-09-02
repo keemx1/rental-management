@@ -7867,9 +7867,15 @@ async function waLoadTemplates() {
       list.innerHTML = '<p class="text-slate-500 text-sm">No templates</p>';
       return;
     }
+    const labels = {
+      PAYMENT_RECEIVED: 'Payment Received', RENT_REMINDER: 'Rent Reminder',
+      RENT_INVOICE: 'Rent Invoice', MAINTENANCE_RECEIVED: 'Maintenance Request',
+      MAINTENANCE_UPDATED: 'Maintenance Update', WELCOME_TENANT: 'Welcome Tenant',
+      GENERAL_ANNOUNCEMENT: 'General Announcement',
+    };
     list.innerHTML = keys.map(k => `
-      <div class="flex items-center justify-between p-2 rounded bg-slate-800/50">
-        <span class="text-sm font-mono">${escapeHtml(k)}</span>
+      <div class="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+        <span class="text-sm font-mono text-slate-700">${escapeHtml(labels[k] || k)}</span>
         <button class="qc-btn text-xs" onclick="waPreviewTemplate('${k}')">Preview</button>
       </div>
     `).join('');

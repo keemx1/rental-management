@@ -5,6 +5,7 @@
  */
 
 const { WhatsAppProvider } = require('./provider');
+const QRCode = require('qrcode');
 
 /** @typedef {'disconnected'|'connecting'|'qr_required'|'authenticating'|'connected'} MockState */
 
@@ -45,14 +46,17 @@ class MockWhatsAppProvider extends WhatsAppProvider {
     await this._delay(1000);
 
     this.state = 'qr_required';
-    this.qrCode = 'MOCK_QR_CODE_DATA';
+
+    // Generate a real QR code image (base64 data URL) from a mock WhatsApp link
+    const mockLink = `https://wa.me/qr/mock_${Date.now()}`;
+    this.qrCode = await QRCode.toDataURL(mockLink, { width: 256, margin: 2 });
     this.emit('state_change', this.state);
     this.emit('qr', this.qrCode);
 
-    // Auto-connect after 5 seconds of QR display
+    // Auto-connect after 10 seconds of QR display (longer for user to "scan")
     this._qrTimeout = setTimeout(() => {
       this._completeAuth();
-    }, 5000);
+    }, 10000);
   }
 
   /**
