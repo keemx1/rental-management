@@ -220,13 +220,13 @@ router.get('/messages/stats', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT
-        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) as today,
-        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '7 days') as this_week,
-        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '30 days') as this_month,
-        COUNT(*) FILTER (WHERE status = 'sent') as sent_count,
-        COUNT(*) FILTER (WHERE status = 'failed') as failed_count,
-        COUNT(*) FILTER (WHERE status = 'delivered') as delivered_count,
-        COUNT(*) as total
+        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)::int as today,
+        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '7 days')::int as this_week,
+        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '30 days')::int as this_month,
+        COUNT(*) FILTER (WHERE status = 'sent')::int as sent_count,
+        COUNT(*) FILTER (WHERE status = 'failed')::int as failed_count,
+        COUNT(*) FILTER (WHERE status = 'delivered')::int as delivered_count,
+        COUNT(*)::int as total
        FROM whatsapp_message_log`
     );
     res.json({ stats: result.rows[0] });

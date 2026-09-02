@@ -1,7 +1,7 @@
 const express = require('express');
 const { requireAuthActive } = require('../middleware/auth');
 const store = require('../storage/store');
-const whatsapp = require('../config/whatsapp');
+const sessionManager = require('../whatsapp/session-manager');
 
 const router = express.Router();
 router.use(requireAuthActive);
@@ -49,12 +49,11 @@ router.post('/send', async (req, res) => {
       let error = null;
       let whatsappMessageId = null;
       try {
-        const result = await whatsapp.sendTextMessage(tenant.phone_number, renderedBody);
-        status = result.status;
-        whatsappMessageId = result.messageId;
-        error = result.failureReason || (result.status === 'Failed' ? 'ack_error' : null);
+        const result = await sessionManager.sendText(tenant.phone_number, renderedBody);
+        status = 'sent';
+        whatsappMessageId = result.id;
       } catch (err) {
-        status = 'Failed';
+        status = 'failed';
         error = err.message;
       }
       await store.logMessage({
@@ -65,6 +64,15 @@ router.post('/send', async (req, res) => {
         whatsappMessageId,
         failureReason: error,
       });
+      // Also log to whatsapp_message_log for stats
+      try {
+        const { pool } = require('../config/database');
+        await pool.query(
+          `INSERT INTO whatsapp_message_log (tenant_code, phone_number, direction, message_type, content, status, provider_message_id, error_message)
+           VALUES ($1, $2, 'outbound', 'broadcast', $3, $4, $5, $6)`,
+          [tenant.tenant_code, tenant.phone_number, renderedBody, status, whatsappMessageId, error]
+        );
+      } catch (_) {}
       results.push({ tenant_id: tenant.id, tenant_name: tenant.name, status, error });
     }
 

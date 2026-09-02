@@ -7793,11 +7793,12 @@ async function waSendTestMsg() {
 
 async function waLoadStats() {
   try {
-    const stats = await api.waQueueStats();
-    setText('wa-stat-today', stats.today || 0);
-    setText('wa-stat-sent', stats.sent || 0);
-    setText('wa-stat-failed', stats.failed || 0);
-    setText('wa-stat-queued', stats.queued || 0);
+    const data = await api.waMessageStats();
+    const stats = data.stats || {};
+    setText('wa-stat-today', Number(stats.today || 0));
+    setText('wa-stat-sent', Number(stats.sent_count || 0));
+    setText('wa-stat-failed', Number(stats.failed_count || 0));
+    setText('wa-stat-queued', Number(stats.queued || 0));
   } catch (_) {}
 }
 

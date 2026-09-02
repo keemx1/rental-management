@@ -171,10 +171,10 @@ async function processNextJob() {
 
     const result = await sessionManager.sendText(job.phone_number, messageText);
 
-    if (result && result.ack > 0) {
-      await markSent(job.id, result.messageId);
+    if (result && result.success) {
+      await markSent(job.id, result.id);
     } else {
-      throw new Error(result?.failureReason || 'Send failed (ack <= 0)');
+      throw new Error('Send failed');
     }
   } catch (err) {
     console.error(`[MsgQueue] Job ${job.id} failed:`, err.message);
