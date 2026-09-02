@@ -7656,7 +7656,7 @@ async function waLoadStatus() {
     if (!dot) return;
 
     const state = data.state || 'disconnected';
-    const stateColors = { connected: 'bg-green-500', qr_required: 'bg-amber-500', connecting: 'bg-blue-500', disconnected: 'bg-slate-500', error: 'bg-red-500' };
+    const stateColors = { connected: 'bg-green-500', qr_required: 'bg-amber-500', connecting: 'bg-blue-500', disconnected: 'bg-slate-400', error: 'bg-red-500' };
     const stateLabels = { connected: 'CONNECTED', qr_required: 'QR CODE READY', connecting: 'CONNECTING…', disconnected: 'NOT CONNECTED', error: 'ERROR', authenticating: 'AUTHENTICATING…', disconnecting: 'DISCONNECTING…' };
 
     dot.className = `w-2 h-2 rounded-full ${stateColors[state] || 'bg-slate-500'}`;
@@ -7709,7 +7709,7 @@ function waShowQr(qrData) {
   if (qrData) {
     container.innerHTML = `<img src="${qrData}" alt="WhatsApp QR Code" class="w-64 h-64 rounded-lg">`;
     document.getElementById('wa-qr-status').textContent = 'Waiting for scan…';
-    document.getElementById('wa-qr-status').className = 'text-sm text-amber-400';
+    document.getElementById('wa-qr-status').className = 'text-sm text-amber-600';
   } else {
     container.innerHTML = '<div class="w-64 h-64 bg-white rounded-lg flex items-center justify-center"><p class="text-slate-500 text-sm">Generating QR code…</p></div>';
   }
