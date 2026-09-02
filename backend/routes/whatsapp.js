@@ -22,7 +22,7 @@ router.get('/status', async (req, res) => {
   try {
     const stateInfo = sessionManager.getStateInfo();
     res.json({
-      state: stateInfo.state,
+      state: stateInfo.state.toLowerCase(),
       qrCode: stateInfo.qrCode,
       sessionInfo: stateInfo.sessionInfo,
       connectedAt: stateInfo.connectedAt,
@@ -37,7 +37,7 @@ router.get('/status', async (req, res) => {
 router.post('/connect', async (req, res) => {
   try {
     await sessionManager.connect();
-    res.json({ ok: true, state: sessionManager.getState() });
+    res.json({ ok: true, state: sessionManager.getState().toLowerCase() });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Failed to connect WhatsApp' });
   }
@@ -46,7 +46,7 @@ router.post('/connect', async (req, res) => {
 router.post('/disconnect', async (req, res) => {
   try {
     await sessionManager.disconnect();
-    res.json({ ok: true, state: sessionManager.getState() });
+    res.json({ ok: true, state: sessionManager.getState().toLowerCase() });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Failed to disconnect WhatsApp' });
   }
@@ -55,7 +55,7 @@ router.post('/disconnect', async (req, res) => {
 router.post('/logout', async (req, res) => {
   try {
     await sessionManager.logout();
-    res.json({ ok: true, state: sessionManager.getState() });
+    res.json({ ok: true, state: sessionManager.getState().toLowerCase() });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Failed to logout WhatsApp' });
   }

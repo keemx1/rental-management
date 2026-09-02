@@ -65,7 +65,17 @@ function showView(name) {
   if (name === 'tenants') loadTenants();
   if (name === 'payments') loadPayments();
   if (name === 'broadcasts') loadBroadcastCenter();
-  if (name === 'whatsapp') refreshWhatsappBeacon();
+  if (name === 'whatsapp') {
+    refreshWhatsappBeacon();
+    waLoadStatus();
+    waLoadSettings();
+    waLoadMessages();
+    waLoadTemplates();
+    waStartPolling();
+  } else if (name !== 'whatsapp') {
+    waStopPolling();
+    waStopQrPolling();
+  }
   if (name === 'invoices') loadInvoicesCenter();
   if (name === 'work-orders') loadWorkOrders();
   if (name === 'documents') loadDocuments();
@@ -7914,24 +7924,6 @@ function waStartQrPolling() {
 function waStopQrPolling() {
   if (_waQrPolling) { clearInterval(_waQrPolling); _waQrPolling = null; }
 }
-
-// Initialize WhatsApp view when navigated to
-(function () {
-  const origShowView = showView;
-  window.showView = function (name) {
-    origShowView(name);
-    if (name === 'whatsapp') {
-      waLoadStatus();
-      waLoadSettings();
-      waLoadMessages();
-      waLoadTemplates();
-      waStartPolling();
-    } else {
-      waStopPolling();
-      waStopQrPolling();
-    }
-  };
-})();
 
 window.waConnect = waConnect;
 window.waDisconnect = waDisconnect;
