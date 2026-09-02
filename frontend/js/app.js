@@ -7894,8 +7894,11 @@ async function waLoadTemplates() {
       GENERAL_ANNOUNCEMENT: 'General Announcement',
     };
     list.innerHTML = keys.map(k => `
-      <div class="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
-        <span class="text-sm font-mono text-slate-700">${escapeHtml(labels[k] || k)}</span>
+      <div class="flex items-center justify-between p-3 rounded bg-slate-50 border border-slate-200">
+        <div>
+          <span class="text-sm font-semibold text-slate-700">${escapeHtml(labels[k] || k)}</span>
+          <span class="text-xs text-slate-400 ml-2 font-mono">${escapeHtml(k)}</span>
+        </div>
         <button class="qc-btn text-xs" onclick="waPreviewTemplate('${k}')">Preview</button>
       </div>
     `).join('');
@@ -7905,7 +7908,28 @@ async function waLoadTemplates() {
 async function waPreviewTemplate(key) {
   try {
     const data = await api.waTemplatePreview(key);
-    alert(data.rendered || 'No preview available');
+    const content = data.rendered || 'No preview available';
+    const labels = {
+      PAYMENT_RECEIVED: 'Payment Received', RENT_REMINDER: 'Rent Reminder',
+      RENT_INVOICE: 'Rent Invoice', MAINTENANCE_RECEIVED: 'Maintenance Request',
+      MAINTENANCE_UPDATED: 'Maintenance Update', WELCOME_TENANT: 'Welcome Tenant',
+      GENERAL_ANNOUNCEMENT: 'General Announcement',
+    };
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+    overlay.innerHTML = `
+      <div class="glass-panel p-6 max-w-md w-full mx-4" style="background:white">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold text-slate-800">${escapeHtml(labels[key] || key)}</h3>
+          <button class="text-slate-400 hover:text-slate-600 text-xl" onclick="this.closest('.fixed').remove()">&times;</button>
+        </div>
+        <pre class="text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 p-4 rounded border border-slate-200 font-sans leading-relaxed">${escapeHtml(content)}</pre>
+        <div class="mt-4 flex justify-end">
+          <button class="qc-btn" onclick="this.closest('.fixed').remove()">Close</button>
+        </div>
+      </div>`;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
   } catch (err) {
     alert('Failed: ' + (err.message || err));
   }

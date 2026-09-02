@@ -308,9 +308,36 @@ router.get('/templates/:key', async (req, res) => {
 
 router.post('/templates/:key/preview', async (req, res) => {
   try {
+    const key = req.params.key;
     const sampleData = req.body || {};
-    const rendered = templates.previewTemplate(req.params.key, sampleData);
-    res.json({ key: req.params.key, rendered });
+
+    // Use default sample data if none provided
+    const defaults = {
+      TENANT_NAME: 'JANE WAWERU',
+      FIRST_NAME: 'JANE',
+      AMOUNT: '15,000',
+      MONTH: 'September',
+      YEAR: '2026',
+      HOUSE_NO: 'A302',
+      PROPERTY_NAME: 'LUXURY APARTMENT',
+      PROPERTY: 'LUXURY APARTMENT',
+      REFERENCE: 'QGH7X4P2RB',
+      DUE_DATE: '5th September 2026',
+      NEXT_DUE: '5th October 2026',
+      TOTAL_DUE: '15,000',
+      DUE_BREAKDOWN: 'Monthly Rent: KES 15,000',
+      ALLOCATION: 'Monthly Rent: KES 15,000',
+      REMAINING_TEXT: ' Your account is fully paid with no outstanding balance.',
+      REQUEST_ID: 'WO-2026-0001',
+      DESCRIPTION: 'Leaking kitchen faucet',
+      STATUS: 'In Progress',
+      TECHNICIAN_TEXT: '\nAssigned to: John Kariuki',
+      MESSAGE: 'Rent collection deadline extended to 10th September 2026.',
+    };
+
+    const data = { ...defaults, ...sampleData };
+    const rendered = templates.previewTemplate(key, data);
+    res.json({ key, rendered });
   } catch (err) {
     if (err.message && err.message.includes('not found')) {
       return res.status(404).json({ error: err.message });

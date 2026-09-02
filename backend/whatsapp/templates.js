@@ -2,25 +2,25 @@
 
 const DEFAULT_TEMPLATES = {
   PAYMENT_RECEIVED:
-    'Hello {{tenant_name}} 👋\n\nWe have received your rent payment.\n\nProperty: {{property_name}}\nUnit: {{unit_number}}\nAmount: KES {{amount}}\nReference: {{reference}}\nRemaining balance: KES {{balance}}\n\nThank you.',
+    'Dear {{TENANT_NAME}}, your rent payment of KES {{AMOUNT}} for the month of {{MONTH}} {{YEAR}} for House No. {{HOUSE_NO}}, {{PROPERTY_NAME}} has been successfully received by GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS.\n\nRent Due for {{MONTH}} {{YEAR}} was KES {{TOTAL_DUE}} ({{DUE_BREAKDOWN}}). Your payment has been allocated as follows: {{ALLOCATION}}.{{REMAINING_TEXT}}\n\nTransaction Ref: {{REFERENCE}}. Next rent due: {{NEXT_DUE}}. Thank you.',
 
   RENT_REMINDER:
-    'Hello {{tenant_name}} 👋\n\nThis is a reminder that your rent of KES {{amount}} is due on {{due_date}}.\n\nProperty: {{property_name}}\nUnit: {{unit_number}}\n\nPlease ensure timely payment to avoid penalties.',
+    'Dear {{TENANT_NAME}}, this is a reminder that your rent of KES {{AMOUNT}} for {{MONTH}} {{YEAR}} is due on {{DUE_DATE}}.\n\nHouse No. {{HOUSE_NO}}, {{PROPERTY_NAME}}\n\nPlease ensure timely payment to avoid penalties.\n\nGUTENBERG ELITE HOME & PROPERTY MANAGEMENTS\nFind a Home. Leave the Management to Us.',
 
   RENT_INVOICE:
-    'Hello {{tenant_name}},\n\nYour rent invoice has been generated.\n\nProperty: {{property_name}}\nUnit: {{unit_number}}\nAmount: KES {{amount}}\nDue date: {{due_date}}\n\nPlease find the invoice attached.',
+    'Dear {{TENANT_NAME}},\n\nYour rent invoice has been generated.\n\nProperty: {{PROPERTY_NAME}}\nUnit: {{HOUSE_NO}}\nAmount: KES {{AMOUNT}}\nDue date: {{DUE_DATE}}\n\nPlease find the invoice attached.\n\nGUTENBERG ELITE HOME & PROPERTY MANAGEMENTS',
 
   MAINTENANCE_RECEIVED:
-    'Hi {{tenant_name}} 👋\n\nYour maintenance request #{{request_id}} has been received.\n\nIssue: {{description}}\n\nOur team will review it shortly.',
+    'Hi {{TENANT_NAME}},\n\nYour maintenance request #{{REQUEST_ID}} has been received.\n\nIssue: {{DESCRIPTION}}\nHouse No. {{HOUSE_NO}}, {{PROPERTY_NAME}}\n\nOur team will review it shortly.\n\nGUTENBERG ELITE HOME & PROPERTY MANAGEMENTS',
 
   MAINTENANCE_UPDATED:
-    'Hi {{tenant_name}},\n\nYour maintenance request #{{request_id}} has been updated.\n\nStatus: {{status}}\n\n{{#if technician}}Assigned to: {{technician}}{{/if}}',
+    'Hi {{TENANT_NAME}},\n\nYour maintenance request #{{REQUEST_ID}} has been updated.\n\nStatus: {{STATUS}}{{TECHNICIAN_TEXT}}\n\nGUTENBERG ELITE HOME & PROPERTY MANAGEMENTS',
 
   WELCOME_TENANT:
-    'Hello {{tenant_name}} 👋\n\nWelcome to {{property_name}}!\n\nUnit: {{unit_number}}\nMonthly Rent: KES {{rent_amount}}\nMove-in Date: {{move_in_date}}\n\nWe\'re delighted to have you. For any assistance, contact us at 0725 934 615.\n\nGUTENBERG ELITE HOME & PROPERTY MANAGEMENTS',
+    'Dear {{TENANT_NAME}},\n\nWELCOME to GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS. Your tenancy at House No. {{HOUSE_NO}}, {{PROPERTY_NAME}} is now active.\n\nTOTAL DUE UPON OCCUPANCY: KES {{TOTAL_DUE}}\n({{DUE_BREAKDOWN}})\n\nYour payment of KES {{AMOUNT}} for {{MONTH}} {{YEAR}} has been successfully received. It has been allocated as follows: {{ALLOCATION}}.{{REMAINING_TEXT}}\n\nTransaction Ref: {{REFERENCE}}. Next rent due: {{NEXT_DUE}}.\n\nWelcome {{FIRST_NAME}}! We are delighted to have you. If you require any assistance, kindly contact our office on 0725 934 615 / 0702 705 321.\n\nGUTENBERG ELITE HOME & PROPERTY MANAGEMENTS\nFind a Home. Leave the Management to Us.',
 
   GENERAL_ANNOUNCEMENT:
-    '📢 Announcement\n\n{{message}}\n\n— GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS',
+    '📢 Announcement\n\n{{MESSAGE}}\n\n— GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS\nFind a Home. Leave the Management to Us.',
 };
 
 let _templates = { ...DEFAULT_TEMPLATES };
