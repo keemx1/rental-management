@@ -7795,10 +7795,10 @@ async function waLoadStats() {
   try {
     const data = await api.waMessageStats();
     const stats = data.stats || {};
-    setText('wa-stat-today', Number(stats.today || 0));
-    setText('wa-stat-sent', Number(stats.sent_count || 0));
-    setText('wa-stat-failed', Number(stats.failed_count || 0));
-    setText('wa-stat-queued', Number(stats.queued || 0));
+    setTextEl('wa-stat-today', Number(stats.today || 0));
+    setTextEl('wa-stat-sent', Number(stats.sent_count || 0));
+    setTextEl('wa-stat-failed', Number(stats.failed_count || 0));
+    setTextEl('wa-stat-queued', Number(stats.queued || 0));
   } catch (_) {}
 }
 
