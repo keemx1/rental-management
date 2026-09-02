@@ -43,6 +43,20 @@ router.post('/connect', async (req, res) => {
   }
 });
 
+router.post('/simulate-scan', async (req, res) => {
+  try {
+    const provider = sessionManager.getProvider();
+    if (provider && typeof provider.simulateScan === 'function') {
+      await provider.simulateScan();
+      res.json({ ok: true, state: sessionManager.getState().toLowerCase() });
+    } else {
+      res.status(400).json({ error: 'Simulate scan not available for this provider' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to simulate scan' });
+  }
+});
+
 router.post('/disconnect', async (req, res) => {
   try {
     await sessionManager.disconnect();

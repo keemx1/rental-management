@@ -7738,6 +7738,16 @@ async function waConnect() {
   }
 }
 
+async function waSimulateScan() {
+  try {
+    const btn = document.querySelector('#wa-qr-panel button');
+    if (btn) { btn.textContent = 'Connecting…'; btn.disabled = true; }
+    await api.waSimulateScan();
+  } catch (err) {
+    alert('Failed: ' + (err.message || err));
+  }
+}
+
 async function waDisconnect() {
   if (!confirm('Disconnect WhatsApp session?')) return;
   try {
@@ -7926,6 +7936,7 @@ function waStopQrPolling() {
 }
 
 window.waConnect = waConnect;
+window.waSimulateScan = waSimulateScan;
 window.waDisconnect = waDisconnect;
 window.waLogout = waLogout;
 window.waSendTest = waSendTest;

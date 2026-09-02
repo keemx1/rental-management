@@ -52,11 +52,16 @@ class MockWhatsAppProvider extends WhatsAppProvider {
     this.qrCode = await QRCode.toDataURL(mockLink, { width: 256, margin: 2 });
     this.emit('state_change', this.state);
     this.emit('qr', this.qrCode);
+    // No auto-connect — user clicks "Simulate Scan" to complete
+  }
 
-    // Auto-connect after 10 seconds of QR display (longer for user to "scan")
-    this._qrTimeout = setTimeout(() => {
-      this._completeAuth();
-    }, 10000);
+  /**
+   * Simulate a QR scan (mock only).
+   * @returns {Promise<void>}
+   */
+  async simulateScan() {
+    if (this.state !== 'qr_required') return;
+    this._completeAuth();
   }
 
   /**

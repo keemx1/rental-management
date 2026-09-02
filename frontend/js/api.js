@@ -721,6 +721,9 @@ export const api = {
   waConnect() {
     return request('/whatsapp/connect', { method: 'POST' });
   },
+  waSimulateScan() {
+    return request('/whatsapp/simulate-scan', { method: 'POST' });
+  },
   waDisconnect() {
     return request('/whatsapp/disconnect', { method: 'POST' });
   },
