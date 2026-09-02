@@ -326,12 +326,152 @@
       <section data-view="whatsapp" class="hidden space-y-6">
         <header class="section-head">
           <p class="section-num">COMMUNICATIONS</p>
-          <h2 class="section-title text-2xl">WhatsApp Gateway</h2>
-          <p class="section-desc">Connection status and configuration for Meta Cloud API</p>
+          <h2 class="section-title text-2xl">WhatsApp Module</h2>
+          <p class="section-desc">QR-linked WhatsApp notifications — Tabana-style connection</p>
         </header>
-        <div id="wa-beacon-slot">
-          <div class="whatsapp-module glass-panel p-5">
-            <p class="text-slate-500 font-mono text-sm text-center py-4">Loading WhatsApp…</p>
+
+        <!-- Status + Connect Panel -->
+        <div class="glass-panel p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">WhatsApp Status</h3>
+            <div id="wa-status-badge" class="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-700 text-sm">
+              <span id="wa-status-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+              <span id="wa-status-text">Checking…</span>
+            </div>
+          </div>
+
+          <div id="wa-session-info" class="hidden mb-4 p-3 rounded bg-slate-800/50 text-sm font-mono">
+            <div id="wa-phone-display"></div>
+            <div id="wa-platform-display" class="text-slate-400"></div>
+            <div id="wa-connected-since" class="text-slate-500 text-xs mt-1"></div>
+          </div>
+
+          <div id="wa-stats-row" class="hidden grid grid-cols-4 gap-3 mb-4">
+            <div class="text-center p-2 rounded bg-slate-800/50">
+              <div class="text-xl font-bold" id="wa-stat-today">0</div>
+              <div class="text-xs text-slate-400">Today</div>
+            </div>
+            <div class="text-center p-2 rounded bg-slate-800/50">
+              <div class="text-xl font-bold text-green-400" id="wa-stat-sent">0</div>
+              <div class="text-xs text-slate-400">Sent</div>
+            </div>
+            <div class="text-center p-2 rounded bg-slate-800/50">
+              <div class="text-xl font-bold text-red-400" id="wa-stat-failed">0</div>
+              <div class="text-xs text-slate-400">Failed</div>
+            </div>
+            <div class="text-center p-2 rounded bg-slate-800/50">
+              <div class="text-xl font-bold text-amber-400" id="wa-stat-queued">0</div>
+              <div class="text-xs text-slate-400">Queued</div>
+            </div>
+          </div>
+
+          <div class="flex gap-2 flex-wrap">
+            <button type="button" id="btn-wa-connect" class="qc-btn qc-btn-primary" onclick="waConnect()">Connect WhatsApp</button>
+            <button type="button" id="btn-wa-disconnect" class="qc-btn" onclick="waDisconnect()" style="display:none">Disconnect</button>
+            <button type="button" id="btn-wa-logout" class="qc-btn" onclick="waLogout()" style="display:none">Logout & Clear Session</button>
+            <button type="button" id="btn-wa-test" class="qc-btn" onclick="waSendTest()" style="display:none">Send Test Message</button>
+          </div>
+        </div>
+
+        <!-- QR Code Modal -->
+        <div id="wa-qr-panel" class="hidden glass-panel p-5 text-center">
+          <h3 class="text-lg font-semibold mb-2">Connect WhatsApp</h3>
+          <p class="text-sm text-slate-400 mb-4">Scan this QR code using the WhatsApp account you want to use for tenant notifications.</p>
+          <div id="wa-qr-container" class="flex justify-center mb-4">
+            <div class="w-64 h-64 bg-white rounded-lg flex items-center justify-center">
+              <p class="text-slate-500 text-sm">Generating QR code…</p>
+            </div>
+          </div>
+          <ol class="text-left text-sm text-slate-400 space-y-1 max-w-xs mx-auto mb-4">
+            <li>1. Open WhatsApp on your phone</li>
+            <li>2. Go to Settings → Linked Devices</li>
+            <li>3. Tap "Link a Device"</li>
+            <li>4. Scan this QR code</li>
+          </ol>
+          <div id="wa-qr-status" class="text-sm text-amber-400">Waiting for scan…</div>
+        </div>
+
+        <!-- Notification Settings -->
+        <div class="glass-panel p-5">
+          <h3 class="text-lg font-semibold mb-3">Notification Settings</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="wa-settings-grid">
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" id="wa-set-welcome" class="accent-green-500" checked> Welcome tenant
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" id="wa-set-invoice" class="accent-green-500" checked> Rent invoice
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" id="wa-set-reminder" class="accent-green-500" checked> Rent reminder
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" id="wa-set-overdue" class="accent-green-500" checked> Overdue rent
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" id="wa-set-payment" class="accent-green-500" checked> Payment confirmation
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" id="wa-set-maintenance" class="accent-green-500" checked> Maintenance request
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" id="wa-set-maint-update" class="accent-green-500" checked> Maintenance updates
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" id="wa-set-announce" class="accent-green-500" checked> General announcements
+            </label>
+          </div>
+          <div class="mt-3 flex gap-3 items-center">
+            <label class="text-sm">Remind <input type="number" id="wa-set-remind-days" class="bg-slate-700 rounded px-2 py-1 w-16 text-center text-sm" value="3" min="1" max="30"> days before due</label>
+            <label class="text-sm">Overdue after <input type="number" id="wa-set-overdue-days" class="bg-slate-700 rounded px-2 py-1 w-16 text-center text-sm" value="1" min="1" max="30"> day(s)</label>
+            <button type="button" class="qc-btn text-sm" onclick="waSaveSettings()">Save Settings</button>
+          </div>
+        </div>
+
+        <!-- Message History -->
+        <div class="glass-panel p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-lg font-semibold">Message History</h3>
+            <button type="button" class="qc-btn text-sm" onclick="waLoadMessages()">Refresh</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="text-left text-slate-400 border-b border-slate-700">
+                <th class="pb-2 pr-3">Tenant</th>
+                <th class="pb-2 pr-3">Phone</th>
+                <th class="pb-2 pr-3">Type</th>
+                <th class="pb-2 pr-3">Status</th>
+                <th class="pb-2 pr-3">Direction</th>
+                <th class="pb-2">Created</th>
+              </tr></thead>
+              <tbody id="wa-messages-tbody" class="divide-y divide-slate-800">
+                <tr><td colspan="6" class="py-4 text-center text-slate-500">No messages yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="wa-messages-pagination" class="flex justify-center gap-2 mt-3"></div>
+        </div>
+
+        <!-- Templates -->
+        <div class="glass-panel p-5">
+          <h3 class="text-lg font-semibold mb-3">Message Templates</h3>
+          <div id="wa-templates-list" class="space-y-2">
+            <p class="text-slate-500 text-sm">Loading templates…</p>
+          </div>
+        </div>
+
+        <!-- Test Message -->
+        <div class="glass-panel p-5">
+          <h3 class="text-lg font-semibold mb-3">Send Test Message</h3>
+          <div class="flex gap-2 items-end">
+            <div class="flex-1">
+              <label class="text-xs text-slate-400">Phone number</label>
+              <input type="text" id="wa-test-phone" placeholder="0712345678" class="w-full bg-slate-700 rounded px-3 py-2 text-sm mt-1">
+            </div>
+            <div class="flex-1">
+              <label class="text-xs text-slate-400">Message</label>
+              <input type="text" id="wa-test-msg" placeholder="Hello from rental management!" class="w-full bg-slate-700 rounded px-3 py-2 text-sm mt-1">
+            </div>
+            <button type="button" class="qc-btn qc-btn-primary" onclick="waSendTestMsg()">Send</button>
           </div>
         </div>
       </section>

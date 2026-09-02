@@ -70,6 +70,18 @@ router.post('/:id/approve', async (req, res) => {
 
     queueReceiptGeneration(result);
 
+    // Trigger QR-linked WhatsApp notification (non-blocking)
+    try {
+      const notifEngine = require('../whatsapp/NotificationEngine');
+      const sm = require('../whatsapp/session-manager');
+      const engine = new notifEngine(sm);
+      engine.trigger('payment_received', {
+        tenant: result.tenant,
+        payment: result.payment,
+        allocation: result.allocation,
+      }).catch(() => {});
+    } catch (_) {}
+
     const overpayment = result.allocation?.overpayment || 0;
 
     if (overpayment > 0) {
@@ -514,6 +526,18 @@ router.post('/approve-from-message', async (req, res) => {
     }
 
     queueReceiptGeneration(approved);
+
+    // Trigger QR-linked WhatsApp notification (non-blocking)
+    try {
+      const notifEngine = require('../whatsapp/NotificationEngine');
+      const sm = require('../whatsapp/session-manager');
+      const engine = new notifEngine(sm);
+      engine.trigger('payment_received', {
+        tenant: approved.tenant,
+        payment: approved.payment,
+        allocation: approved.allocation,
+      }).catch(() => {});
+    } catch (_) {}
 
     let whatsappResult = { status: 'Skipped' };
 

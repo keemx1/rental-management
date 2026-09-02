@@ -713,4 +713,55 @@ export const api = {
   updateDepositRefund(id, body) {
     return request(`/deposit-refunds/${id}`, { method: 'PUT', body: JSON.stringify(body) });
   },
+
+  // WhatsApp Module
+  waStatus() {
+    return request('/whatsapp/status');
+  },
+  waConnect() {
+    return request('/whatsapp/connect', { method: 'POST' });
+  },
+  waDisconnect() {
+    return request('/whatsapp/disconnect', { method: 'POST' });
+  },
+  waLogout() {
+    return request('/whatsapp/logout', { method: 'POST' });
+  },
+  waQR() {
+    return request('/whatsapp/qr');
+  },
+  waSendTest(phone, message) {
+    return request('/whatsapp/send-test', { method: 'POST', body: JSON.stringify({ phone, message }) });
+  },
+  waSettings() {
+    return request('/whatsapp/settings');
+  },
+  waUpdateSettings(settings) {
+    return request('/whatsapp/settings', { method: 'PUT', body: JSON.stringify(settings) });
+  },
+  waMessages(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/whatsapp/messages${qs ? '?' + qs : ''}`);
+  },
+  waMessageStats() {
+    return request('/whatsapp/messages/stats');
+  },
+  waQueueStats() {
+    return request('/whatsapp/queue/stats');
+  },
+  waQueueRecent(limit = 50) {
+    return request(`/whatsapp/queue/recent?limit=${limit}`);
+  },
+  waQueueRetry(id) {
+    return request(`/whatsapp/queue/retry/${id}`, { method: 'POST' });
+  },
+  waQueueCancel(id) {
+    return request(`/whatsapp/queue/${id}`, { method: 'DELETE' });
+  },
+  waTemplates() {
+    return request('/whatsapp/templates');
+  },
+  waTemplatePreview(key) {
+    return request(`/whatsapp/templates/${key}/preview`, { method: 'POST' });
+  },
 };

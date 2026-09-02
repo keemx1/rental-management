@@ -44,6 +44,13 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: `priority must be one of: ${VALID_PRIORITIES.join(', ')}` });
     }
     const order = await store.createWorkOrder(req.body);
+    // Trigger QR-linked WhatsApp maintenance notification (non-blocking)
+    try {
+      const notifEngine = require('../whatsapp/NotificationEngine');
+      const sm = require('../whatsapp/session-manager');
+      const engine = new notifEngine(sm);
+      engine.trigger('maintenance_created', { workOrder: order }).catch(() => {});
+    } catch (_) {}
     res.status(201).json({ order });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create work order: ' + err.message });

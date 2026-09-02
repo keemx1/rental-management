@@ -38,6 +38,7 @@ const archiveRoutes = require('./routes/archive');
 const pendingOverpaymentRoutes = require('./routes/pendingOverpayments');
 const invoiceRegisterRoutes = require('./routes/invoiceRegister');
 const monthlyReportRoutes = require('./routes/monthlyReports');
+const whatsappRoutes = require('./routes/whatsapp');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -81,6 +82,7 @@ app.use('/api/pending-overpayments', pendingOverpaymentRoutes);
 app.use('/api/invoice-register', invoiceRegisterRoutes);
 app.use('/api/monthly-reports', monthlyReportRoutes);
 app.use('/api/deposit-refunds', require('./routes/depositRefunds'));
+app.use('/api/whatsapp', whatsappRoutes);
 
 app.get('/api/health', healthDetailedAuth, (req, res) => {
   const payload = { ok: true, timestamp: new Date().toISOString() };
@@ -118,6 +120,22 @@ async function bootstrap() {
     console.error('[WhatsApp Cloud API]', err?.message || err);
   });
 
+  // Initialize WhatsApp module (QR-linked provider)
+  try {
+    const { applyWhatsAppSchema } = require('./whatsapp/schema');
+    await applyWhatsAppSchema();
+    const sessionManager = require('./whatsapp/session-manager');
+    const { startWorker } = require('./whatsapp/message-queue');
+    const { handleIncomingMessage } = require('./whatsapp/twoWay');
+    sessionManager.on('message', (msg) => {
+      handleIncomingMessage(msg).catch(err => console.error('[WhatsApp TwoWay]', err.message));
+    });
+    await sessionManager.connect();
+    startWorker();
+  } catch (err) {
+    console.error('[WhatsApp Module]', err?.message || err);
+  }
+
   startScheduler();
 
   function tryListen(port) {
@@ -138,6 +156,12 @@ async function bootstrap() {
 
   async function gracefulShutdown(signal) {
     console.log(`\n[Server] ${signal} received — shutting down…`);
+    try {
+      const { stopWorker } = require('./whatsapp/message-queue');
+      stopWorker();
+      const sessionManager = require('./whatsapp/session-manager');
+      await sessionManager.disconnect();
+    } catch (_) {}
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 8000);
   }

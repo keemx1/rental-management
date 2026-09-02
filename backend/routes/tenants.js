@@ -89,6 +89,13 @@ router.post('/', async (req, res) => {
       entityId: tenant.tenant_code,
       details: { opening_arrears: openingArrears, opening_advance_rent: openingAdvance },
     });
+    // Trigger QR-linked WhatsApp welcome notification (non-blocking)
+    try {
+      const notifEngine = require('../whatsapp/NotificationEngine');
+      const sm = require('../whatsapp/session-manager');
+      const engine = new notifEngine(sm);
+      engine.trigger('tenant_created', { tenant }).catch(() => {});
+    } catch (_) {}
     res.status(201).json({ tenant });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create tenant' });

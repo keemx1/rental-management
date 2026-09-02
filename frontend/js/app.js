@@ -7635,3 +7635,303 @@ document.getElementById('dr-record-form')?.addEventListener('submit', async (e) 
 });
 
 window.openDrDetail = openDrDetail;
+
+// ─── WhatsApp Module (QR-Linked) ────────────────────────────────────────────
+let _waPolling = null;
+let _waQrPolling = null;
+
+async function waLoadStatus() {
+  try {
+    const data = await api.waStatus();
+    const dot = document.getElementById('wa-status-dot');
+    const text = document.getElementById('wa-status-text');
+    const info = document.getElementById('wa-session-info');
+    const stats = document.getElementById('wa-stats-row');
+    const btnConnect = document.getElementById('btn-wa-connect');
+    const btnDisconnect = document.getElementById('btn-wa-disconnect');
+    const btnLogout = document.getElementById('btn-wa-logout');
+    const btnTest = document.getElementById('btn-wa-test');
+    const qrPanel = document.getElementById('wa-qr-panel');
+
+    if (!dot) return;
+
+    const state = data.state || 'disconnected';
+    const stateColors = { connected: 'bg-green-500', qr_required: 'bg-amber-500', connecting: 'bg-blue-500', disconnected: 'bg-slate-500', error: 'bg-red-500' };
+    const stateLabels = { connected: 'CONNECTED', qr_required: 'QR CODE READY', connecting: 'CONNECTING…', disconnected: 'NOT CONNECTED', error: 'ERROR', authenticating: 'AUTHENTICATING…', disconnecting: 'DISCONNECTING…' };
+
+    dot.className = `w-2 h-2 rounded-full ${stateColors[state] || 'bg-slate-500'}`;
+    text.textContent = stateLabels[state] || state.toUpperCase();
+
+    if (state === 'connected') {
+      info.classList.remove('hidden');
+      document.getElementById('wa-phone-display').textContent = data.sessionInfo?.phone || 'Connected';
+      document.getElementById('wa-platform-display').textContent = data.sessionInfo?.platform ? `Platform: ${data.sessionInfo.platform}` : '';
+      document.getElementById('wa-connected-since').textContent = data.connectedAt ? `Connected since: ${new Date(data.connectedAt).toLocaleString()}` : '';
+      btnConnect.style.display = 'none';
+      btnDisconnect.style.display = '';
+      btnLogout.style.display = '';
+      btnTest.style.display = '';
+      qrPanel.classList.add('hidden');
+      waStopQrPolling();
+    } else if (state === 'qr_required') {
+      info.classList.add('hidden');
+      btnConnect.style.display = 'none';
+      btnDisconnect.style.display = 'none';
+      btnLogout.style.display = 'none';
+      btnTest.style.display = 'none';
+      qrPanel.classList.remove('hidden');
+      waShowQr(data.qrCode);
+      waStartQrPolling();
+    } else {
+      info.classList.add('hidden');
+      btnConnect.style.display = '';
+      btnDisconnect.style.display = 'none';
+      btnLogout.style.display = 'none';
+      btnTest.style.display = 'none';
+      qrPanel.classList.add('hidden');
+      waStopQrPolling();
+    }
+
+    if (state === 'connected') {
+      stats.classList.remove('hidden');
+      waLoadStats();
+    } else {
+      stats.classList.add('hidden');
+    }
+  } catch (err) {
+    console.error('[WA] Status error:', err);
+  }
+}
+
+function waShowQr(qrData) {
+  const container = document.getElementById('wa-qr-container');
+  if (!container) return;
+  if (qrData) {
+    container.innerHTML = `<img src="${qrData}" alt="WhatsApp QR Code" class="w-64 h-64 rounded-lg">`;
+    document.getElementById('wa-qr-status').textContent = 'Waiting for scan…';
+    document.getElementById('wa-qr-status').className = 'text-sm text-amber-400';
+  } else {
+    container.innerHTML = '<div class="w-64 h-64 bg-white rounded-lg flex items-center justify-center"><p class="text-slate-500 text-sm">Generating QR code…</p></div>';
+  }
+}
+
+async function waConnect() {
+  try {
+    document.getElementById('btn-wa-connect').textContent = 'Connecting…';
+    document.getElementById('btn-wa-connect').disabled = true;
+    await api.waConnect();
+    waStartPolling();
+  } catch (err) {
+    alert('Failed to connect: ' + (err.message || err));
+    document.getElementById('btn-wa-connect').textContent = 'Connect WhatsApp';
+    document.getElementById('btn-wa-connect').disabled = false;
+  }
+}
+
+async function waDisconnect() {
+  if (!confirm('Disconnect WhatsApp session?')) return;
+  try {
+    await api.waDisconnect();
+    waLoadStatus();
+  } catch (err) {
+    alert('Failed to disconnect: ' + (err.message || err));
+  }
+}
+
+async function waLogout() {
+  if (!confirm('Logout and clear session? This will remove all session data.')) return;
+  try {
+    await api.waLogout();
+    waLoadStatus();
+  } catch (err) {
+    alert('Failed to logout: ' + (err.message || err));
+  }
+}
+
+async function waSendTest() {
+  const phone = prompt('Enter phone number to send test message:');
+  if (!phone) return;
+  try {
+    const result = await api.waSendTest(phone, 'Test message from Rental Management System ✓');
+    alert(result.message || 'Test message sent!');
+  } catch (err) {
+    alert('Failed: ' + (err.message || err));
+  }
+}
+
+async function waSendTestMsg() {
+  const phone = document.getElementById('wa-test-phone')?.value;
+  const msg = document.getElementById('wa-test-msg')?.value;
+  if (!phone || !msg) return alert('Enter phone and message');
+  try {
+    const result = await api.waSendTest(phone, msg);
+    alert(result.message || 'Sent!');
+  } catch (err) {
+    alert('Failed: ' + (err.message || err));
+  }
+}
+
+async function waLoadStats() {
+  try {
+    const stats = await api.waQueueStats();
+    setText('wa-stat-today', stats.today || 0);
+    setText('wa-stat-sent', stats.sent || 0);
+    setText('wa-stat-failed', stats.failed || 0);
+    setText('wa-stat-queued', stats.queued || 0);
+  } catch (_) {}
+}
+
+async function waLoadMessages(page = 1) {
+  try {
+    const data = await api.waMessages({ page, limit: 20 });
+    const tbody = document.getElementById('wa-messages-tbody');
+    if (!tbody) return;
+    const messages = data.messages || [];
+    if (messages.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-slate-500">No messages yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = messages.map(m => `
+      <tr class="text-sm">
+        <td class="py-2 pr-3">${escapeHtml(m.tenant_name || '—')}</td>
+        <td class="py-2 pr-3 font-mono text-xs">${escapeHtml(m.phone_number || '—')}</td>
+        <td class="py-2 pr-3">${escapeHtml(m.message_type || 'text')}</td>
+        <td class="py-2 pr-3"><span class="px-2 py-0.5 rounded text-xs ${m.status === 'sent' ? 'bg-green-900 text-green-300' : m.status === 'failed' ? 'bg-red-900 text-red-300' : 'bg-slate-700 text-slate-300'}">${escapeHtml(m.status)}</span></td>
+        <td class="py-2 pr-3">${escapeHtml(m.direction)}</td>
+        <td class="py-2 text-xs text-slate-400">${m.created_at ? new Date(m.created_at).toLocaleString() : '—'}</td>
+      </tr>
+    `).join('');
+    const totalPages = data.totalPages || 1;
+    const pag = document.getElementById('wa-messages-pagination');
+    if (pag && totalPages > 1) {
+      let btns = '';
+      for (let i = 1; i <= totalPages; i++) {
+        btns += `<button class="qc-btn text-xs ${i === page ? 'qc-btn-primary' : ''}" onclick="waLoadMessages(${i})">${i}</button>`;
+      }
+      pag.innerHTML = btns;
+    }
+  } catch (err) {
+    console.error('[WA] Messages error:', err);
+  }
+}
+
+async function waLoadSettings() {
+  try {
+    const data = await api.waSettings();
+    const settings = data.settings || {};
+    const set = (id, key) => { const el = document.getElementById(id); if (el) el.checked = settings[key] !== 'false'; };
+    set('wa-set-welcome', 'auto_welcome_tenant');
+    set('wa-set-invoice', 'auto_rent_invoice');
+    set('wa-set-reminder', 'auto_rent_reminder');
+    set('wa-set-overdue', 'auto_overdue_rent');
+    set('wa-set-payment', 'auto_payment_received');
+    set('wa-set-maintenance', 'auto_maintenance_created');
+    set('wa-set-maint-update', 'auto_maintenance_updates');
+    set('wa-set-announce', 'auto_general_announcement');
+    const remindDays = document.getElementById('wa-set-remind-days');
+    const overdueDays = document.getElementById('wa-set-overdue-days');
+    if (remindDays) remindDays.value = settings.rent_reminder_days_before || 3;
+    if (overdueDays) overdueDays.value = settings.rent_overdue_days_after || 1;
+  } catch (_) {}
+}
+
+async function waSaveSettings() {
+  const get = (id) => document.getElementById(id)?.checked ? 'true' : 'false';
+  const settings = {
+    auto_welcome_tenant: get('wa-set-welcome'),
+    auto_rent_invoice: get('wa-set-invoice'),
+    auto_rent_reminder: get('wa-set-reminder'),
+    auto_overdue_rent: get('wa-set-overdue'),
+    auto_payment_received: get('wa-set-payment'),
+    auto_maintenance_created: get('wa-set-maintenance'),
+    auto_maintenance_updates: get('wa-set-maint-update'),
+    auto_general_announcement: get('wa-set-announce'),
+    rent_reminder_days_before: document.getElementById('wa-set-remind-days')?.value || '3',
+    rent_overdue_days_after: document.getElementById('wa-set-overdue-days')?.value || '1',
+  };
+  try {
+    await api.waUpdateSettings(settings);
+    alert('Settings saved!');
+  } catch (err) {
+    alert('Failed to save: ' + (err.message || err));
+  }
+}
+
+async function waLoadTemplates() {
+  try {
+    const data = await api.waTemplates();
+    const list = document.getElementById('wa-templates-list');
+    if (!list) return;
+    const keys = data.templates || [];
+    if (keys.length === 0) {
+      list.innerHTML = '<p class="text-slate-500 text-sm">No templates</p>';
+      return;
+    }
+    list.innerHTML = keys.map(k => `
+      <div class="flex items-center justify-between p-2 rounded bg-slate-800/50">
+        <span class="text-sm font-mono">${escapeHtml(k)}</span>
+        <button class="qc-btn text-xs" onclick="waPreviewTemplate('${k}')">Preview</button>
+      </div>
+    `).join('');
+  } catch (_) {}
+}
+
+async function waPreviewTemplate(key) {
+  try {
+    const data = await api.waTemplatePreview(key);
+    alert(data.rendered || 'No preview available');
+  } catch (err) {
+    alert('Failed: ' + (err.message || err));
+  }
+}
+
+function waStartPolling() {
+  waStopPolling();
+  _waPolling = setInterval(waLoadStatus, 5000);
+  waLoadStatus();
+}
+
+function waStopPolling() {
+  if (_waPolling) { clearInterval(_waPolling); _waPolling = null; }
+}
+
+function waStartQrPolling() {
+  waStopQrPolling();
+  _waQrPolling = setInterval(async () => {
+    try {
+      const data = await api.waQR();
+      if (data.qrCode) waShowQr(data.qrCode);
+    } catch (_) {}
+  }, 3000);
+}
+
+function waStopQrPolling() {
+  if (_waQrPolling) { clearInterval(_waQrPolling); _waQrPolling = null; }
+}
+
+// Initialize WhatsApp view when navigated to
+(function () {
+  const origShowView = showView;
+  window.showView = function (name) {
+    origShowView(name);
+    if (name === 'whatsapp') {
+      waLoadStatus();
+      waLoadSettings();
+      waLoadMessages();
+      waLoadTemplates();
+      waStartPolling();
+    } else {
+      waStopPolling();
+      waStopQrPolling();
+    }
+  };
+})();
+
+window.waConnect = waConnect;
+window.waDisconnect = waDisconnect;
+window.waLogout = waLogout;
+window.waSendTest = waSendTest;
+window.waSendTestMsg = waSendTestMsg;
+window.waLoadMessages = waLoadMessages;
+window.waSaveSettings = waSaveSettings;
+window.waPreviewTemplate = waPreviewTemplate;
