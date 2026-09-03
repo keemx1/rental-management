@@ -3192,6 +3192,89 @@ document.getElementById('btn-copy-generated-message')?.addEventListener('click',
   }
 });
 
+// Payment mode switching
+document.getElementById('payment-mode-select')?.addEventListener('change', async (e) => {
+  const mode = e.target.value;
+  const mpesaSection = document.getElementById('payment-mpesa-section');
+  const cashSection = document.getElementById('payment-cash-section');
+  const pesalinkSection = document.getElementById('payment-pesalink-section');
+  const parseBtn = document.getElementById('btn-parse-payment-message');
+  const tenantSel = document.getElementById('payment-message-tenant-select');
+  const hint = document.getElementById('payment-message-hint');
+  if (mpesaSection) mpesaSection.classList.toggle('hidden', mode !== 'mpesa');
+  if (cashSection) cashSection.classList.toggle('hidden', mode !== 'cash');
+  if (pesalinkSection) pesalinkSection.classList.toggle('hidden', mode !== 'pesalink');
+  if (parseBtn) parseBtn.textContent = mode === 'mpesa' ? 'Parse' : 'Approve';
+  if (hint) hint.textContent = mode === 'mpesa' ? 'Paste a message and click Parse.' : 'Select tenant and enter details, then click Approve.';
+  // Set today's date on cash/pesalink date fields
+  const today = new Date().toISOString().slice(0, 10);
+  const cashDate = document.getElementById('payment-cash-date');
+  const pesaDate = document.getElementById('payment-pesalink-date');
+  if (cashDate && !cashDate.value) cashDate.value = today;
+  if (pesaDate && !pesaDate.value) pesaDate.value = today;
+  // Populate tenant dropdown for Cash mode
+  if (mode === 'cash' && tenantSel) {
+    try {
+      const data = await api.tenants();
+      const tenants = data.tenants || data || [];
+      tenantSel.innerHTML = '<option value="">Select tenant…</option>' + tenants.map(t => {
+        const houseName = t.linked_house_name || t.property_name || '';
+        const houseNo = t.linked_house_number || t.unit_label || '';
+        return `<option value="${t.id}">${escapeHtml(t.name)} (${escapeHtml(t.tenant_code)}) — ${escapeHtml(houseName)} ${escapeHtml(houseNo)}</option>`;
+      }).join('');
+      tenantSel.disabled = false;
+    } catch (_) {}
+  }
+});
+
+// Cash / Pesa Link approve
+document.getElementById('btn-parse-payment-message')?.addEventListener('click', async () => {
+  const mode = document.getElementById('payment-mode-select')?.value || 'mpesa';
+  if (mode === 'mpesa') return parsePaymentMessageFlow();
+
+  const hint = document.getElementById('payment-message-hint');
+  const tenantSel = document.getElementById('payment-message-tenant-select');
+  const amountEl = document.getElementById('payment-message-amount');
+  const refEl = document.getElementById('payment-message-ref');
+  const msgEl = document.getElementById('payment-generated-message');
+  const approveBtn = document.getElementById('btn-approve-from-message');
+
+  if (mode === 'cash') {
+    const amount = document.getElementById('payment-cash-amount')?.value;
+    const date = document.getElementById('payment-cash-date')?.value;
+    const time = document.getElementById('payment-cash-time')?.value;
+    if (!amount || Number(amount) <= 0) { if (hint) hint.textContent = 'Enter a valid amount.'; return; }
+    if (!tenantSel?.value) { if (hint) hint.textContent = 'Select a tenant first.'; return; }
+    if (!confirm(`Approve KES ${Number(amount).toLocaleString()} cash payment?`)) return;
+    try {
+      if (hint) hint.textContent = 'Approving…';
+      const result = await api.approveCashPesaLink({ payment_mode: 'Cash', amount, payment_date: date, payment_time: time, tenant_id: tenantSel.value });
+      if (msgEl && result.generated_message) msgEl.value = result.generated_message;
+      if (hint) hint.textContent = 'Cash payment approved and WhatsApp sent.';
+      loadPayments(); loadDashboard();
+    } catch (err) { if (hint) hint.textContent = 'Failed: ' + (err.message || err); }
+    return;
+  }
+
+  if (mode === 'pesalink') {
+    const amount = document.getElementById('payment-pesalink-amount')?.value;
+    const date = document.getElementById('payment-pesalink-date')?.value;
+    const time = document.getElementById('payment-pesalink-time')?.value;
+    const tenantCode = document.getElementById('payment-pesalink-tenant')?.value;
+    if (!amount || Number(amount) <= 0) { if (hint) hint.textContent = 'Enter a valid amount.'; return; }
+    if (!tenantCode?.trim()) { if (hint) hint.textContent = 'Enter tenant code / house number.'; return; }
+    if (!confirm(`Approve KES ${Number(amount).toLocaleString()} Pesa Link payment?`)) return;
+    try {
+      if (hint) hint.textContent = 'Approving…';
+      const result = await api.approveCashPesaLink({ payment_mode: 'Pesa Link', amount, payment_date: date, payment_time: time, tenant_code: tenantCode.trim() });
+      if (msgEl && result.generated_message) msgEl.value = result.generated_message;
+      if (hint) hint.textContent = 'Pesa Link payment approved and WhatsApp sent.';
+      loadPayments(); loadDashboard();
+    } catch (err) { if (hint) hint.textContent = 'Failed: ' + (err.message || err); }
+    return;
+  }
+});
+
 document.getElementById('broadcast-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;

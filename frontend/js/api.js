@@ -260,6 +260,12 @@ export const api = {
       body: JSON.stringify({ raw_message, tenant_id, payment_date }),
     });
   },
+  approveCashPesaLink({ payment_mode, amount, payment_date, payment_time, tenant_code, tenant_id }) {
+    return request('/payments/approve-cash-pesalink', {
+      method: 'POST',
+      body: JSON.stringify({ payment_mode, amount, payment_date, payment_time, tenant_code, tenant_id }),
+    });
+  },
   houses(params = {}) {
     const qs = new URLSearchParams(params).toString();
     return request(`/houses${qs ? `?${qs}` : ''}`);

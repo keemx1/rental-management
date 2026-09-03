@@ -174,23 +174,43 @@ router.post('/:id/skip-overpayment', async (req, res) => {
 
 function parseMpesaMessage(raw) {
   const text = String(raw || '').replace(/\s+/g, ' ').trim();
-  const amountMatch = text.match(/\b(?:Ksh|KES)\s*([\d,]+(?:\.\d{1,2})?)/i);
-  const refMatch = text.match(/\b[A-Z0-9]{10}\b/);
+  const amountMatch = text.match(/([\d,]+(?:\.\d{1,2})?)\s*(?:Ksh|KES)/i) || text.match(/\b(?:Ksh|KES)\s*([\d,]+(?:\.\d{1,2})?)/i);
   const phoneMatch = text.match(/\b(?:254|0)?7\d{8}\b/);
   const tenantCodeMatch = text.match(/\bT\d{3,}\b/i);
   const houseNumberMatch = text.match(/\b(?:house|unit)\s*[:\-]?\s*([A-Za-z0-9\-]+)\b/i);
   const accountNumberMatch = text.match(/#([A-Z0-9]+)/i);
 
-  const amount = amountMatch ? Number(String(amountMatch[1]).replace(/,/g, '')) : null;
-  const mpesa_reference = refMatch ? refMatch[0] : null;
+  // Reference: try known patterns first, then fallback
+  let mpesa_reference = null;
+  const refDotMatch = text.match(/\bRef\.?\s*([A-Za-z0-9]{6,20})\b/i);
+  const txIdMatch = text.match(/Transaction\s+(?:ID|No|Ref)[.:]*\s*([A-Za-z0-9]{6,20})\b/i);
+  if (refDotMatch) {
+    mpesa_reference = refDotMatch[1].toUpperCase();
+  } else if (txIdMatch) {
+    mpesa_reference = txIdMatch[1].toUpperCase();
+  } else {
+    const refMatch = text.match(/\b[A-Z0-9]{10,12}\b/);
+    mpesa_reference = refMatch ? refMatch[0] : null;
+  }
 
-  // Extract payment date from message — formats: DD/MM/YY, YYYY-MM-DD, DD/MM/YYYY
+  const amount = amountMatch ? Number(String(amountMatch[1]).replace(/,/g, '')) : null;
+
+  // Extract payment date from message — formats: DD/MM/YY, YYYY-MM-DD, DD/MM/YYYY, DD Mon YYYY
   let payment_date = null;
   const dateMatchYY = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2})\b/);
+  const dateMatchYYYYSlash = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
   const dateMatchYYYY = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  const monthNames = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+  const dateMatchMon = text.match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})\b/i);
   if (dateMatchYYYY) {
     const [, y, m, d] = dateMatchYYYY;
     payment_date = `${y}-${m}-${d}`;
+  } else if (dateMatchMon) {
+    const [, d, mon, y] = dateMatchMon;
+    payment_date = `${y}-${monthNames[mon.toLowerCase()]}-${d.padStart(2, '0')}`;
+  } else if (dateMatchYYYYSlash) {
+    const [, d, m, y] = dateMatchYYYYSlash;
+    payment_date = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   } else if (dateMatchYY) {
     const [, d, m, y2] = dateMatchYY;
     const fullYear = Number(y2) < 100 ? 2000 + Number(y2) : Number(y2);
@@ -579,6 +599,100 @@ router.post('/approve-from-message', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to approve payment from message' });
+  }
+});
+
+router.post('/approve-cash-pesalink', async (req, res) => {
+  try {
+    const { payment_mode, amount, payment_date, payment_time, tenant_code, tenant_id } = req.body;
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({ error: 'Valid amount is required' });
+    }
+    if (!payment_mode || !['Cash', 'Pesa Link'].includes(payment_mode)) {
+      return res.status(400).json({ error: 'payment_mode must be Cash or Pesa Link' });
+    }
+
+    let tenantId = tenant_id;
+    if (!tenantId && tenant_code) {
+      const matches = await store.findTenantsForPaymentLookup({ tenantCode: tenant_code });
+      if (matches.length > 0) tenantId = matches[0].id;
+    }
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant not found. Provide tenant_code or tenant_id.' });
+    }
+
+    const tenant = await store.getTenant(tenantId);
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+
+    const paymentDate = payment_date || new Date().toISOString().slice(0, 10);
+    const paymentDateTime = payment_time
+      ? new Date(`${paymentDate}T${payment_time}:00`).toISOString()
+      : new Date(`${paymentDate}T12:00:00`).toISOString();
+
+    const payment = await store.createPayment({
+      tenant_id: tenantId,
+      amount: Number(amount),
+      mpesa_reference: null,
+      notes: `${payment_mode} payment recorded manually`,
+      status: 'Pending',
+      payment_date: paymentDate,
+      payment_mode,
+      payment_datetime: paymentDateTime,
+    });
+
+    const approved = await store.approvePayment(payment.id);
+    if (!approved) {
+      return res.status(500).json({ error: 'Failed to approve payment' });
+    }
+
+    queueReceiptGeneration(approved);
+
+    // Trigger QR-linked WhatsApp notification (non-blocking)
+    try {
+      const notifEngine = require('../whatsapp/NotificationEngine');
+      const sm = require('../whatsapp/session-manager');
+      const engine = new notifEngine(sm);
+      engine.trigger('payment_received', {
+        tenant: approved.tenant,
+        payment: approved.payment,
+        allocation: approved.allocation,
+      }).catch(() => {});
+    } catch (_) {}
+
+    if (approved.allocation && approved.allocation.overpayment > 0) {
+      return res.json({
+        success: true,
+        payment: approved.payment,
+        tenant: approved.tenant,
+        whatsapp: { status: 'Skipped' },
+        overpayment: approved.allocation.overpayment,
+        payment_id: approved.payment.id,
+      });
+    }
+
+    const isOnboarding = !!(approved.allocation && approved.allocation.onboarding);
+    const generated_message = isOnboarding
+      ? buildNewTenancyConfirmation(approved.tenant, approved.payment, approved.allocation)
+      : buildPaymentConfirmation(approved.tenant, approved.payment, approved.allocation);
+
+    if (isOnboarding) {
+      sendNewTenancyConfirmation(approved.tenant, approved.payment, approved.allocation)
+        .catch(() => {});
+    } else {
+      sendPaymentConfirmation(approved.tenant, approved.payment, approved.allocation)
+        .catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      payment: approved.payment,
+      tenant: approved.tenant,
+      whatsapp: { status: 'Sent' },
+      generated_message,
+      newTenancy: isOnboarding || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to approve cash/pesalink payment: ' + err.message });
   }
 });
 
