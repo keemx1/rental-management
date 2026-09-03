@@ -70,6 +70,10 @@
             <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span class="sidebar-label">Tenants</span>
           </a>
+          <a href="#" data-nav="future-tenancies" class="sidebar-link" title="Future Tenancies">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span class="sidebar-label">Future Tenancies</span>
+          </a>
 
           <!-- FINANCIAL -->
           <div class="sidebar-section-label">Financial</div>
@@ -881,10 +885,27 @@
               <textarea name="notes" rows="3" class="cyber-input"></textarea>
             </div>
       <div style="background:#fff7ed;border:2px dashed #ea580c;padding:14px;border-radius:8px">
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-          <input type="checkbox" name="garbage_fee_enabled" id="house-edit-garbage-fee-toggle" style="width:22px;height:22px" />
-          <span style="color:#c2410c;font-size:14px;font-weight:700;text-transform:uppercase">ENABLE GARBAGE FEE (KES 2,000 one-time for new tenants)</span>
-        </label>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <p style="color:#c2410c;font-size:14px;font-weight:700;text-transform:uppercase;margin:0">House Charges</p>
+          <button type="button" id="btn-add-house-charge" class="text-xs font-semibold text-orange-600 hover:text-orange-800">+ Add Charge</button>
+        </div>
+        <p style="color:#9a3412;font-size:12px;margin:0 0 10px 0">Configure charges for this house. Toggle each on/off. Enabled charges auto-apply to new tenants.</p>
+        <div id="house-charges-list" class="space-y-2"></div>
+        <!-- Add charge form (hidden by default) -->
+        <div id="house-charge-add-form" class="hidden mt-3 p-3 bg-white rounded-lg border border-orange-200 space-y-2">
+          <div class="grid grid-cols-3 gap-2">
+            <input id="hc-add-name" type="text" class="cyber-input text-sm" placeholder="Charge name (e.g. Garbage)" />
+            <input id="hc-add-amount" type="number" min="0" class="cyber-input text-sm" placeholder="Amount (KES)" />
+            <select id="hc-add-frequency" class="cyber-input text-sm">
+              <option value="one-time">One-time</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+          <div class="flex gap-2">
+            <button type="button" onclick="saveHouseCharge()" class="qc-btn qc-btn-primary text-xs">Save</button>
+            <button type="button" onclick="document.getElementById('house-charge-add-form').classList.add('hidden')" class="qc-btn text-xs">Cancel</button>
+          </div>
+        </div>
       </div>
 
       <div style="background:#eef2ff;border:2px solid #6366f1;padding:14px;border-radius:8px">
@@ -964,6 +985,163 @@
             </thead>
             <tbody id="tenants-tbody"></tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- FUTURE TENANCIES -->
+      <section data-view="future-tenancies" class="hidden space-y-6">
+        <header class="section-head flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p class="section-num">FUTURE TENANCIES</p>
+            <h2 class="section-title text-2xl">Reserved Units & Future Payments</h2>
+            <p class="section-desc">Track prospective tenants, record pre-move-in payments, and allocate them to future months</p>
+          </div>
+          <button type="button" id="btn-add-future-tenancy" class="qc-btn qc-btn-primary">+ Reserve Unit</button>
+        </header>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="ft-summary-cards">
+          <div class="glass-panel p-3 text-center">
+            <div class="text-2xl font-bold" id="ft-reserved-count">0</div>
+            <div class="text-xs text-slate-500 mt-1">Reserved</div>
+          </div>
+          <div class="glass-panel p-3 text-center">
+            <div class="text-2xl font-bold text-green-600" id="ft-active-count">0</div>
+            <div class="text-xs text-slate-500 mt-1">Activated</div>
+          </div>
+          <div class="glass-panel p-3 text-center">
+            <div class="text-2xl font-bold text-blue-600" id="ft-total-paid">KES 0</div>
+            <div class="text-xs text-slate-500 mt-1">Total Approved</div>
+          </div>
+          <div class="glass-panel p-3 text-center">
+            <div class="text-2xl font-bold text-amber-600" id="ft-total-pending">KES 0</div>
+            <div class="text-xs text-slate-500 mt-1">Pending Approval</div>
+          </div>
+        </div>
+
+        <!-- Filter -->
+        <div class="flex gap-2 flex-wrap">
+          <select id="ft-filter-status" class="cyber-input font-mono">
+            <option value="">All statuses</option>
+            <option value="RESERVED" selected>Reserved</option>
+            <option value="ACTIVE">Active</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+        </div>
+
+        <!-- Table -->
+        <div class="glass-panel overflow-x-auto">
+          <table class="data-grid w-full min-w-[1000px]">
+            <thead>
+              <tr>
+                <th>Property</th>
+                <th>Unit</th>
+                <th>Prospective Tenant</th>
+                <th>Phone</th>
+                <th>Allocated Month</th>
+                <th>Rent (KES)</th>
+                <th>Deposit (KES)</th>
+                <th>Total Paid</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="ft-tenancies-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Future Tenancy Detail Panel (hidden by default) -->
+        <div id="ft-detail-panel" class="hidden glass-panel p-4 space-y-4">
+          <div class="flex justify-between items-start">
+            <div>
+              <h3 id="ft-detail-title" class="text-lg font-bold"></h3>
+              <p id="ft-detail-subtitle" class="text-sm text-slate-500"></p>
+            </div>
+            <button onclick="document.getElementById('ft-detail-panel').classList.add('hidden')" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+          </div>
+
+          <!-- Payment Form -->
+          <div id="ft-payment-form" class="hidden border border-slate-200 rounded-lg p-4 space-y-3 bg-slate-50">
+            <h4 class="font-semibold text-sm">Record Future Payment</h4>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Amount (KES)</label>
+                <input id="ft-pay-amount" type="number" min="1" class="cyber-input w-full" placeholder="e.g. 10000" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Payment Date</label>
+                <input id="ft-pay-date" type="date" class="cyber-input w-full" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Mode</label>
+                <select id="ft-pay-mode" class="cyber-input w-full">
+                  <option value="Cash">Cash</option>
+                  <option value="M-Pesa">M-Pesa</option>
+                  <option value="Pesa Link">Pesa Link</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Purpose</label>
+                <select id="ft-pay-purpose" class="cyber-input w-full">
+                  <option value="Down Payment">Down Payment</option>
+                  <option value="Deposit">Deposit</option>
+                  <option value="Rent">Rent</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Allocated Month</label>
+                <input id="ft-pay-allocated" type="month" class="cyber-input w-full" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Reference (optional)</label>
+                <input id="ft-pay-ref" type="text" class="cyber-input w-full" placeholder="e.g. QGH7X4P2RB" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Notes (optional)</label>
+              <input id="ft-pay-notes" type="text" class="cyber-input w-full" placeholder="Any notes..." />
+            </div>
+            <div class="flex gap-2">
+              <button onclick="submitFuturePayment()" class="qc-btn qc-btn-primary text-sm">Record Payment</button>
+              <button onclick="document.getElementById('ft-payment-form').classList.add('hidden')" class="qc-btn text-sm">Cancel</button>
+            </div>
+          </div>
+
+          <!-- Payments List -->
+          <div>
+            <div class="flex justify-between items-center mb-2">
+              <h4 class="font-semibold text-sm">Payment History</h4>
+              <button onclick="showFuturePaymentForm()" class="qc-btn qc-btn-secondary text-xs">+ Record Payment</button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="data-grid w-full min-w-[800px] text-sm">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Mode</th>
+                    <th>Purpose</th>
+                    <th>Allocated To</th>
+                    <th>Reference</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="ft-payments-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex gap-2 pt-2 border-t border-slate-200" id="ft-actions">
+            <button onclick="activateFutureTenancy()" class="qc-btn qc-btn-primary text-sm">Activate Tenancy</button>
+            <button onclick="cancelFutureTenancy()" class="qc-btn text-sm text-red-600 border-red-300 hover:bg-red-50">Cancel Reservation</button>
+          </div>
         </div>
       </section>
 

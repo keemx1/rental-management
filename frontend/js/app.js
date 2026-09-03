@@ -90,6 +90,7 @@ function showView(name) {
   if (name === 'archive') loadArchive();
   if (name === 'pending-overpayments') loadPendingOverpayments();
   if (name === 'deposit-refunds') loadDepositRefunds();
+  if (name === 'future-tenancies') loadFutureTenancies();
   if (name === 'users') loadUsers();
   if (name === 'reports') {
     document.getElementById('report-phone').value = '';
@@ -2480,11 +2481,97 @@ async function openHouseModal(id = null) {
       document.getElementById('house-edit-till-number').value = house.till_number || '';
       document.getElementById('house-edit-till-name').value = house.till_name || '';
       togglePaymentFields();
+      loadHouseCharges(house.paybill_number);
+    } else {
+      loadHouseCharges(null);
+    }
     }
   }
   houseEditReturnView = id ? 'house-dashboard' : 'houses';
   showView('house-edit');
 }
+
+// ─── House Charges ──────────────────────────────────────────────────────────
+
+let _currentHousePaybill = null;
+
+async function loadHouseCharges(housePaybill) {
+  _currentHousePaybill = housePaybill;
+  const list = document.getElementById('house-charges-list');
+  if (!list) return;
+  if (!housePaybill) {
+    list.innerHTML = '<p class="text-xs text-slate-400">Save the house first, then add charges.</p>';
+    return;
+  }
+  try {
+    const data = await api.houseCharges(housePaybill);
+    const charges = data.charges || [];
+    if (charges.length === 0) {
+      list.innerHTML = '<p class="text-xs text-slate-400">No charges configured. Add one below.</p>';
+      return;
+    }
+    list.innerHTML = charges.map(c => {
+      const freqBadge = c.frequency === 'monthly'
+        ? '<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700">Monthly</span>'
+        : '<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">One-time</span>';
+      return `<div class="flex items-center justify-between p-2 rounded-lg ${c.enabled ? 'bg-white border border-orange-200' : 'bg-slate-50 border border-slate-200 opacity-60'}">
+        <div class="flex items-center gap-3">
+          <button type="button" onclick="toggleHouseChargeUI('${housePaybill}', ${c.id})" class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${c.enabled ? 'bg-orange-500' : 'bg-slate-300'}">
+            <span class="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${c.enabled ? 'translate-x-4.5' : 'translate-x-0.5'}" style="transform:translateX(${c.enabled ? '18px' : '2px'})"></span>
+          </button>
+          <div>
+            <span class="font-semibold text-sm ${c.enabled ? 'text-slate-800' : 'text-slate-500'}">${escapeHtml(c.charge_name)}</span>
+            <span class="ml-2 text-sm text-slate-600">KES ${Number(c.amount).toLocaleString('en-KE')}</span>
+            <span class="ml-2">${freqBadge}</span>
+          </div>
+        </div>
+        <button type="button" onclick="deleteHouseChargeUI('${housePaybill}', ${c.id})" class="text-red-400 hover:text-red-600 text-xs">Delete</button>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    list.innerHTML = '<p class="text-xs text-red-400">Failed to load charges</p>';
+  }
+}
+
+async function toggleHouseChargeUI(housePaybill, chargeId) {
+  try {
+    await api.toggleHouseCharge(housePaybill, chargeId);
+    loadHouseCharges(housePaybill);
+  } catch (err) {
+    alert('Failed to toggle charge');
+  }
+}
+
+async function deleteHouseChargeUI(housePaybill, chargeId) {
+  if (!confirm('Delete this charge?')) return;
+  try {
+    await api.deleteHouseCharge(housePaybill, chargeId);
+    loadHouseCharges(housePaybill);
+  } catch (err) {
+    alert('Failed to delete charge');
+  }
+}
+
+async function saveHouseCharge() {
+  if (!_currentHousePaybill) return alert('Save the house first before adding charges.');
+  const name = document.getElementById('hc-add-name')?.value?.trim();
+  const amount = Number(document.getElementById('hc-add-amount')?.value || 0);
+  const frequency = document.getElementById('hc-add-frequency')?.value || 'one-time';
+  if (!name) return alert('Charge name is required');
+  try {
+    await api.createHouseCharge(_currentHousePaybill, { charge_name: name, amount, frequency, enabled: true });
+    document.getElementById('house-charge-add-form')?.classList.add('hidden');
+    document.getElementById('hc-add-name').value = '';
+    document.getElementById('hc-add-amount').value = '';
+    loadHouseCharges(_currentHousePaybill);
+  } catch (err) {
+    alert('Failed to create charge');
+  }
+}
+
+document.getElementById('btn-add-house-charge')?.addEventListener('click', () => {
+  document.getElementById('house-charge-add-form')?.classList.toggle('hidden');
+});
 
 async function loadTemplates() {
   const { templates } = await api.templates();
@@ -8052,3 +8139,329 @@ window.waSendTestMsg = waSendTestMsg;
 window.waLoadMessages = waLoadMessages;
 window.waSaveSettings = waSaveSettings;
 window.waPreviewTemplate = waPreviewTemplate;
+
+// ─── Future Tenancies ──────────────────────────────────────────────────────
+
+let _ftCurrentTenancyId = null;
+
+async function loadFutureTenancies() {
+  try {
+    const status = document.getElementById('ft-filter-status')?.value || '';
+    const params = {};
+    if (status) params.status = status;
+    const data = await api.futureTenancies(params);
+    const list = data.future_tenancies || [];
+    const tbody = document.getElementById('ft-tenancies-tbody');
+    if (!tbody) return;
+    if (list.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="10" class="text-center text-slate-400 py-8">No future tenancies found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = list.map(ft => {
+      const totalPaid = Number(ft.total_paid || 0);
+      const totalPending = Number(ft.total_pending || 0);
+      const statusBadge = ft.status === 'RESERVED' ? 'bg-amber-100 text-amber-700'
+        : ft.status === 'ACTIVE' ? 'bg-green-100 text-green-700'
+        : 'bg-slate-100 text-slate-500';
+      return `<tr class="border-t border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="openFutureTenancyDetail(${ft.id})">
+        <td>${ft.property_name || '—'}</td>
+        <td>${ft.unit_label || '—'}</td>
+        <td>${ft.tenant_name}</td>
+        <td>${ft.phone_number || '—'}</td>
+        <td>${ft.allocated_month || '—'}</td>
+        <td>${Number(ft.rent_amount || 0).toLocaleString('en-KE')}</td>
+        <td>${Number(ft.deposit_amount || 0).toLocaleString('en-KE')}</td>
+        <td class="font-semibold">${totalPaid.toLocaleString('en-KE')}</td>
+        <td><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge}">${ft.status}</span></td>
+        <td class="text-right"><button class="text-xs text-blue-600 hover:underline" onclick="event.stopPropagation();openFutureTenancyDetail(${ft.id})">View</button></td>
+      </tr>`;
+    }).join('');
+
+    // Update summary cards
+    const reservedCount = list.filter(f => f.status === 'RESERVED').length;
+    const activeCount = list.filter(f => f.status === 'ACTIVE').length;
+    const totalApproved = list.reduce((s, f) => s + Number(f.total_paid || 0), 0);
+    const totalPending = list.reduce((s, f) => s + Number(f.total_pending || 0), 0);
+    setTextEl('ft-reserved-count', reservedCount);
+    setTextEl('ft-active-count', activeCount);
+    setTextEl('ft-total-paid', 'KES ' + totalApproved.toLocaleString('en-KE'));
+    setTextEl('ft-total-pending', 'KES ' + totalPending.toLocaleString('en-KE'));
+  } catch (err) {
+    console.error('loadFutureTenancies:', err);
+  }
+}
+
+async function openFutureTenancyDetail(id) {
+  try {
+    const data = await api.futureTenancy(id);
+    const ft = data.future_tenancy;
+    if (!ft) return;
+    _ftCurrentTenancyId = id;
+    setTextEl('ft-detail-title', `${ft.tenant_name} — ${ft.unit_label || ''} ${ft.property_name}`);
+    setTextEl('ft-detail-subtitle', `Allocated to: ${ft.allocated_month} | Status: ${ft.status}`);
+
+    // Show/hide action buttons based on status
+    const actionsEl = document.getElementById('ft-actions');
+    const payFormEl = document.getElementById('ft-payment-form');
+    if (ft.status === 'RESERVED') {
+      actionsEl?.classList.remove('hidden');
+      payFormEl?.parentElement?.querySelector('button')?.classList.remove('hidden');
+    } else {
+      actionsEl?.classList.add('hidden');
+    }
+
+    // Load payments
+    const pData = await api.futureTenancyPayments(id);
+    const payments = pData.future_payments || [];
+    const pTbody = document.getElementById('ft-payments-tbody');
+    if (pTbody) {
+      if (payments.length === 0) {
+        pTbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-400 py-4">No payments recorded yet</td></tr>';
+      } else {
+        pTbody.innerHTML = payments.map(fp => {
+          const statusBadge = fp.status === 'Approved' ? 'bg-green-100 text-green-700'
+            : fp.status === 'Pending' ? 'bg-amber-100 text-amber-700'
+            : 'bg-slate-100 text-slate-500';
+          const actionBtns = fp.status === 'Pending'
+            ? `<button onclick="approveFuturePayment(${fp.id})" class="text-xs text-green-600 hover:underline mr-2">Approve</button><button onclick="cancelFuturePaymentAction(${fp.id})" class="text-xs text-red-600 hover:underline">Cancel</button>`
+            : '';
+          return `<tr class="border-t border-slate-100">
+            <td>${fp.payment_date || '—'}</td>
+            <td class="font-semibold">${Number(fp.amount).toLocaleString('en-KE')}</td>
+            <td>${fp.payment_mode || '—'}</td>
+            <td>${fp.purpose || '—'}</td>
+            <td>${fp.allocated_month || '—'}</td>
+            <td>${fp.mpesa_reference || '—'}</td>
+            <td><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge}">${fp.status}</span></td>
+            <td>${actionBtns}</td>
+          </tr>`;
+        }).join('');
+      }
+    }
+
+    // Show detail panel
+    document.getElementById('ft-detail-panel')?.classList.remove('hidden');
+    document.getElementById('ft-detail-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    console.error('openFutureTenancyDetail:', err);
+  }
+}
+
+function showFuturePaymentForm() {
+  const form = document.getElementById('ft-payment-form');
+  if (form) {
+    form.classList.remove('hidden');
+    // Default date to today
+    document.getElementById('ft-pay-date').value = new Date().toISOString().slice(0, 10);
+    // Default allocated month to current month
+    document.getElementById('ft-pay-allocated').value = new Date().toISOString().slice(0, 7);
+  }
+}
+
+async function submitFuturePayment() {
+  if (!_ftCurrentTenancyId) return;
+  const amount = Number(document.getElementById('ft-pay-amount')?.value || 0);
+  const payment_date = document.getElementById('ft-pay-date')?.value;
+  const payment_mode = document.getElementById('ft-pay-mode')?.value || 'Cash';
+  const purpose = document.getElementById('ft-pay-purpose')?.value || 'Down Payment';
+  const allocated_month = document.getElementById('ft-pay-allocated')?.value;
+  const mpesa_reference = document.getElementById('ft-pay-ref')?.value || null;
+  const notes = document.getElementById('ft-pay-notes')?.value || null;
+
+  if (!amount || amount <= 0) return alert('Please enter a valid amount');
+  if (!allocated_month) return alert('Please select an allocated month');
+
+  try {
+    await api.createFuturePayment(_ftCurrentTenancyId, {
+      amount, payment_date, payment_mode, purpose, allocated_month, mpesa_reference, notes,
+    });
+    document.getElementById('ft-payment-form')?.classList.add('hidden');
+    openFutureTenancyDetail(_ftCurrentTenancyId);
+  } catch (err) {
+    alert('Failed to record payment: ' + (err.message || err));
+  }
+}
+
+async function approveFuturePayment(paymentId) {
+  try {
+    await api.approveFuturePayment(paymentId);
+    openFutureTenancyDetail(_ftCurrentTenancyId);
+  } catch (err) {
+    alert('Failed to approve: ' + (err.message || err));
+  }
+}
+
+async function cancelFuturePaymentAction(paymentId) {
+  if (!confirm('Cancel this payment?')) return;
+  try {
+    await api.cancelFuturePayment(paymentId);
+    openFutureTenancyDetail(_ftCurrentTenancyId);
+  } catch (err) {
+    alert('Failed to cancel: ' + (err.message || err));
+  }
+}
+
+async function activateFutureTenancy() {
+  if (!_ftCurrentTenancyId) return;
+  if (!confirm('This will create an active tenant from this reservation. All approved payments will be carried forward. Continue?')) return;
+  try {
+    const result = await api.activateFutureTenancy(_ftCurrentTenancyId);
+    alert(`Tenancy activated!\nTenant: ${result.tenant?.name}\nTotal Paid: KES ${Number(result.total_paid || 0).toLocaleString('en-KE')}\nDeposit Paid: KES ${Number(result.deposit_paid || 0).toLocaleString('en-KE')}`);
+    document.getElementById('ft-detail-panel')?.classList.add('hidden');
+    _ftCurrentTenancyId = null;
+    loadFutureTenancies();
+  } catch (err) {
+    alert('Failed to activate: ' + (err.message || err));
+  }
+}
+
+async function cancelFutureTenancy() {
+  if (!_ftCurrentTenancyId) return;
+  if (!confirm('Cancel this reservation? This cannot be undone.')) return;
+  try {
+    await api.cancelFutureTenancy(_ftCurrentTenancyId);
+    document.getElementById('ft-detail-panel')?.classList.add('hidden');
+    _ftCurrentTenancyId = null;
+    loadFutureTenancies();
+  } catch (err) {
+    alert('Failed to cancel: ' + (err.message || err));
+  }
+}
+
+async function showAddFutureTenancyModal() {
+  // Populate houses dropdown for selection
+  let houses = [];
+  try {
+    const data = await api.houses();
+    houses = data.houses || [];
+  } catch (_) {}
+
+  const modal = document.createElement('div');
+  modal.id = 'ft-modal';
+  modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/50';
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+  const housesOptions = houses.map(h =>
+    `<option value="${h.paybill_number || ''}" data-property="${h.house_name || ''}" data-unit="${h.unit_label || ''}" data-rent="${h.rent_amount || 0}" data-deposit="${h.deposit_amount || 0}">${h.house_name || ''} — ${h.paybill_number || ''}</option>`
+  ).join('');
+
+  modal.innerHTML = `
+    <div class="bg-white rounded-xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto shadow-2xl">
+      <h3 class="text-lg font-bold mb-4">Reserve a Unit — Future Tenancy</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Select House (optional — can enter manually below)</label>
+          <select id="ft-modal-house" class="cyber-input w-full" onchange="ftModalHouseChanged(this)">
+            <option value="">— Enter details manually —</option>
+            ${housesOptions}
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Property Name *</label>
+            <input id="ft-modal-property" type="text" class="cyber-input w-full" placeholder="e.g. Sunview Apartments" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Unit Label</label>
+            <input id="ft-modal-unit" type="text" class="cyber-input w-full" placeholder="e.g. C9" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Prospective Tenant Name *</label>
+          <input id="ft-modal-name" type="text" class="cyber-input w-full" placeholder="e.g. JANE WAWERU" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Phone Number</label>
+            <input id="ft-modal-phone" type="tel" class="cyber-input w-full" placeholder="e.g. 0712345678" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">National ID</label>
+            <input id="ft-modal-nid" type="text" class="cyber-input w-full" placeholder="e.g. 12345678" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Tenant Code</label>
+            <input id="ft-modal-code" type="text" class="cyber-input w-full" placeholder="e.g. T001" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Allocated Month *</label>
+            <input id="ft-modal-month" type="month" class="cyber-input w-full" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Rent Amount (KES)</label>
+            <input id="ft-modal-rent" type="number" class="cyber-input w-full" placeholder="e.g. 15000" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Deposit Amount (KES)</label>
+            <input id="ft-modal-deposit" type="number" class="cyber-input w-full" placeholder="e.g. 10000" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+          <input id="ft-modal-notes" type="text" class="cyber-input w-full" placeholder="Any notes..." />
+        </div>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button onclick="submitFutureTenancy()" class="qc-btn qc-btn-primary">Reserve Unit</button>
+        <button onclick="document.getElementById('ft-modal').remove()" class="qc-btn">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  // Default allocated month to next month
+  const nextMonth = new Date();
+  nextMonth.setMonth(nextMonth.getMonth() + 1);
+  document.getElementById('ft-modal-month').value = nextMonth.toISOString().slice(0, 7);
+}
+
+window.ftModalHouseChanged = function(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  if (opt.value) {
+    document.getElementById('ft-modal-property').value = opt.dataset.property || '';
+    document.getElementById('ft-modal-unit').value = opt.dataset.unit || '';
+    document.getElementById('ft-modal-rent').value = opt.dataset.rent || '';
+    document.getElementById('ft-modal-deposit').value = opt.dataset.deposit || '';
+  }
+};
+
+async function submitFutureTenancy() {
+  const property_name = document.getElementById('ft-modal-property')?.value?.trim();
+  const unit_label = document.getElementById('ft-modal-unit')?.value?.trim();
+  const house_paybill = document.getElementById('ft-modal-house')?.value || null;
+  const tenant_name = document.getElementById('ft-modal-name')?.value?.trim();
+  const phone_number = document.getElementById('ft-modal-phone')?.value?.trim();
+  const national_id = document.getElementById('ft-modal-nid')?.value?.trim();
+  const tenant_code = document.getElementById('ft-modal-code')?.value?.trim();
+  const allocated_month = document.getElementById('ft-modal-month')?.value;
+  const rent_amount = Number(document.getElementById('ft-modal-rent')?.value || 0);
+  const deposit_amount = Number(document.getElementById('ft-modal-deposit')?.value || 0);
+  const notes = document.getElementById('ft-modal-notes')?.value?.trim();
+
+  if (!property_name) return alert('Property name is required');
+  if (!tenant_name) return alert('Tenant name is required');
+  if (!allocated_month) return alert('Allocated month is required');
+
+  try {
+    await api.createFutureTenancy({
+      property_name, unit_label, house_paybill, tenant_name, phone_number,
+      national_id, tenant_code, allocated_month, rent_amount, deposit_amount, notes,
+    });
+    document.getElementById('ft-modal')?.remove();
+    loadFutureTenancies();
+  } catch (err) {
+    alert('Failed to reserve unit: ' + (err.message || err));
+  }
+}
+
+// Wire up filter change
+document.getElementById('ft-filter-status')?.addEventListener('change', loadFutureTenancies);
+
+// Wire up add button
+document.getElementById('btn-add-future-tenancy')?.addEventListener('click', showAddFutureTenancyModal);
+
+// Export for showView
+window._ftLoadOnView = loadFutureTenancies;

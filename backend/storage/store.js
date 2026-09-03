@@ -181,17 +181,40 @@ async function getTenant(id, run) {
 async function createTenant(data) {
   let property_name = data.property_name || 'General';
   let garbageFeeEnabled = false;
+  let houseCharges = [];
   if (data.house_id) {
     const house = await getHouse(data.house_id);
     if (house) {
       property_name = house.house_name;
       garbageFeeEnabled = house.garbage_fee_enabled === true || house.garbage_fee_enabled === 't';
     }
+    // Also load charges from the new house_charges table
+    try {
+      const chargeRes = await query(
+        `SELECT * FROM house_charges WHERE house_paybill = $1 AND enabled = TRUE ORDER BY sort_order, id`,
+        [data.house_id]
+      );
+      houseCharges = chargeRes.rows;
+    } catch (_) {}
   }
   
-  const garbageFeeAmount = data.garbage_fee_amount != null && Number(data.garbage_fee_amount) > 0
+  // Compute garbage fee: explicit override > house_charges > legacy garbage_fee_enabled > 0
+  let garbageFeeAmount = data.garbage_fee_amount != null && Number(data.garbage_fee_amount) > 0
     ? Number(data.garbage_fee_amount)
     : (garbageFeeEnabled ? 2000 : 0);
+
+  // Compute water charge: explicit override > house_charges > 0
+  let waterChargeAmount = Number(data.water_charge_amount) || 0;
+
+  // Apply enabled one-time charges from house_charges
+  for (const hc of houseCharges) {
+    const name = (hc.charge_name || '').toLowerCase();
+    if (name.includes('garbage') && garbageFeeAmount === 0) {
+      garbageFeeAmount = Number(hc.amount) || 2000;
+    } else if (name.includes('water') && waterChargeAmount === 0) {
+      waterChargeAmount = Number(hc.amount) || 0;
+    }
+  }
 
   const openingArrears = Number(data.arrears || data.opening_arrears || 0);
   const openingAdvance = Number(data.opening_advance_rent || 0);
@@ -217,7 +240,7 @@ async function createTenant(data) {
       Number(data.rent_amount) || 0,
       Number(data.deposit_amount) || 0,
       garbageFeeAmount,
-      Number(data.water_charge_amount) || 0,
+      waterChargeAmount,
       data.move_in_date || null,
       data.rent_due_date,
       data.rent_due_time || '23:59:00',

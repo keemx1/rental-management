@@ -1307,3 +1307,82 @@ BEGIN
     ALTER TABLE tenants ADD COLUMN agreement_outstanding DECIMAL(10, 2) NOT NULL DEFAULT 0;
   END IF;
 END $$;
+
+-- =====================================================================
+-- FUTURE TENANCIES / RESERVED UNITS
+-- Tracks prospective tenants who have made payments before move-in.
+-- Status: RESERVED → ACTIVE (when tenant is activated)
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS future_tenancies (
+  id SERIAL PRIMARY KEY,
+  property_name VARCHAR(128) NOT NULL,
+  unit_label VARCHAR(64),
+  house_paybill VARCHAR(32) REFERENCES houses(paybill_number),
+  tenant_name VARCHAR(128) NOT NULL,
+  phone_number VARCHAR(20),
+  national_id VARCHAR(32),
+  tenant_code VARCHAR(32),
+  allocated_month VARCHAR(7) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'RESERVED' CHECK (status IN ('RESERVED', 'CANCELLED', 'ACTIVE')),
+  rent_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  deposit_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  activated_at TIMESTAMPTZ,
+  activated_tenant_id INTEGER,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_future_ten_status ON future_tenancies(status);
+CREATE INDEX IF NOT EXISTS idx_future_ten_property ON future_tenancies(property_name);
+CREATE INDEX IF NOT EXISTS idx_future_ten_house ON future_tenancies(house_paybill);
+CREATE INDEX IF NOT EXISTS idx_future_ten_code ON future_tenancies(tenant_code);
+
+-- =====================================================================
+-- FUTURE TENANCY PAYMENTS
+-- Records individual payments toward a future tenancy.
+-- payment_date = when money was received
+-- allocated_month = the future month the payment is intended for
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS future_payments (
+  id SERIAL PRIMARY KEY,
+  future_tenancy_id INTEGER NOT NULL REFERENCES future_tenancies(id) ON DELETE CASCADE,
+  amount DECIMAL(10, 2) NOT NULL,
+  payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  payment_time TIME,
+  allocated_month VARCHAR(7) NOT NULL,
+  payment_mode VARCHAR(32) NOT NULL DEFAULT 'Cash' CHECK (payment_mode IN ('M-Pesa', 'Cash', 'Pesa Link', 'Bank Transfer', 'Other')),
+  mpesa_reference VARCHAR(64),
+  purpose VARCHAR(64) NOT NULL DEFAULT 'Down Payment' CHECK (purpose IN ('Deposit', 'Rent', 'Down Payment', 'Other')),
+  notes TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Cancelled')),
+  approved_at TIMESTAMPTZ,
+  receipt_number VARCHAR(64),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_future_pay_tenancy ON future_payments(future_tenancy_id);
+CREATE INDEX IF NOT EXISTS idx_future_pay_status ON future_payments(status);
+CREATE INDEX IF NOT EXISTS idx_future_pay_month ON future_payments(allocated_month);
+
+-- =====================================================================
+-- HOUSE CHARGES
+-- Configurable per-house charges (garbage, water, service fee, etc.)
+-- Each charge has a name, amount, frequency, and can be toggled on/off.
+-- When a new tenant is created for this house, enabled charges are
+-- auto-applied to the tenant record.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS house_charges (
+  id SERIAL PRIMARY KEY,
+  house_paybill VARCHAR(32) NOT NULL REFERENCES houses(paybill_number) ON DELETE CASCADE,
+  charge_name VARCHAR(64) NOT NULL,
+  amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  frequency VARCHAR(16) NOT NULL DEFAULT 'one-time' CHECK (frequency IN ('one-time', 'monthly')),
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_house_charges_house ON house_charges(house_paybill);

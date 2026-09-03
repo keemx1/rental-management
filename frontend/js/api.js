@@ -773,4 +773,52 @@ export const api = {
   waTemplatePreview(key) {
     return request(`/whatsapp/templates/${key}/preview`, { method: 'POST' });
   },
+  // ─── Future Tenancies ───────────────────────────────────────────────────
+  futureTenancies(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/future-tenancies${qs ? '?' + qs : ''}`);
+  },
+  futureTenancy(id) {
+    return request(`/future-tenancies/${id}`);
+  },
+  createFutureTenancy(body) {
+    return request('/future-tenancies', { method: 'POST', body: JSON.stringify(body) });
+  },
+  updateFutureTenancy(id, body) {
+    return request(`/future-tenancies/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  cancelFutureTenancy(id) {
+    return request(`/future-tenancies/${id}/cancel`, { method: 'POST' });
+  },
+  activateFutureTenancy(id) {
+    return request(`/future-tenancies/${id}/activate`, { method: 'POST' });
+  },
+  // ─── House Charges ────────────────────────────────────────────────────────
+  houseCharges(houseId) {
+    return request(`/house-charges/${houseId}`);
+  },
+  createHouseCharge(houseId, body) {
+    return request(`/house-charges/${houseId}`, { method: 'POST', body: JSON.stringify(body) });
+  },
+  updateHouseCharge(houseId, chargeId, body) {
+    return request(`/house-charges/${houseId}/${chargeId}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  toggleHouseCharge(houseId, chargeId) {
+    return request(`/house-charges/${houseId}/${chargeId}/toggle`, { method: 'PATCH' });
+  },
+  deleteHouseCharge(houseId, chargeId) {
+    return request(`/house-charges/${houseId}/${chargeId}`, { method: 'DELETE' });
+  },
+  futureTenancyPayments(id) {
+    return request(`/future-tenancies/${id}/payments`);
+  },
+  createFuturePayment(tenancyId, body) {
+    return request(`/future-tenancies/${tenancyId}/payments`, { method: 'POST', body: JSON.stringify(body) });
+  },
+  approveFuturePayment(paymentId) {
+    return request(`/future-tenancies/payments/${paymentId}/approve`, { method: 'POST' });
+  },
+  cancelFuturePayment(paymentId) {
+    return request(`/future-tenancies/payments/${paymentId}/cancel`, { method: 'POST' });
+  },
 };

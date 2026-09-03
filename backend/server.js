@@ -83,6 +83,8 @@ app.use('/api/invoice-register', invoiceRegisterRoutes);
 app.use('/api/monthly-reports', monthlyReportRoutes);
 app.use('/api/deposit-refunds', require('./routes/depositRefunds'));
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/future-tenancies', require('./routes/futureTenancies'));
+app.use('/api/house-charges', require('./routes/houseCharges'));
 
 app.get('/api/health', healthDetailedAuth, (req, res) => {
   const payload = { ok: true, timestamp: new Date().toISOString() };
