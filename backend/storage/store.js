@@ -2992,7 +2992,16 @@ async function payPenalty(id) {
     `UPDATE penalties SET status = 'Paid', paid_date = CURRENT_DATE, updated_at = NOW() WHERE id = $1 AND status = 'Pending' RETURNING *`,
     [id]
   );
-  return res.rows[0] || null;
+  const penalty = res.rows[0];
+  if (penalty) {
+    // Also update linked maintenance charge recovery status
+    query(
+      `UPDATE maintenance_charges SET recovery_status = 'Paid', amount_recovered = total_cost, updated_at = NOW()
+       WHERE penalty_id = $1 AND recovery_status != 'Paid'`,
+      [id]
+    ).catch(() => {});
+  }
+  return penalty || null;
 }
 
 async function deletePenalty(id) {
@@ -3896,8 +3905,8 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     const garbageCharge = Number(t.garbage_fee_amount || 0);
     const arrears = Number(t.arrears || 0);
 
-    // Penalties this month for this tenant
-    const penaltyTotal = tenantPenalties.reduce((s, p) => s + Number(p.amount || 0), 0);
+    // Penalties this month for this tenant — only count Pending (unpaid) penalties
+    const penaltyTotal = tenantPenalties.filter(p => p.status === 'Pending').reduce((s, p) => s + Number(p.amount || 0), 0);
 
     // Rent Due = rent + water + garbage + penalties
     const rentDue = rentAmount + waterCharge + garbageCharge + penaltyTotal;
@@ -4004,6 +4013,10 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
   const totalRecovered = workSummary.reduce((s, w) => s + w.amount_recovered, 0);
   const totalInvoicesAmount = invoicesIssued.reduce((s, i) => s + i.amount, 0);
 
+  // Penalty breakdown by status
+  const totalPenaltiesPending = penRes.rows.filter(p => p.status === 'Pending').reduce((s, p) => s + Number(p.amount || 0), 0);
+  const totalPenaltiesPaid = penRes.rows.filter(p => p.status === 'Paid').reduce((s, p) => s + Number(p.amount || 0), 0);
+
   const summary = {
     total_units: totalUnits, occupied_units: statusCounts.CLEARED + statusCounts.PARTIALLY_PAID + statusCounts.UNPAID + statusCounts.OVERPAYMENT,
     vacant_units: statusCounts.VACANT, booked_units: statusCounts.BOOKED,
@@ -4012,7 +4025,8 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     new_tenants: 0, vacated_tenants: 0,
     total_rent_due: totalRentDue, total_rent_paid: totalRentPaid,
     total_deposit_collected: totalDepositCollected, total_water_charges: totalWaterCharges,
-    total_penalties: totalPenalties, total_outstanding: totalOutstanding,
+    total_penalties: totalPenaltiesPending, total_penalties_paid: totalPenaltiesPaid,
+    total_outstanding: totalOutstanding,
     total_advance_overpayment: totalAdvance, total_credit_balance: 0,
     total_tenant_recoveries: totalRecovered, total_mgmt_maintenance_cost: totalMgmtCost,
     total_work_repair_cost: totalMaintenanceCost, total_invoices_issued: totalInvoicesAmount,
