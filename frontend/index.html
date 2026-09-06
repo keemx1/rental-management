@@ -2849,6 +2849,10 @@
             <h2 class="section-title mt-1">Monthly <span class="accent">Reports</span></h2>
             <p class="section-desc">Automatically generated financial and maintenance reports for each billing period</p>
           </div>
+          <div class="flex gap-2" id="mr-view-toggle">
+            <button type="button" class="action-btn text-xs" data-mr-view="standard" id="btn-mr-standard">Standard Report</button>
+            <button type="button" class="action-btn text-xs" data-mr-view="enhanced" id="btn-mr-enhanced">Enhanced Report</button>
+          </div>
         </div>
 
         <div class="glass-panel p-6 max-w-6xl mx-auto">
@@ -2984,6 +2988,76 @@
 
           <div id="mr-empty" class="text-center text-slate-500 py-12">
             Select a month to view its financial report. Reports are auto-generated during monthly rollover.
+          </div>
+
+          <!-- Enhanced Report View -->
+          <div id="mr-enhanced-view" class="hidden">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-bold text-white">Enhanced Monthly Report</h3>
+              <button type="button" id="btn-download-enhanced" class="action-btn text-sm">Download Excel</button>
+            </div>
+
+            <!-- Unit-by-Unit Financial Table -->
+            <div class="mb-6">
+              <h4 class="text-md font-semibold text-cyan-400 mb-2">Detailed Unit-by-Unit Financial Table</h4>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left cyber-table text-xs" id="er-unit-table">
+                  <thead>
+                    <tr>
+                      <th>Unit</th><th>Tenant</th><th>Telephone</th><th class="text-right">Deposit</th>
+                      <th class="text-right">Water</th><th class="text-right">Penalty</th>
+                      <th class="text-right">Monthly Rent</th><th class="text-right">Balance B/F</th>
+                      <th class="text-right">Rent Due</th><th class="text-right">Rent Paid</th>
+                      <th>Receipt No</th><th>Transaction Ref</th><th>Payment Date</th>
+                      <th class="text-right">Balance</th><th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="er-unit-tbody"></tbody>
+                  <tfoot id="er-unit-tfoot"></tfoot>
+                </table>
+              </div>
+            </div>
+
+            <!-- Work Done During the Month -->
+            <div class="mb-6">
+              <h4 class="text-md font-semibold text-amber-400 mb-2">Work Done During the Month</h4>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left cyber-table text-xs">
+                  <thead>
+                    <tr>
+                      <th>WO No</th><th>Unit</th><th>Tenant</th><th>Problem Reported</th>
+                      <th>Work Done</th><th class="text-right">Material</th><th class="text-right">Labour</th>
+                      <th class="text-right">Total</th><th>Party</th><th class="text-right">Recovered</th>
+                      <th class="text-right">Outstanding</th><th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="er-work-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Invoices Issued -->
+            <div class="mb-6">
+              <h4 class="text-md font-semibold text-purple-400 mb-2">Invoices Issued During the Month</h4>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left cyber-table text-xs">
+                  <thead>
+                    <tr>
+                      <th>Invoice No</th><th>Type</th><th>Property/Unit</th><th>Description</th>
+                      <th class="text-right">Amount</th><th>Date Issued</th><th>Party</th>
+                      <th>Status</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th>
+                    </tr>
+                  </thead>
+                  <tbody id="er-invoice-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Monthly Summary -->
+            <div class="p-4 bg-slate-800/30 rounded-lg border border-slate-700">
+              <h4 class="text-md font-semibold text-white mb-3">Monthly Summary / Totals</h4>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm" id="er-summary-grid"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -4351,11 +4425,12 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js"></script>
+  <script type="module" src="/js/app.js?v=11"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=9').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=13').catch(() => {});
     }
+    document.querySelector('.app-shell')?.classList.add('login-mode');
   </script>
 </body>
 

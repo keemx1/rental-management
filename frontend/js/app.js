@@ -2473,8 +2473,6 @@ async function openHouseModal(id = null) {
       form.house_name.value = house.house_name;
       form.total_units.value = house.total_units;
       form.notes.value = house.notes || '';
-      const gfToggle = document.getElementById('house-edit-garbage-fee-toggle');
-      if (gfToggle) gfToggle.checked = !!house.garbage_fee_enabled;
       document.getElementById('house-edit-payment-method').value = house.payment_method || 'paybill';
       document.getElementById('house-edit-payment-paybill').value = house.payment_paybill || '';
       document.getElementById('house-edit-account-format').value = house.account_number_format || '';
@@ -2484,7 +2482,6 @@ async function openHouseModal(id = null) {
       loadHouseCharges(house.paybill_number);
     } else {
       loadHouseCharges(null);
-    }
     }
   }
   houseEditReturnView = id ? 'house-dashboard' : 'houses';
@@ -7258,20 +7255,183 @@ async function loadReportData(month) {
   }
 }
 
-document.getElementById('mr-month-select')?.addEventListener('change', (e) => loadReportData(e.target.value));
+document.getElementById('mr-month-select')?.addEventListener('change', (e) => {
+  if (_currentMrView === 'enhanced') loadEnhancedReport(e.target.value);
+  else loadReportData(e.target.value);
+});
 document.getElementById('mr-property-select')?.addEventListener('change', () => {
   const month = document.getElementById('mr-month-select')?.value;
-  if (month) loadReportData(month);
+  if (month) {
+    if (_currentMrView === 'enhanced') loadEnhancedReport(month);
+    else loadReportData(month);
+  }
 });
+// Hook into existing refresh handler to support enhanced view
 document.getElementById('btn-refresh-report')?.addEventListener('click', async () => {
   const month = document.getElementById('mr-month-select')?.value;
-  const housePaybill = document.getElementById('mr-property-select')?.value || '';
   if (!month) return;
+  if (_currentMrView === 'enhanced') { await loadEnhancedReport(month); return; }
+  const housePaybill = document.getElementById('mr-property-select')?.value || '';
   try {
     await api.refreshMonthlyReport(month, housePaybill || undefined);
     await loadReportData(month);
   } catch (err) { alert(err.message); }
 });
+
+// ─── Enhanced Monthly Report ─────────────────────────────────────────────────
+let _currentMrView = 'standard';
+
+document.getElementById('btn-mr-standard')?.addEventListener('click', () => switchMrView('standard'));
+document.getElementById('btn-mr-enhanced')?.addEventListener('click', () => switchMrView('enhanced'));
+
+function switchMrView(view) {
+  _currentMrView = view;
+  document.getElementById('btn-mr-standard')?.classList.toggle('bg-blue-600', view === 'standard');
+  document.getElementById('btn-mr-standard')?.classList.toggle('text-white', view === 'standard');
+  document.getElementById('btn-mr-enhanced')?.classList.toggle('bg-blue-600', view === 'enhanced');
+  document.getElementById('btn-mr-enhanced')?.classList.toggle('text-white', view === 'enhanced');
+  const month = document.getElementById('mr-month-select')?.value;
+  if (month) {
+    if (view === 'enhanced') loadEnhancedReport(month);
+    else loadReportData(month);
+  }
+}
+
+// Set initial toggle state
+document.getElementById('btn-mr-standard')?.classList.add('bg-blue-600', 'text-white');
+
+document.getElementById('btn-download-enhanced')?.addEventListener('click', async () => {
+  const month = document.getElementById('mr-month-select')?.value;
+  const housePaybill = document.getElementById('mr-property-select')?.value || '';
+  if (!month) return;
+  try {
+    const result = await api.downloadEnhancedMonthlyReport(month, housePaybill || undefined);
+    if (result.blob) triggerFileDownload(result);
+  } catch (err) { alert(err.message); }
+});
+
+async function loadEnhancedReport(month) {
+  const standardView = document.getElementById('mr-report-view');
+  const enhancedView = document.getElementById('mr-enhanced-view');
+  const empty = document.getElementById('mr-empty');
+  if (!month) { if (standardView) standardView.classList.add('hidden'); if (enhancedView) enhancedView.classList.add('hidden'); if (empty) empty.classList.remove('hidden'); return; }
+  try {
+    const housePaybill = document.getElementById('mr-property-select')?.value || '';
+    const { report } = await api.getEnhancedMonthlyReport(month, housePaybill || undefined);
+    if (standardView) standardView.classList.add('hidden');
+    if (enhancedView) enhancedView.classList.remove('hidden');
+    if (empty) empty.classList.add('hidden');
+
+    const money = (n) => 'KES ' + Number(n || 0).toLocaleString('en-KE', { maximumFractionDigits: 0 });
+
+    // Unit-by-unit table
+    const unitTbody = document.getElementById('er-unit-tbody');
+    const unitTfoot = document.getElementById('er-unit-tfoot');
+    const units = report.units || [];
+    unitTbody.innerHTML = units.length ? units.map(u => {
+      const statusClass = u.status === 'CLEARED' ? 'text-green-400' : u.status === 'PARTIALLY_PAID' ? 'text-amber-400' : u.status === 'UNPAID' ? 'text-red-400' : u.status === 'OVERPAYMENT' ? 'text-blue-400' : 'text-slate-500';
+      const rowBg = u.status === 'VACANT' || u.status === 'BOOKED' ? 'opacity-50' : '';
+      return `<tr class="${rowBg}">
+        <td class="font-mono">${escapeHtml(u.unit_number || '')}</td>
+        <td>${escapeHtml(u.tenant_name || '')}</td>
+        <td class="text-xs">${escapeHtml(u.telephone || '')}</td>
+        <td class="text-right font-mono">${u.deposit ? money(u.deposit) : '—'}</td>
+        <td class="text-right font-mono">${u.water ? money(u.water) : '—'}</td>
+        <td class="text-right font-mono">${u.penalty ? money(u.penalty) : '—'}</td>
+        <td class="text-right font-mono">${money(u.monthly_rent)}</td>
+        <td class="text-right font-mono">${u.balance_bf ? money(u.balance_bf) : '—'}</td>
+        <td class="text-right font-mono font-semibold">${money(u.rent_due)}</td>
+        <td class="text-right font-mono">${u.rent_paid ? money(u.rent_paid) : '—'}</td>
+        <td class="font-mono text-xs">${escapeHtml(u.receipt_no || '—')}</td>
+        <td class="font-mono text-xs">${escapeHtml(u.transaction_ref || '—')}</td>
+        <td class="font-mono text-xs">${escapeHtml(u.payment_date || '—')}</td>
+        <td class="text-right font-mono font-semibold">${money(u.balance)}</td>
+        <td><span class="font-semibold text-xs ${statusClass}">${escapeHtml(u.status || '')}</span></td>
+      </tr>`;
+    }).join('') : '<tr><td colspan="15" class="text-center text-slate-500 py-4">No units found</td></tr>';
+
+    // Totals row
+    const sum = report.summary || {};
+    unitTfoot.innerHTML = `<tr class="font-bold border-t-2 border-slate-600">
+      <td colspan="3" class="text-right">TOTALS</td>
+      <td class="text-right font-mono">${money(sum.total_deposit_collected)}</td>
+      <td class="text-right font-mono">${money(sum.total_water_charges)}</td>
+      <td class="text-right font-mono">${money(sum.total_penalties)}</td>
+      <td class="text-right font-mono">${money(sum.total_rent_due)}</td>
+      <td class="text-right font-mono">—</td>
+      <td class="text-right font-mono">${money(sum.total_rent_due)}</td>
+      <td class="text-right font-mono">${money(sum.total_rent_paid)}</td>
+      <td colspan="3"></td>
+      <td class="text-right font-mono">${money(sum.total_outstanding)}</td>
+      <td></td>
+    </tr>`;
+
+    // Work summary
+    const workTbody = document.getElementById('er-work-tbody');
+    const work = report.work_summary || [];
+    workTbody.innerHTML = work.length ? work.map(w => `<tr>
+      <td class="font-mono text-xs">${escapeHtml(w.wo_number || '')}</td>
+      <td>${escapeHtml(w.unit || '')}</td>
+      <td>${escapeHtml(w.tenant || '')}</td>
+      <td>${escapeHtml(w.problem || '')}</td>
+      <td>${escapeHtml(w.work_done || '')}</td>
+      <td class="text-right font-mono">${w.material_cost ? money(w.material_cost) : '—'}</td>
+      <td class="text-right font-mono">${w.labour_cost ? money(w.labour_cost) : '—'}</td>
+      <td class="text-right font-mono font-semibold">${money(w.total_cost)}</td>
+      <td><span class="text-xs ${w.responsible_party === 'Tenant' ? 'text-amber-400' : 'text-cyan-400'}">${escapeHtml(w.responsible_party || '')}</span></td>
+      <td class="text-right font-mono">${w.amount_recovered ? money(w.amount_recovered) : '—'}</td>
+      <td class="text-right font-mono">${w.outstanding_recovery > 0 ? money(w.outstanding_recovery) : '—'}</td>
+      <td><span class="status-badge ${w.status === 'Paid' ? 'badge-active' : 'badge-pending'}">${escapeHtml(w.status || '')}</span></td>
+    </tr>`).join('') : '<tr><td colspan="12" class="text-center text-slate-500 py-4">No work/maintenance activities this month</td></tr>';
+
+    // Invoices
+    const invTbody = document.getElementById('er-invoice-tbody');
+    const invs = report.invoices_issued || [];
+    invTbody.innerHTML = invs.length ? invs.map(i => `<tr>
+      <td class="font-mono text-xs">${escapeHtml(i.invoice_number || '')}</td>
+      <td>${escapeHtml(i.invoice_type || '')}</td>
+      <td class="text-xs">${escapeHtml(i.property || '')}${i.unit ? ' / ' + escapeHtml(i.unit) : ''}</td>
+      <td>${escapeHtml(i.description || '')}</td>
+      <td class="text-right font-mono">${money(i.amount)}</td>
+      <td class="font-mono text-xs">${i.date_issued ? new Date(i.date_issued).toLocaleDateString('en-KE') : '—'}</td>
+      <td>${escapeHtml(i.responsible_party || '')}</td>
+      <td><span class="status-badge badge-pending">${escapeHtml(i.payment_status || '')}</span></td>
+      <td class="text-right font-mono">${i.amount_paid ? money(i.amount_paid) : '—'}</td>
+      <td class="text-right font-mono">${i.outstanding ? money(i.outstanding) : '—'}</td>
+    </tr>`).join('') : '<tr><td colspan="10" class="text-center text-slate-500 py-4">No invoices issued this month</td></tr>';
+
+    // Summary grid
+    const sg = document.getElementById('er-summary-grid');
+    sg.innerHTML = `
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Total Units</p><p class="font-bold font-orbitron">${sum.total_units || 0}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Occupied</p><p class="font-bold font-orbitron text-green-400">${sum.occupied_units || 0}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Vacant</p><p class="font-bold font-orbitron text-amber-400">${sum.vacant_units || 0}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Booked</p><p class="font-bold font-orbitron text-indigo-400">${sum.booked_units || 0}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Paid</p><p class="font-bold font-orbitron text-green-400">${sum.paid_units || 0}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Partially Paid</p><p class="font-bold font-orbitron text-amber-400">${sum.partially_paid_units || 0}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Unpaid</p><p class="font-bold font-orbitron text-red-400">${sum.unpaid_units || 0}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">New Tenants</p><p class="font-bold font-orbitron text-green-400">${sum.new_tenants || 0}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Vacated</p><p class="font-bold font-orbitron text-rose-400">${sum.vacated_tenants || 0}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Total Rent Due</p><p class="font-bold font-orbitron">${money(sum.total_rent_due)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Total Rent Paid</p><p class="font-bold font-orbitron text-green-400">${money(sum.total_rent_paid)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Deposit Collected</p><p class="font-bold font-orbitron">${money(sum.total_deposit_collected)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Water Charges</p><p class="font-bold font-orbitron">${money(sum.total_water_charges)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Penalties</p><p class="font-bold font-orbitron text-amber-400">${money(sum.total_penalties)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Outstanding Balance</p><p class="font-bold font-orbitron text-red-400">${money(sum.total_outstanding)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Advance/Overpayment</p><p class="font-bold font-orbitron text-blue-400">${money(sum.total_advance_overpayment)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Credit Balance</p><p class="font-bold font-orbitron text-cyan-400">${money(sum.total_credit_balance)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Tenant Recoveries</p><p class="font-bold font-orbitron">${money(sum.total_tenant_recoveries)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Mgmt Maintenance</p><p class="font-bold font-orbitron text-amber-400">${money(sum.total_mgmt_maintenance_cost)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Total Work Cost</p><p class="font-bold font-orbitron">${money(sum.total_work_repair_cost)}</p></div>
+      <div class="p-2 bg-slate-800/50 rounded border border-slate-700"><p class="text-xs text-slate-400">Invoices Issued</p><p class="font-bold font-orbitron text-purple-400">${money(sum.total_invoices_issued)}</p></div>
+    `;
+
+  } catch (err) {
+    if (standardView) standardView.classList.add('hidden');
+    if (enhancedView) enhancedView.classList.add('hidden');
+    if (empty) { empty.classList.remove('hidden'); empty.textContent = 'No enhanced report found for this month. Run monthly rollover first.'; }
+  }
+}
 
 async function loadInvoiceRegister() {
   await Promise.all([loadInvoiceRegisterMonthly(), runInvoiceRegisterSearch()]);
@@ -8155,6 +8315,10 @@ async function loadFutureTenancies() {
     if (!tbody) return;
     if (list.length === 0) {
       tbody.innerHTML = '<tr><td colspan="10" class="text-center text-slate-400 py-8">No future tenancies found</td></tr>';
+      setTextEl('ft-reserved-count', 0);
+      setTextEl('ft-active-count', 0);
+      setTextEl('ft-total-paid', 'KES 0');
+      setTextEl('ft-total-pending', 'KES 0');
       return;
     }
     tbody.innerHTML = list.map(ft => {
@@ -8465,3 +8629,18 @@ document.getElementById('btn-add-future-tenancy')?.addEventListener('click', sho
 
 // Export for showView
 window._ftLoadOnView = loadFutureTenancies;
+
+// Expose house charge functions for inline onclick handlers
+window.toggleHouseChargeUI = toggleHouseChargeUI;
+window.deleteHouseChargeUI = deleteHouseChargeUI;
+window.saveHouseCharge = saveHouseCharge;
+
+// Expose future tenancy functions for inline onclick handlers
+window.openFutureTenancyDetail = openFutureTenancyDetail;
+window.submitFuturePayment = submitFuturePayment;
+window.showFuturePaymentForm = showFuturePaymentForm;
+window.approveFuturePayment = approveFuturePayment;
+window.cancelFuturePaymentAction = cancelFuturePaymentAction;
+window.activateFutureTenancy = activateFutureTenancy;
+window.cancelFutureTenancy = cancelFutureTenancy;
+window.submitFutureTenancy = submitFutureTenancy;

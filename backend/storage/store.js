@@ -3799,6 +3799,256 @@ async function getMonthlyReport(month, housePaybill) {
 }
 
 /**
+ * Build the enhanced monthly report data — unit-by-unit financial table,
+ * work/maintenance summary, invoices issued, and monthly summary totals.
+ */
+async function buildEnhancedMonthlyReport(month, housePaybill) {
+  const monthStart = `${month}-01`;
+  const d = new Date(`${month}-15T12:00:00`);
+  d.setMonth(d.getMonth() + 1);
+  const monthEnd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+
+  // 1. All tenants for the property (or all)
+  let tenantQ = `SELECT t.*, h.house_name FROM tenants t LEFT JOIN houses h ON t.house_paybill_number = h.paybill_number WHERE 1=1`;
+  const tenantParams = [];
+  if (housePaybill) { tenantQ += ` AND t.house_paybill_number = $1`; tenantParams.push(housePaybill); }
+  tenantQ += ` ORDER BY t.house_paybill_number, t.unit_label`;
+  const tenantRes = await query(tenantQ, tenantParams);
+
+  // 2. All approved payments in the month
+  let payQ = `SELECT p.*, t.name AS tenant_name, t.unit_label, t.house_paybill_number
+    FROM payments p JOIN tenants t ON p.tenant_code = t.tenant_code
+    WHERE p.status = 'Approved' AND p.payment_date >= $1 AND p.payment_date < $2`;
+  const payParams = [monthStart, monthEnd];
+  if (housePaybill) { payQ += ` AND t.house_paybill_number = $3`; payParams.push(housePaybill); }
+  payQ += ` ORDER BY t.house_paybill_number, t.unit_label, p.payment_date`;
+  const payRes = await query(payQ, payParams);
+
+  // 3. All penalties in the month
+  let penQ = `SELECT p.*, t.name AS tenant_name, t.unit_label, t.house_paybill_number
+    FROM penalties p JOIN tenants t ON p.tenant_code = t.tenant_code
+    WHERE p.created_at >= $1 AND p.created_at < $2`;
+  const penParams = [monthStart, monthEnd];
+  if (housePaybill) { penQ += ` AND t.house_paybill_number = $3`; penParams.push(housePaybill); }
+  const penRes = await query(penQ, penParams);
+
+  // 4. All maintenance charges + work orders in the month
+  let mcQ = `SELECT mc.*, wo.wo_number, wo.property_name AS wo_property, wo.technician_name,
+    wo.date_requested, wo.date_completed, wo.status AS wo_status,
+    wo.actual_work_completed, wo.materials_used, wo.labour_involved
+    FROM maintenance_charges mc
+    JOIN work_orders wo ON mc.work_order_id = wo.id
+    WHERE mc.charge_month = $1`;
+  const mcParams = [month];
+  if (housePaybill) { mcQ += ` AND wo.house_paybill_number = $2`; mcParams.push(housePaybill); }
+  const mcRes = await query(mcQ, mcParams);
+
+  // 5. Invoices issued in the month (from invoice_register)
+  let invQ = `SELECT ir.* FROM invoice_register ir WHERE ir.generated_at >= $1 AND ir.generated_at < $2`;
+  const invParams = [monthStart, monthEnd];
+  if (housePaybill) { invQ += ` AND ir.house_paybill_number = $3`; invParams.push(housePaybill); }
+  const invRes = await query(invQ, invParams);
+
+  // 6. Future tenancies (booked units)
+  let ftQ = `SELECT ft.*, h.house_name FROM future_tenancies ft LEFT JOIN houses h ON ft.house_paybill = h.paybill_number WHERE ft.allocated_month = $1 AND ft.status = 'RESERVED'`;
+  const ftParams = [month];
+  if (housePaybill) { ftQ += ` AND ft.house_paybill = $2`; ftParams.push(housePaybill); }
+  const ftRes = await query(ftQ, ftParams);
+
+  // Group payments by tenant
+  const paymentsByTenant = {};
+  for (const p of payRes.rows) {
+    if (!paymentsByTenant[p.tenant_code]) paymentsByTenant[p.tenant_code] = [];
+    paymentsByTenant[p.tenant_code].push(p);
+  }
+
+  // Group penalties by tenant
+  const penaltiesByTenant = {};
+  for (const p of penRes.rows) {
+    if (!penaltiesByTenant[p.tenant_code]) penaltiesByTenant[p.tenant_code] = [];
+    penaltiesByTenant[p.tenant_code].push(p);
+  }
+
+  // Build unit-by-unit table
+  const units = [];
+  const statusCounts = { CLEARED: 0, PARTIALLY_PAID: 0, UNPAID: 0, VACANT: 0, BOOKED: 0, OVERPAYMENT: 0 };
+  let totalRentDue = 0, totalRentPaid = 0, totalDepositCollected = 0;
+  let totalWaterCharges = 0, totalPenalties = 0, totalOutstanding = 0, totalAdvance = 0;
+
+  for (const t of tenantRes.rows) {
+    const tenantPayments = paymentsByTenant[t.tenant_code] || [];
+    const tenantPenalties = penaltiesByTenant[t.tenant_code] || [];
+
+    // Vacant unit
+    if (t.status === 'Vacant') {
+      units.push({
+        unit_number: t.unit_label || t.tenant_code, tenant_name: '— VACANT —',
+        telephone: '', deposit: 0, water: 0, penalty: 0, monthly_rent: Number(t.rent_amount || 0),
+        balance_bf: 0, rent_due: 0, rent_paid: 0, receipt_no: '', transaction_ref: '',
+        payment_date: '', balance: 0, status: 'VACANT', payment_mode: '',
+      });
+      statusCounts.VACANT++;
+      continue;
+    }
+
+    const rentAmount = Number(t.rent_amount || 0);
+    const waterCharge = Number(t.water_charge_amount || 0);
+    const garbageCharge = Number(t.garbage_fee_amount || 0);
+    const arrears = Number(t.arrears || 0);
+
+    // Penalties this month for this tenant
+    const penaltyTotal = tenantPenalties.reduce((s, p) => s + Number(p.amount || 0), 0);
+
+    // Rent Due = rent + water + garbage + penalties
+    const rentDue = rentAmount + waterCharge + garbageCharge + penaltyTotal;
+
+    // Payments this month
+    const depositPaid = tenantPayments.filter(p => p.payment_type === 'deposit').reduce((s, p) => s + Number(p.amount || 0), 0);
+    const totalPaid = tenantPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+
+    // Latest payment for receipt/ref/date
+    const latestPayment = tenantPayments.length > 0
+      ? tenantPayments.reduce((latest, p) => (!latest || p.payment_date > latest.payment_date) ? p : latest, null)
+      : null;
+
+    // Balance = arrears + (rent_due - total_paid)
+    const balance = arrears + rentDue - totalPaid;
+
+    // Status
+    let status;
+    if (balance <= 0 && totalPaid >= rentDue + arrears) {
+      status = balance < 0 ? 'OVERPAYMENT' : 'CLEARED';
+    } else if (totalPaid > 0) {
+      status = 'PARTIALLY PAID';
+    } else {
+      status = 'UNPAID';
+    }
+
+    // Payment mode from latest payment
+    const paymentMode = latestPayment?.payment_mode || '';
+
+    // Receipt and reference
+    let receiptNo = '';
+    let transactionRef = '';
+    let paymentDate = '';
+    if (latestPayment) {
+      receiptNo = latestPayment.receipt_number || '';
+      transactionRef = latestPayment.mpesa_reference || latestPayment.cheque_number || latestPayment.sender_account || '';
+      paymentDate = latestPayment.payment_date || '';
+    }
+
+    units.push({
+      unit_number: t.unit_label || t.tenant_code, tenant_name: t.name,
+      telephone: t.phone_number || '', deposit: depositPaid, water: waterCharge,
+      penalty: penaltyTotal, monthly_rent: rentAmount, balance_bf: arrears,
+      rent_due: rentDue, rent_paid: totalPaid, receipt_no: receiptNo,
+      transaction_ref: transactionRef, payment_date: paymentDate,
+      balance, status, payment_mode: paymentMode,
+    });
+
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+    totalRentDue += rentDue;
+    totalRentPaid += totalPaid;
+    totalDepositCollected += depositPaid;
+    totalWaterCharges += waterCharge;
+    totalPenalties += penaltyTotal;
+    if (balance > 0) totalOutstanding += balance;
+    if (balance < 0) totalAdvance += Math.abs(balance);
+  }
+
+  // Add booked future tenancies
+  for (const ft of ftRes.rows) {
+    units.push({
+      unit_number: ft.house_paybill || '', tenant_name: ft.prospective_tenant_name || 'BOOKED',
+      telephone: ft.prospective_phone || '', deposit: 0, water: 0, penalty: 0,
+      monthly_rent: 0, balance_bf: 0, rent_due: 0, rent_paid: 0,
+      receipt_no: '', transaction_ref: '', payment_date: '', balance: 0,
+      status: 'BOOKED', payment_mode: '',
+    });
+    statusCounts.BOOKED = (statusCounts.BOOKED || 0) + 1;
+  }
+
+  // Work / maintenance summary
+  const workSummary = mcRes.rows.map(mc => ({
+    wo_number: mc.wo_number, unit: mc.unit_code, tenant: mc.tenant_name,
+    problem: mc.problem, work_done: mc.repair_description,
+    material_cost: Number(mc.material_cost || 0), labour_cost: Number(mc.labour_cost || 0),
+    total_cost: Number(mc.total_cost || 0), responsible_party: mc.responsible_party || 'Pending',
+    amount_recovered: Number(mc.amount_recovered || 0),
+    outstanding_recovery: Number(mc.total_cost || 0) - Number(mc.amount_recovered || 0),
+    status: mc.recovery_status || 'Pending',
+  }));
+
+  // Invoices issued
+  const invoicesIssued = invRes.rows.map(inv => ({
+    invoice_number: inv.invoice_number, invoice_type: inv.invoice_type,
+    property: inv.property_name, unit: inv.unit_label,
+    description: inv.invoice_type === 'exit' ? `Exit Invoice - ${inv.invoice_number}` :
+      inv.invoice_type === 'rent' ? `Rent Invoice - ${inv.tenant_name || ''}` :
+      inv.invoice_type === 'maintenance' ? `Maintenance Invoice - ${inv.invoice_number}` :
+      inv.invoice_type === 'penalty' ? `Penalty Invoice - ${inv.tenant_name || ''}` :
+      `${inv.invoice_type} Invoice`,
+    amount: Number(inv.amount || 0), date_issued: inv.generated_at,
+    responsible_party: inv.invoice_type === 'maintenance' ? 'Management' :
+      inv.invoice_type === 'exit' ? 'Tenant' : 'Tenant',
+    payment_status: inv.status || 'Generated',
+    amount_paid: Number(inv.amount || 0),
+    outstanding: 0,
+  }));
+
+  // Monthly summary
+  const totalUnits = tenantRes.rows.length + ftRes.rows.length;
+  const totalMaintenanceCost = workSummary.reduce((s, w) => s + w.total_cost, 0);
+  const totalTenantRecoveries = workSummary.filter(w => w.responsible_party === 'Tenant').reduce((s, w) => s + w.total_cost, 0);
+  const totalMgmtCost = workSummary.filter(w => w.responsible_party !== 'Tenant').reduce((s, w) => s + w.total_cost, 0);
+  const totalRecovered = workSummary.reduce((s, w) => s + w.amount_recovered, 0);
+  const totalInvoicesAmount = invoicesIssued.reduce((s, i) => s + i.amount, 0);
+
+  const summary = {
+    total_units: totalUnits, occupied_units: statusCounts.CLEARED + statusCounts.PARTIALLY_PAID + statusCounts.UNPAID + statusCounts.OVERPAYMENT,
+    vacant_units: statusCounts.VACANT, booked_units: statusCounts.BOOKED,
+    paid_units: statusCounts.CLEARED, partially_paid_units: statusCounts.PARTIALLY_PAID,
+    unpaid_units: statusCounts.UNPAID, overpayment_units: statusCounts.OVERPAYMENT,
+    new_tenants: 0, vacated_tenants: 0,
+    total_rent_due: totalRentDue, total_rent_paid: totalRentPaid,
+    total_deposit_collected: totalDepositCollected, total_water_charges: totalWaterCharges,
+    total_penalties: totalPenalties, total_outstanding: totalOutstanding,
+    total_advance_overpayment: totalAdvance, total_credit_balance: 0,
+    total_tenant_recoveries: totalRecovered, total_mgmt_maintenance_cost: totalMgmtCost,
+    total_work_repair_cost: totalMaintenanceCost, total_invoices_issued: totalInvoicesAmount,
+  };
+
+  // Compute new/exiting tenants
+  let ntQ = `SELECT
+    COUNT(*) FILTER (WHERE move_in_date >= $1 AND move_in_date < $2) AS new_tenants,
+    COUNT(*) FILTER (WHERE move_out_date >= $1 AND move_out_date < $2) AS vacated_tenants
+    FROM tenants`;
+  const ntParams = [monthStart, monthEnd];
+  if (housePaybill) { ntQ += ` WHERE house_paybill_number = $3`; ntParams.push(housePaybill); }
+  const ntRes = await query(ntQ, ntParams);
+  summary.new_tenants = Number(ntRes.rows[0]?.new_tenants || 0);
+  summary.vacated_tenants = Number(ntRes.rows[0]?.vacated_tenants || 0);
+
+  // Credit balance total
+  let cbQ = `SELECT COALESCE(SUM(credit_balance), 0) AS total FROM tenants WHERE credit_balance > 0`;
+  const cbParams = [];
+  if (housePaybill) { cbQ += ` AND house_paybill_number = $1`; cbParams.push(housePaybill); }
+  const cbRes = await query(cbQ, cbParams);
+  summary.total_credit_balance = Number(cbRes.rows[0]?.total || 0);
+
+  return {
+    period: month,
+    property_filter: housePaybill || null,
+    property_name: housePaybill ? (await getHouse(housePaybill))?.house_name || null : null,
+    units,
+    work_summary: workSummary,
+    invoices_issued: invoicesIssued,
+    summary,
+    generated_at: new Date().toISOString(),
+  };
+}
+
+/**
  * Generate and close monthly reports for ALL properties for the given month.
  * Called at rollover time.
  */
@@ -5420,4 +5670,5 @@ module.exports = {
   getEligibleManagementExpenses,
   createManagementExpenseFromWO,
   unlinkManagementExpenseCharges,
+  buildEnhancedMonthlyReport,
 };

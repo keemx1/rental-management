@@ -821,4 +821,12 @@ export const api = {
   cancelFuturePayment(paymentId) {
     return request(`/future-tenancies/payments/${paymentId}/cancel`, { method: 'POST' });
   },
+  // ─── Enhanced Monthly Report ─────────────────────────────────────────────
+  getEnhancedMonthlyReport(month, housePaybill) {
+    const qs = housePaybill ? `?house_paybill=${encodeURIComponent(housePaybill)}` : '';
+    return request(`/monthly-reports/${encodeURIComponent(month)}/enhanced${qs}`);
+  },
+  downloadEnhancedMonthlyReport(month, housePaybill) {
+    return blobRequest(`/monthly-reports/${encodeURIComponent(month)}/enhanced/excel`, { house_paybill: housePaybill || null });
+  },
 };

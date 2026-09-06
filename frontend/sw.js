@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gutenberg-v10';
+const CACHE_NAME = 'gutenberg-v13';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -10,9 +10,6 @@ const STATIC_ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
-  );
   self.skipWaiting();
 });
 
@@ -23,6 +20,10 @@ self.addEventListener('activate', (event) => {
     )
   );
   self.clients.claim();
+  // Force all tabs to reload so they get the new SW and fresh files
+  self.clients.matchAll({ type: 'window' }).then((clients) => {
+    clients.forEach((client) => client.navigate(client.url));
+  });
 });
 
 self.addEventListener('fetch', (event) => {
@@ -46,7 +47,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          if (response && response.status === 200) {
+          if (response && response.status === 200 && url.protocol === 'https:') {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
@@ -57,10 +58,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Skip non-http(s) requests (chrome-extension, etc.)
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetched = fetch(event.request).then((response) => {
-        if (response && response.status === 200) {
+        if (response && response.status === 200 && url.protocol === 'https:') {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }

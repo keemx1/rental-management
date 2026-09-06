@@ -10,6 +10,17 @@ const { sessionManager } = require('../whatsapp/session-manager');
 const router = express.Router();
 router.use(requireAuthActive);
 
+// ─── Summary ───────────────────────────────────────────────────────────────
+
+router.get('/summary/stats', async (req, res) => {
+  try {
+    const summary = await futureTenancies.getFutureTenancySummary();
+    res.json({ summary });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get summary' });
+  }
+});
+
 // ─── List Future Tenancies ─────────────────────────────────────────────────
 
 router.get('/', async (req, res) => {
@@ -187,17 +198,6 @@ router.post('/:id/activate', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Failed to activate future tenancy' });
-  }
-});
-
-// ─── Summary ───────────────────────────────────────────────────────────────
-
-router.get('/summary/stats', async (req, res) => {
-  try {
-    const summary = await futureTenancies.getFutureTenancySummary();
-    res.json({ summary });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to get summary' });
   }
 });
 
