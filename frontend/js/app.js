@@ -7278,6 +7278,16 @@ document.getElementById('btn-refresh-report')?.addEventListener('click', async (
   } catch (err) { alert(err.message); }
 });
 
+document.getElementById('btn-download-standard-report')?.addEventListener('click', async () => {
+  const month = document.getElementById('mr-month-select')?.value;
+  const housePaybill = document.getElementById('mr-property-select')?.value || '';
+  if (!month) return;
+  try {
+    const result = await api.downloadMonthlyReport(month, housePaybill || undefined);
+    if (result.blob) triggerFileDownload(result);
+  } catch (err) { alert(err.message); }
+});
+
 // ─── Enhanced Monthly Report ─────────────────────────────────────────────────
 let _currentMrView = 'standard';
 

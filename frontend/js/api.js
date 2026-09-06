@@ -582,6 +582,9 @@ export const api = {
       body: JSON.stringify({ house_paybill: housePaybill || null }),
     });
   },
+  downloadMonthlyReport(month, housePaybill) {
+    return blobRequest(`/monthly-reports/${encodeURIComponent(month)}/excel`, { house_paybill: housePaybill || null });
+  },
   getDepositPreview(tenantId, billingPeriod) {
     return request(`/tenants/${tenantId}/deposit-preview?billing_period=${encodeURIComponent(billingPeriod)}`);
   },

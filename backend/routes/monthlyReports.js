@@ -238,6 +238,158 @@ router.post('/:month/enhanced/excel', async (req, res) => {
   }
 });
 
+// Download standard monthly report as Excel
+router.post('/:month/excel', async (req, res) => {
+  try {
+    const { month } = req.params;
+    const housePaybill = req.body?.house_paybill || null;
+
+    // Build the report data fresh (same as refresh)
+    const rd = await store.buildMonthlyReportData(month, housePaybill);
+    const propertyName = housePaybill ? (await store.getHouse(housePaybill))?.house_name || null : null;
+
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet('Monthly Report', {
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    });
+
+    const lastCol = 'I';
+    ws.columns = [
+      { key: 'a', width: 20 }, { key: 'b', width: 30 }, { key: 'c', width: 16 },
+      { key: 'd', width: 16 }, { key: 'e', width: 16 }, { key: 'f', width: 16 },
+      { key: 'g', width: 16 }, { key: 'h', width: 16 }, { key: 'i', width: 16 },
+    ];
+
+    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const [yr, mo] = month.split('-');
+    const monthLabel = `${monthNames[parseInt(mo, 10) - 1]} ${yr}`;
+    const propLabel = propertyName ? ` - ${propertyName}` : ' - All Properties';
+
+    // Logo
+    ws.insertRow(1, []);
+    ws.mergeCells(`A1:${lastCol}1`);
+    ws.getRow(1).height = 120;
+    const logoPath = resolveLogoPath();
+    if (logoPath) {
+      const imageId = workbook.addImage({ filename: logoPath, extension: getLogoExtension() });
+      ws.addImage(imageId, { tl: { col: 1.8, row: 0.1 }, ext: { width: 100, height: 100 } });
+    }
+
+    ws.insertRow(2, [`GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS - MONTHLY REPORT${propLabel}`]);
+    ws.mergeCells(`A2:${lastCol}2`);
+    ws.getCell('A2').font = { bold: true, size: 13 };
+    ws.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(2).height = 28;
+
+    ws.insertRow(3, [`Period: ${monthLabel}`]);
+    ws.mergeCells(`A3:${lastCol}3`);
+    ws.getCell('A3').font = { size: 11, italic: true };
+    ws.getCell('A3').alignment = { horizontal: 'center' };
+    ws.getRow(3).height = 20;
+    ws.insertRow(4, []);
+
+    const money = (n) => 'KES ' + Number(n || 0).toLocaleString('en-KE', { maximumFractionDigits: 0 });
+
+    // ─── Revenue ───
+    const rev = rd.revenue || {};
+    ws.insertRow(5, ['REVENUE SUMMARY']);
+    ws.mergeCells(`A5:${lastCol}5`);
+    ws.getCell('A5').font = { bold: true, size: 12 };
+    ws.addRow(['Revenue Collected', rev.total_collected || 0, '', 'Payments', rev.payment_count || 0]);
+    ws.addRow(['Deposits Collected', rev.deposits_collected || 0, '', '', '']);
+    ws.insertRow(1, []);
+
+    // ─── Occupancy ───
+    const occ = rd.occupancy || {};
+    const occRow = ws.addRow([]);
+    const occTitle = ws.addRow(['OCCUPANCY & COLLECTION STATUS']);
+    ws.mergeCells(`A${occTitle.number}:${lastCol}${occTitle.number}`);
+    ws.getCell(`A${occTitle.number}`).font = { bold: true, size: 12 };
+    ws.addRow(['Occupied', occ.occupied || 0, '', 'Paid', occ.paid_count || 0]);
+    ws.addRow(['Vacant', occ.vacant || 0, '', 'Partially Paid', occ.partial_count || 0]);
+    ws.addRow(['New Tenants', occ.new_tenants || 0, '', 'Unpaid', occ.unpaid_count || 0]);
+    ws.addRow(['Exiting', occ.exiting_tenants || 0, '', 'Collection %', `${occ.collection_pct || 0}%`]);
+    ws.insertRow(1, []);
+
+    // ─── Management Expenses ───
+    const mgmt = rd.management_expenses || [];
+    const mgmtTitle = ws.addRow(['MANAGEMENT EXPENSES']);
+    ws.mergeCells(`A${mgmtTitle.number}:${lastCol}${mgmtTitle.number}`);
+    ws.getCell(`A${mgmtTitle.number}`).font = { bold: true, size: 12 };
+    const mgmtHdr = ws.addRow(['WO No', 'Issue', 'Unit', 'Problem', 'Material', 'Labour', 'Total', 'Party', '']);
+    mgmtHdr.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    mgmtHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD97706' } };
+    for (const e of mgmt) {
+      ws.addRow([e.wo_number, e.issue_no, e.unit, e.problem, e.material_cost, e.labour_cost, e.total_cost, e.responsible_party, '']);
+    }
+    if (mgmt.length === 0) ws.addRow(['No management expenses this month', '', '', '', '', '', '', '', '']);
+    ws.insertRow(1, []);
+
+    // ─── Tenant Recoveries ───
+    const tenant = rd.tenant_recoveries || [];
+    const tenantTitle = ws.addRow(['TENANT RECOVERIES']);
+    ws.mergeCells(`A${tenantTitle.number}:${lastCol}${tenantTitle.number}`);
+    ws.getCell(`A${tenantTitle.number}`).font = { bold: true, size: 12 };
+    const tenantHdr = ws.addRow(['WO No', 'Unit', 'Tenant', 'Problem', 'Total', 'Recovered', 'Outstanding', 'Status', '']);
+    tenantHdr.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    tenantHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+    for (const e of tenant) {
+      ws.addRow([e.wo_number, e.unit, e.tenant, e.problem, e.total_cost, e.amount_recovered, e.total_cost - e.amount_recovered, e.recovery_status, '']);
+    }
+    if (tenant.length === 0) ws.addRow(['No tenant recoveries this month', '', '', '', '', '', '', '', '']);
+    ws.insertRow(1, []);
+
+    // ─── Penalties ───
+    const penalties = rd.penalties || [];
+    const penTitle = ws.addRow(['PENALTY INVOICES']);
+    ws.mergeCells(`A${penTitle.number}:${lastCol}${penTitle.number}`);
+    ws.getCell(`A${penTitle.number}`).font = { bold: true, size: 12 };
+    const penHdr = ws.addRow(['Tenant', 'Description', 'Category', 'Amount', 'Status', '', '', '', '']);
+    penHdr.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    penHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDC2626' } };
+    for (const p of penalties) {
+      ws.addRow([p.tenant_name, p.description, p.category, p.amount, p.status, '', '', '', '']);
+    }
+    if (penalties.length === 0) ws.addRow(['No penalties this month', '', '', '', '', '', '', '', '']);
+    ws.insertRow(1, []);
+
+    // ─── Exit Invoices ───
+    const exits = rd.exit_invoices || [];
+    const exitTitle = ws.addRow(['EXIT INVOICES']);
+    ws.mergeCells(`A${exitTitle.number}:${lastCol}${exitTitle.number}`);
+    ws.getCell(`A${exitTitle.number}`).font = { bold: true, size: 12 };
+    const exitHdr = ws.addRow(['Exit No', 'Tenant', 'Unit', 'Rent Treatment', 'Deductions', 'Deposit Refund', 'Final', 'Status', '']);
+    exitHdr.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    exitHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C3AED' } };
+    for (const e of exits) {
+      ws.addRow([e.exit_number, e.tenant_name, e.unit_label, e.rent_treatment, e.deductions_total, e.deposit_refund, e.final_settlement, e.status, '']);
+    }
+    if (exits.length === 0) ws.addRow(['No exit invoices this month', '', '', '', '', '', '', '', '']);
+    ws.insertRow(1, []);
+
+    // ─── Notices to Vacate ───
+    const notices = rd.notices_to_vacate || [];
+    const noticeTitle = ws.addRow(['NOTICES TO VACATE']);
+    ws.mergeCells(`A${noticeTitle.number}:${lastCol}${noticeTitle.number}`);
+    ws.getCell(`A${noticeTitle.number}`).font = { bold: true, size: 12 };
+    const noticeHdr = ws.addRow(['Tenant', 'Unit', 'Notice Date', 'Expected Vacate', 'Status', '', '', '', '']);
+    noticeHdr.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    noticeHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0EA5E9' } };
+    for (const n of notices) {
+      ws.addRow([n.tenant_name, n.tenant_code, n.notice_date, n.expected_vacate, n.status, '', '', '', '']);
+    }
+    if (notices.length === 0) ws.addRow(['No notices to vacate this month', '', '', '', '', '', '', '', '']);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const safeProp = (propertyName || 'All').replace(/[^A-Za-z0-9]/g, '_');
+    const filename = `Monthly_Report_${safeProp}_${month}_${today}.xlsx`;
+    streamWorkbook(res, workbook, 'Monthly_Report', 'Monthly_Report', filename);
+  } catch (err) {
+    console.error('[Standard Report Excel]', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to generate standard report Excel' });
+  }
+});
+
 // Get a specific monthly report
 router.get('/:month', async (req, res) => {
   try {
