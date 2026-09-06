@@ -116,6 +116,7 @@ router.put('/:id', async (req, res) => {
       'deposit_amount',
       'deposit_paid',
       'arrears',
+      'arrears_manually_set',
       'garbage_fee_amount',
       'garbage_fee_paid',
       'water_charge_amount',

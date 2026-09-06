@@ -1179,6 +1179,7 @@ async function openTenantModal(id = null) {
   if (openingAdvanceField) openingAdvanceField.style.display = '';
   if (openingAdvanceInput) openingAdvanceInput.readOnly = false;
   if (openingAdvanceHint) openingAdvanceHint.classList.add('hidden');
+  document.getElementById('arrears-manual-badge')?.classList.add('hidden');
 
   if (id) {
     form.tenant_code.readOnly = true;
@@ -1207,6 +1208,7 @@ async function openTenantModal(id = null) {
       form.garbage_fee_amount.value = t.garbage_fee_amount || 0;
       form.water_charge_amount.value = t.water_charge_amount || 0;
       form.arrears.value = t.arrears || 0;
+      document.getElementById('arrears-manual-badge')?.classList.toggle('hidden', !t.arrears_manually_set);
       form.agreement_charge.value = t.agreement_charge || 0;
       form.agreement_paid.value = t.agreement_paid || 0;
       const openingAdvance = Number(t.opening_advance_rent || 0);
@@ -2852,6 +2854,7 @@ document.getElementById('tenant-form')?.addEventListener('submit', async (e) => 
     garbage_fee_amount: Number(form.garbage_fee_amount?.value || 0),
     water_charge_amount: Number(form.water_charge_amount?.value || 0),
     arrears: openingArrears,
+    arrears_manually_set: openingArrears > 0,
     opening_advance_rent: openingAdvance,
     agreement_charge: agreementCharge,
     agreement_paid: agreementPaid,

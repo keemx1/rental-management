@@ -3679,8 +3679,8 @@
             <input name="water_charge_amount" type="number" min="0" value="0" class="cyber-input" title="Water charges for the tenancy." />
           </div>
           <div>
-            <label class="form-label">Opening Arrears (KES)</label>
-            <input name="arrears" type="number" min="0" value="0" class="cyber-input" title="Outstanding balance from before system adoption. Leave 0 if none." />
+            <label class="form-label">Opening Arrears (KES) <span id="arrears-manual-badge" class="hidden text-xs text-amber-400 ml-1">(Manually Set)</span></label>
+            <input name="arrears" type="number" min="0" value="0" class="cyber-input" title="Outstanding balance from before system adoption, or manually corrected arrears. Leave 0 if none. When set, rollover will not overwrite this value." />
           </div>
           <div id="opening-advance-field">
             <label class="form-label">Opening Advance Rent (KES)</label>

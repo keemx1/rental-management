@@ -170,7 +170,7 @@ async function listTenants(filters = {}) {
 
 async function getTenant(id, run) {
   const res = await runOrQuery(run,
-    `SELECT t.tenant_code AS id, t.tenant_code, t.name, t.phone_number, t.national_id, t.house_paybill_number AS house_id, t.property_name, t.unit_label, t.rent_amount, t.arrears, t.deposit_amount, t.deposit_paid, t.garbage_fee_amount, t.garbage_fee_paid, t.water_charge_amount, t.water_charge_paid, t.rent_paid_this_month, t.credit_balance, t.advance_rent_until::text AS advance_rent_until, t.advance_rent_balance, t.opening_advance_rent, t.agreement_charge, t.agreement_paid, t.agreement_outstanding, t.move_in_date::text AS move_in_date, t.move_out_date::text AS move_out_date, t.notice_to_vacate_date::text AS notice_to_vacate_date, t.exit_reason, t.rent_due_date::text AS rent_due_date, t.rent_due_time, t.status, t.created_at, t.updated_at, t.guardian_name, t.guardian_id, t.guardian_phone, t.guardian_relationship, t.standard_monthly_rent, t.first_billing_method, t.first_billing_charge, t.first_billing_reason, t.first_billing_days, h.payment_method, h.payment_paybill, h.account_number_format, h.till_number, h.till_name
+    `SELECT t.tenant_code AS id, t.tenant_code, t.name, t.phone_number, t.national_id, t.house_paybill_number AS house_id, t.property_name, t.unit_label, t.rent_amount, t.arrears, t.arrears_manually_set, t.deposit_amount, t.deposit_paid, t.garbage_fee_amount, t.garbage_fee_paid, t.water_charge_amount, t.water_charge_paid, t.rent_paid_this_month, t.credit_balance, t.advance_rent_until::text AS advance_rent_until, t.advance_rent_balance, t.opening_advance_rent, t.agreement_charge, t.agreement_paid, t.agreement_outstanding, t.move_in_date::text AS move_in_date, t.move_out_date::text AS move_out_date, t.notice_to_vacate_date::text AS notice_to_vacate_date, t.exit_reason, t.rent_due_date::text AS rent_due_date, t.rent_due_time, t.status, t.created_at, t.updated_at, t.guardian_name, t.guardian_id, t.guardian_phone, t.guardian_relationship, t.standard_monthly_rent, t.first_billing_method, t.first_billing_charge, t.first_billing_reason, t.first_billing_days, h.payment_method, h.payment_paybill, h.account_number_format, h.till_number, h.till_name
      FROM tenants t LEFT JOIN houses h ON t.house_paybill_number = h.paybill_number WHERE t.tenant_code = $1`,
     [id]
   );
@@ -2871,7 +2871,7 @@ async function rolloverBody() {
 
   const overdue = await query(
     `SELECT tenant_code, rent_amount, arrears, rent_due_date::text AS rent_due_date, advance_rent_balance, advance_rent_until,
-            standard_monthly_rent, first_billing_method, move_in_date::text AS move_in_date
+            standard_monthly_rent, first_billing_method, move_in_date::text AS move_in_date, arrears_manually_set
      FROM tenants
      WHERE status != 'Vacant' AND rent_due_date < $1`,
     [firstOfThisMonth]
@@ -2879,6 +2879,7 @@ async function rolloverBody() {
 
   const results = [];
   for (const t of overdue.rows) {
+    const manuallySet = t.arrears_manually_set === true;
     let arrears = Number(t.arrears || 0);
     const rentAmount = Number(t.rent_amount || 0);
     let dueDate = new Date(t.rent_due_date + 'T12:00:00');
@@ -2901,28 +2902,38 @@ async function rolloverBody() {
 
     // Loop to catch up multiple missed months
     let monthsRolled = 0;
-    while (dueDate < today) {
-      const monthPrefix = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
-      const monthPaid = approvedPayments
-        .filter(p => p.payment_date && p.payment_date.startsWith(monthPrefix))
-        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-      if (monthPaid < rentAmount) {
-        const shortfall = rentAmount - monthPaid;
-        if (isFullyCoveredMonth(monthPrefix)) {
-          // Month already covered by advance rent — no arrears generated.
-        } else if (advanceRentBalance > 0) {
-          const applied = Math.min(advanceRentBalance, shortfall);
-          advanceRentBalance -= applied;
-          arrears += (shortfall - applied);
-        } else {
-          arrears += shortfall;
-        }
+    // If arrears were manually set, skip recalculation — just advance the due date
+    if (manuallySet) {
+      while (dueDate < today) {
+        dueDate.setMonth(dueDate.getMonth() + 1);
+        dueDate.setDate(5);
+        monthsRolled++;
       }
+    } else {
+      while (dueDate < today) {
+        const monthPrefix = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
+        const monthPaid = approvedPayments
+          .filter(p => p.payment_date && p.payment_date.startsWith(monthPrefix))
+          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-      dueDate.setMonth(dueDate.getMonth() + 1);
-      dueDate.setDate(5);
-      monthsRolled++;
+        if (monthPaid < rentAmount) {
+          const shortfall = rentAmount - monthPaid;
+          if (isFullyCoveredMonth(monthPrefix)) {
+            // Month already covered by advance rent — no arrears generated.
+          } else if (advanceRentBalance > 0) {
+            const applied = Math.min(advanceRentBalance, shortfall);
+            advanceRentBalance -= applied;
+            arrears += (shortfall - applied);
+          } else {
+            arrears += shortfall;
+          }
+        }
+
+        dueDate.setMonth(dueDate.getMonth() + 1);
+        dueDate.setDate(5);
+        monthsRolled++;
+      }
     }
 
     if (monthsRolled > 0) {
@@ -2947,12 +2958,13 @@ async function rolloverBody() {
 
       await query(
         `UPDATE tenants SET arrears = $1, rent_due_date = $2, rent_paid_this_month = 0, status = $6, advance_rent_balance = $4, advance_rent_until = $5, updated_at = NOW()${rentUpdate} WHERE tenant_code = $3`,
-        [Math.max(0, arrears), newDueDate, t.tenant_code, advanceRentBalance, newAdvanceUntil, newStatus, ...extraParams]
+        [manuallySet ? Number(t.arrears || 0) : Math.max(0, arrears), newDueDate, t.tenant_code, advanceRentBalance, newAdvanceUntil, newStatus, ...extraParams]
       );
       results.push({
         tenant_code: t.tenant_code,
         months_missed: monthsRolled,
-        new_arrears: Math.max(0, arrears),
+        new_arrears: manuallySet ? Number(t.arrears || 0) : Math.max(0, arrears),
+        manually_preserved: manuallySet,
         new_due_date: newDueDate,
         advance_rent_applied: Number(t.advance_rent_balance || 0) - advanceRentBalance,
         rent_restored: rentUpdate ? stdRent : null,

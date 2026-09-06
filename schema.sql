@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   rent_due_date DATE NOT NULL,
   rent_due_time TIME NOT NULL DEFAULT '23:59:00',
   arrears DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  arrears_manually_set BOOLEAN NOT NULL DEFAULT FALSE,
   status VARCHAR(20) NOT NULL DEFAULT 'Active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
