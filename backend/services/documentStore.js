@@ -465,12 +465,16 @@ function exitInvoiceLinesRows(lines) {
   if (!lines || !lines.length) {
     return '<tr><td colspan="2" class="empty-note">No deductions recorded.</td></tr>';
   }
-  return lines.map((l, idx) => `
+  return lines.map((l, idx) => {
+    const cat = l.category ? l.category.charAt(0).toUpperCase() + l.category.slice(1) : '';
+    const desc = l.description || l.label || '';
+    const display = desc ? (cat ? `${cat}: ${desc}` : desc) : (cat || `Deduction ${idx + 1}`);
+    return `
     <tr>
-      <td>${l.label || 'Deduction ' + (idx + 1)}</td>
+      <td>${display}</td>
       <td style="text-align: right;">KES ${KES(l.amount)}</td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 function buildExitInvoiceHtml(invoice, tenant = {}) {
