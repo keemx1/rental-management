@@ -22,6 +22,20 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+function showToast(msg, type) {
+  const el = document.createElement('div');
+  el.className = `fixed top-4 right-4 z-[9999] px-4 py-3 rounded-lg shadow-lg text-sm font-semibold transition-opacity duration-300 ${type === 'error' ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; }, 2500);
+  setTimeout(() => { el.remove(); }, 3000);
+}
+
+function debounce(fn, ms) {
+  let t;
+  return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
+}
+
 function setTextEl(id, val) {
   const el = document.getElementById(id);
   if (el) el.textContent = val;
@@ -4358,6 +4372,7 @@ function showInvoiceTypeSelector() {
   document.getElementById('salary-panel')?.classList.add('hidden');
   document.getElementById('staff-advance-panel')?.classList.add('hidden');
   document.getElementById('employee-rent-panel')?.classList.add('hidden');
+  document.getElementById('water-bill-panel')?.classList.add('hidden');
 }
 
 function showInvoiceType(type) {
@@ -8690,13 +8705,13 @@ async function loadWaterBillInvoices() {
       const statusClass = { Draft: 'text-amber-400', Finalized: 'text-blue-400', Sent: 'text-green-400', Downloaded: 'text-blue-300', Paid: 'text-green-300', Void: 'text-rose-400' }[inv.status] || 'text-slate-400';
       const actions = [];
       actions.push(`<button class="text-cyan-400 hover:text-cyan-300 px-1" onclick="viewWaterInvoice(${inv.id})">View</button>`);
-      if (inv.status === 'Draft' || inv.status === 'Finalized' || inv.status === 'Downloaded' || inv.status === 'Sent') {
+      if (inv.status === 'Draft') {
         actions.push(`<button class="text-blue-400 hover:text-blue-300 px-1" onclick="editWaterInvoice(${inv.id})">Edit</button>`);
       }
       if (inv.status === 'Draft') {
         actions.push(`<button class="text-rose-400 hover:text-rose-300 px-1" onclick="deleteWaterInvoiceUI(${inv.id})">Delete</button>`);
       }
-      if (inv.status !== 'Paid' && inv.status !== 'Void' && inv.status !== 'Draft') {
+      if (inv.status === 'Finalized' || inv.status === 'Sent' || inv.status === 'Downloaded') {
         actions.push(`<button class="text-amber-400 hover:text-amber-300 px-1" onclick="voidWaterInvoiceUI(${inv.id})">Void</button>`);
       }
       const paymentStatus = inv.status === 'Paid' ? '<span class="text-green-300">Paid</span>' : '<span class="text-slate-500">Unpaid</span>';
@@ -8721,13 +8736,15 @@ async function loadWaterBillInvoices() {
 async function populateWaterBillDropdowns() {
   // Property dropdowns (filter + form)
   try {
-    const houses = await api.listHouses();
+    const houses = await api.houses();
     waterBillHousesCache = houses || [];
     const filterSel = document.getElementById('wb-property-filter');
     const formSel = document.getElementById('wb-form-house');
+    const rateSel = document.getElementById('wb-rate-house');
     const opts = houses.map(h => `<option value="${h.paybill_number}">${escapeHtml(h.house_name)} (${h.paybill_number})</option>`).join('');
     if (filterSel) filterSel.innerHTML = '<option value="">All Properties</option>' + opts;
     if (formSel) formSel.innerHTML = '<option value="">Select property</option>' + opts;
+    if (rateSel) rateSel.innerHTML = '<option value="">Select property</option>' + opts;
   } catch (err) { /* ignore */ }
 }
 
@@ -9090,6 +9107,38 @@ async function viewWaterInvoice(id) {
     document.getElementById('wb-detail-modal').style.display = 'flex';
     document.getElementById('wb-detail-modal').dataset.invoiceId = inv.id;
     document.getElementById('wb-detail-modal').dataset.invoiceStatus = inv.status;
+    const downloadBtn = document.getElementById('btn-download-wb');
+    const sendBtn = document.getElementById('btn-send-wb');
+    if (downloadBtn) downloadBtn.style.display = '';
+    if (sendBtn) sendBtn.style.display = '';
+    let existingEdit = document.getElementById('btn-edit-wb-detail');
+    let existingDel = document.getElementById('btn-delete-wb-detail');
+    let existingVoid = document.getElementById('btn-void-wb-detail');
+    if (existingEdit) existingEdit.remove();
+    if (existingDel) existingDel.remove();
+    if (existingVoid) existingVoid.remove();
+    const btnRow = downloadBtn?.parentElement;
+    if (btnRow) {
+      if (inv.status === 'Draft') {
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button'; editBtn.id = 'btn-edit-wb-detail';
+        editBtn.className = 'qc-btn qc-btn-primary text-sm'; editBtn.textContent = 'Edit';
+        editBtn.onclick = () => { document.getElementById('wb-detail-modal').style.display = 'none'; editWaterInvoice(inv.id); };
+        btnRow.insertBefore(editBtn, downloadBtn);
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button'; delBtn.id = 'btn-delete-wb-detail';
+        delBtn.className = 'qc-btn text-sm'; delBtn.style.background = '#dc2626'; delBtn.style.color = 'white'; delBtn.textContent = 'Delete';
+        delBtn.onclick = () => { document.getElementById('wb-detail-modal').style.display = 'none'; deleteWaterInvoiceUI(inv.id); };
+        btnRow.insertBefore(delBtn, downloadBtn);
+      }
+      if (inv.status === 'Finalized' || inv.status === 'Sent' || inv.status === 'Downloaded') {
+        const voidBtn = document.createElement('button');
+        voidBtn.type = 'button'; voidBtn.id = 'btn-void-wb-detail';
+        voidBtn.className = 'qc-btn text-sm'; voidBtn.style.background = '#d97706'; voidBtn.style.color = 'white'; voidBtn.textContent = 'Void';
+        voidBtn.onclick = () => { document.getElementById('wb-detail-modal').style.display = 'none'; voidWaterInvoiceUI(inv.id); };
+        btnRow.insertBefore(voidBtn, downloadBtn);
+      }
+    }
   } catch (err) {
     showToast('Failed to load invoice: ' + err.message, 'error');
   }
@@ -9103,9 +9152,9 @@ document.getElementById('btn-download-wb')?.addEventListener('click', async func
   const id = document.getElementById('wb-detail-modal')?.dataset.invoiceId;
   if (!id) return;
   try {
-    const blob = await api.downloadWaterInvoice(id);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'water-invoice.pdf'; a.click();
+    const result = await api.downloadWaterInvoice(id);
+    const url = URL.createObjectURL(result.blob);
+    const a = document.createElement('a'); a.href = url; a.download = result.filename || 'water-invoice.pdf'; a.click();
     URL.revokeObjectURL(url);
     loadWaterBillInvoices();
   } catch (err) {
