@@ -5657,7 +5657,10 @@ async function findTenantByPropertyAndUnit(housePaybill, unitLabel) {
     `SELECT t.tenant_code AS id, t.tenant_code, t.name, t.phone_number, t.house_paybill_number AS house_id,
             t.property_name, t.unit_label, t.rent_amount, t.status
      FROM tenants t
-     WHERE t.house_paybill_number = $1 AND t.unit_label = $2 AND t.status = 'Active'
+     WHERE t.house_paybill_number = $1
+       AND (t.unit_label = $2 OR t.tenant_code ILIKE $2)
+       AND t.status IN ('Active', 'Paid')
+     ORDER BY CASE WHEN t.unit_label = $2 THEN 0 ELSE 1 END
      LIMIT 1`,
     [housePaybill, unitLabel]
   );

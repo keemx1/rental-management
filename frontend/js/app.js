@@ -8869,7 +8869,7 @@ document.getElementById('wb-form-house')?.addEventListener('change', async funct
 });
 
 // Unit number change → find tenant
-document.getElementById('wb-form-unit')?.addEventListener('change', async function() {
+document.getElementById('wb-form-unit')?.addEventListener('blur', async function() {
   const unitLabel = this.value.trim();
   const housePaybill = document.getElementById('wb-form-house')?.value;
   if (!housePaybill || !unitLabel) {
