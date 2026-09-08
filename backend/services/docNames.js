@@ -92,6 +92,11 @@ function employeeRentInvoiceDocumentName(employeeName, period) {
   return `Employee-Rent_${clean(employeeName)}_${clean(period)}_${Date.now()}.pdf`;
 }
 
+function waterInvoiceDocumentName({ wtrNumber, tenantName, houseName, unitCode }) {
+  const parts = [String(wtrNumber || 'WATER-INVOICE'), upperClean(tenantName), upperClean(houseName), clean(unitCode)].filter(Boolean);
+  return parts.join('_') + '.pdf';
+}
+
 function renameForDelivery(filePath, docName) {
   const target = path.join(path.dirname(filePath), docName);
   fs.renameSync(filePath, target);
@@ -116,5 +121,6 @@ module.exports = {
   reportDocumentName,
   staffAdvanceInvoiceDocumentName,
   employeeRentInvoiceDocumentName,
+  waterInvoiceDocumentName,
   renameForDelivery,
 };

@@ -832,4 +832,46 @@ export const api = {
   downloadEnhancedMonthlyReport(month, housePaybill) {
     return blobRequest(`/monthly-reports/${encodeURIComponent(month)}/enhanced/excel`, { house_paybill: housePaybill || null });
   },
+
+  // ─── Water Invoices ─────────────────────────────────────────────────────
+  listWaterInvoices(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/water-invoices${qs ? '?' + qs : ''}`);
+  },
+  getWaterInvoice(id) {
+    return request(`/water-invoices/${id}`);
+  },
+  createWaterInvoice(body) {
+    return request('/water-invoices', { method: 'POST', body: JSON.stringify(body) });
+  },
+  updateWaterInvoice(id, body) {
+    return request(`/water-invoices/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  finalizeWaterInvoice(id) {
+    return request(`/water-invoices/${id}/finalize`, { method: 'POST' });
+  },
+  voidWaterInvoice(id, reason) {
+    return request(`/water-invoices/${id}/void`, { method: 'POST', body: JSON.stringify({ reason }) });
+  },
+  deleteWaterInvoice(id) {
+    return request(`/water-invoices/${id}`, { method: 'DELETE' });
+  },
+  downloadWaterInvoice(id) {
+    return blobRequest(`/water-invoices/${id}/send`, { mode: 'download' });
+  },
+  sendWaterInvoice(id) {
+    return request(`/water-invoices/${id}/send`, { method: 'POST', body: JSON.stringify({ mode: 'send' }) });
+  },
+  getWaterRate(housePaybill) {
+    return request(`/water-invoices/rates/${encodeURIComponent(housePaybill)}`);
+  },
+  updateWaterRate(housePaybill, body) {
+    return request(`/water-invoices/rates/${encodeURIComponent(housePaybill)}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  getWaterRateHistory(housePaybill) {
+    return request(`/water-invoices/rates/${encodeURIComponent(housePaybill)}/history`);
+  },
+  getLatestWaterReading(tenantCode) {
+    return request(`/water-invoices/latest-reading/${encodeURIComponent(tenantCode)}`);
+  },
 };

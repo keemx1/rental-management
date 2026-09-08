@@ -85,6 +85,7 @@ app.use('/api/deposit-refunds', require('./routes/depositRefunds'));
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/future-tenancies', require('./routes/futureTenancies'));
 app.use('/api/house-charges', require('./routes/houseCharges'));
+app.use('/api/water-invoices', require('./routes/waterInvoices'));
 
 app.get('/api/health', healthDetailedAuth, (req, res) => {
   const payload = { ok: true, timestamp: new Date().toISOString() };

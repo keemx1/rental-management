@@ -8,7 +8,7 @@ const path = require('path');
 const puppeteer = require('puppeteer');
 const { getPuppeteerLaunchOptions } = require('../config/puppeteerChrome');
 const { getLogoBase64 } = require('./logo');
-const { receiptDocumentName, statementDocumentName, maintenanceInvoiceDocumentName, workOrderDocumentName, invoiceDocumentName, exitInvoiceDocumentName, salaryInvoiceDocumentName, reimbursementInvoiceDocumentName, expenseInvoiceDocumentName } = require('./docNames');
+const { receiptDocumentName, statementDocumentName, maintenanceInvoiceDocumentName, workOrderDocumentName, invoiceDocumentName, exitInvoiceDocumentName, salaryInvoiceDocumentName, reimbursementInvoiceDocumentName, expenseInvoiceDocumentName, waterInvoiceDocumentName } = require('./docNames');
 const store = require('../storage/store');
 
 const DOCUMENTS_DIR = path.join(__dirname, '../storage/documents');
@@ -589,6 +589,88 @@ async function generateAndStoreExitInvoice(id, actor) {
     });
   } catch (err) {
     console.error('[Documents] Exit invoice generation failed:', err.message);
+    return null;
+  }
+}
+
+function buildWaterInvoiceHtml(invoice) {
+  const statusMap = { Draft: 'draft', Finalized: 'finalized', Sent: 'sent', Downloaded: 'finalized', 'Downloaded & Sent': 'finalized', Paid: 'paid', Void: 'void' };
+  const statusClass = statusMap[invoice.status] || 'draft';
+
+  const billingMonthDate = new Date(`${invoice.billing_month}-15T12:00:00`);
+  const billingPeriodLabel = billingMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  // Water is billed for previous month
+  const prevMonth = new Date(billingMonthDate);
+  prevMonth.setMonth(prevMonth.getMonth() - 1);
+  const consumptionMonth = prevMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+  const notesHtml = invoice.notes
+    ? `<div class="note-box" style="text-align: left; white-space: pre-wrap;">${invoice.notes}</div>`
+    : '';
+
+  return renderTemplate('water_invoice.html', {
+    wtr_number: invoice.wtr_number,
+    tenant_name: invoice.tenant_name || '',
+    property_name: invoice.property_name || '',
+    unit_label: invoice.unit_label || '',
+    billing_period_label: `${consumptionMonth} (for ${billingPeriodLabel} billing)`,
+    billing_month: invoice.billing_month,
+    date_issued: new Date(invoice.created_at).toISOString().slice(0, 10),
+    due_date: invoice.due_date || 'N/A',
+    previous_reading: Number(invoice.previous_reading).toFixed(2),
+    current_reading: Number(invoice.current_reading).toFixed(2),
+    units_used: Number(invoice.units_used).toFixed(2),
+    rate_per_unit: Number(invoice.rate_per_unit).toFixed(2),
+    total_amount: Number(invoice.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    status: invoice.status,
+    status_class: statusClass,
+    notes_html: notesHtml,
+  });
+}
+
+async function generateAndStoreWaterInvoice(id, actor) {
+  try {
+    const invoice = await store.getWaterInvoice(id);
+    if (!invoice) return null;
+
+    const filename = waterInvoiceDocumentName({
+      wtrNumber: invoice.wtr_number,
+      tenantName: invoice.tenant_name,
+      houseName: invoice.property_name,
+      unitCode: invoice.unit_label,
+    });
+    ensureDir();
+    const html = buildWaterInvoiceHtml(invoice);
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+
+    const doc = await store.createDocument({
+      doc_type: 'water_invoice',
+      doc_number: invoice.wtr_number,
+      title: `Water Invoice ${invoice.wtr_number}`,
+      filename,
+      file_path: pdfPath,
+      tenant_code: invoice.tenant_code,
+      house_paybill_number: invoice.house_paybill_number || null,
+      property_name: invoice.property_name || null,
+      unit_label: invoice.unit_label || null,
+      amount: invoice.total_amount,
+      doc_date: invoice.due_date || new Date().toISOString().slice(0, 10),
+    });
+
+    return await registerInvoice(doc, {
+      document_id: doc ? doc.id : null,
+      invoice_number: invoice.wtr_number,
+      invoice_type: 'water',
+      generated_by: actor || null,
+      tenant_code: invoice.tenant_code,
+      tenant_name: invoice.tenant_name,
+      property_name: invoice.property_name,
+      house_paybill_number: invoice.house_paybill_number || null,
+      unit_label: invoice.unit_label || null,
+      amount: invoice.total_amount,
+    });
+  } catch (err) {
+    console.error('[Documents] Water invoice generation failed:', err.message);
     return null;
   }
 }
@@ -1469,4 +1551,6 @@ module.exports = {
   generateAndStoreStaffAdvanceInvoice,
   buildEmployeeRentHtml,
   generateAndStoreEmployeeRentInvoice,
+  buildWaterInvoiceHtml,
+  generateAndStoreWaterInvoice,
 };

@@ -5516,6 +5516,141 @@ async function getSalaryDeductionsForMonth(employeeName, salaryMonth) {
   return res.rows;
 }
 
+// ── Water Invoice ────────────────────────────────────────────────────────────
+
+async function generateWaterInvoiceNumber() {
+  return nextCounterNumber('invoice_counters', 'GEHPM-WTR');
+}
+
+async function createWaterInvoice(data) {
+  const wtrNumber = await generateWaterInvoiceNumber();
+  const unitsUsed = Number(data.current_reading || 0) - Number(data.previous_reading || 0);
+  if (unitsUsed < 0) throw new Error('Current reading must be >= previous reading');
+  const totalAmount = unitsUsed * Number(data.rate_per_unit || 0);
+  const res = await query(
+    `INSERT INTO water_invoices
+       (wtr_number, tenant_code, tenant_name, property_name, house_paybill_number,
+        unit_label, billing_month, previous_reading, current_reading,
+        units_used, rate_per_unit, total_amount, due_date, status, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+     RETURNING *`,
+    [
+      wtrNumber, data.tenant_code, data.tenant_name || '', data.property_name || '',
+      data.house_paybill_number || null, data.unit_label || '', data.billing_month,
+      Number(data.previous_reading || 0), Number(data.current_reading || 0),
+      unitsUsed, Number(data.rate_per_unit || 0), totalAmount,
+      data.due_date || null, data.status || 'Draft', data.notes || null,
+    ]
+  );
+  return res.rows[0];
+}
+
+async function getWaterInvoice(id) {
+  const res = await query(`SELECT * FROM water_invoices WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function listWaterInvoices(filters = {}) {
+  let where = [];
+  let params = [];
+  let idx = 1;
+  if (filters.tenant_code) { where.push(`tenant_code = $${idx++}`); params.push(filters.tenant_code); }
+  if (filters.house_paybill_number) { where.push(`house_paybill_number = $${idx++}`); params.push(filters.house_paybill_number); }
+  if (filters.status) { where.push(`status = $${idx++}`); params.push(filters.status); }
+  if (filters.billing_month) { where.push(`billing_month = $${idx++}`); params.push(filters.billing_month); }
+  if (filters.q) {
+    where.push(`(wtr_number ILIKE $${idx} OR tenant_name ILIKE $${idx} OR unit_label ILIKE $${idx})`);
+    params.push(`%${filters.q}%`);
+    idx++;
+  }
+  const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+  const res = await query(
+    `SELECT * FROM water_invoices${whereClause} ORDER BY created_at DESC`,
+    params
+  );
+  return res.rows;
+}
+
+async function updateWaterInvoice(id, patch) {
+  const existing = await getWaterInvoice(id);
+  if (!existing) return null;
+
+  const prev = {
+    previous_reading: patch.previous_reading != null ? Number(patch.previous_reading) : Number(existing.previous_reading),
+    current_reading: patch.current_reading != null ? Number(patch.current_reading) : Number(existing.current_reading),
+    rate_per_unit: patch.rate_per_unit != null ? Number(patch.rate_per_unit) : Number(existing.rate_per_unit),
+  };
+  const unitsUsed = prev.current_reading - prev.previous_reading;
+  if (unitsUsed < 0) throw new Error('Current reading must be >= previous reading');
+  const totalAmount = unitsUsed * prev.rate_per_unit;
+
+  const fields = [];
+  const vals = [];
+  let idx = 1;
+  const allowed = ['tenant_code', 'tenant_name', 'property_name', 'house_paybill_number', 'unit_label',
+    'billing_month', 'due_date', 'status', 'notes'];
+  for (const k of allowed) {
+    if (patch[k] !== undefined) { fields.push(`${k} = $${idx++}`); vals.push(patch[k]); }
+  }
+  fields.push(`previous_reading = $${idx++}`); vals.push(prev.previous_reading);
+  fields.push(`current_reading = $${idx++}`); vals.push(prev.current_reading);
+  fields.push(`units_used = $${idx++}`); vals.push(unitsUsed);
+  fields.push(`rate_per_unit = $${idx++}`); vals.push(prev.rate_per_unit);
+  fields.push(`total_amount = $${idx++}`); vals.push(totalAmount);
+  fields.push(`updated_at = NOW()`); vals.push(id);
+
+  const res = await query(
+    `UPDATE water_invoices SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+    vals
+  );
+  return res.rows[0] || null;
+}
+
+async function voidWaterInvoice(id, reason) {
+  const res = await query(
+    `UPDATE water_invoices SET status = 'Void', void_reason = $1, updated_at = NOW() WHERE id = $2 AND status != 'Paid' RETURNING *`,
+    [reason || 'Voided', id]
+  );
+  return res.rows[0] || null;
+}
+
+async function deleteWaterInvoice(id) {
+  await query(`DELETE FROM water_invoices WHERE id = $1 AND status = 'Draft'`, [id]);
+}
+
+async function getWaterRate(housePaybill) {
+  const res = await query(`SELECT water_rate_per_unit FROM houses WHERE paybill_number = $1`, [housePaybill]);
+  return res.rows[0] ? Number(res.rows[0].water_rate_per_unit) : 0;
+}
+
+async function updateWaterRate(housePaybill, newRate, effectiveMonth, changedBy) {
+  const oldRes = await query(`SELECT water_rate_per_unit FROM houses WHERE paybill_number = $1`, [housePaybill]);
+  const oldRate = oldRes.rows[0] ? Number(oldRes.rows[0].water_rate_per_unit) : 0;
+
+  await query(`UPDATE houses SET water_rate_per_unit = $1 WHERE paybill_number = $2`, [newRate, housePaybill]);
+  await query(
+    `INSERT INTO water_rate_history (house_paybill, old_rate, new_rate, effective_month, changed_by) VALUES ($1,$2,$3,$4,$5)`,
+    [housePaybill, oldRate, newRate, effectiveMonth, changedBy]
+  );
+  return { old_rate: oldRate, new_rate: newRate };
+}
+
+async function getWaterRateHistory(housePaybill) {
+  const res = await query(
+    `SELECT * FROM water_rate_history WHERE house_paybill = $1 ORDER BY changed_at DESC`,
+    [housePaybill]
+  );
+  return res.rows;
+}
+
+async function getLatestWaterReading(tenantCode) {
+  const res = await query(
+    `SELECT current_reading FROM water_invoices WHERE tenant_code = $1 ORDER BY created_at DESC LIMIT 1`,
+    [tenantCode]
+  );
+  return res.rows[0] ? Number(res.rows[0].current_reading) : 0;
+}
+
 module.exports = {
   init,
   findUserByUsername,
@@ -5697,4 +5832,17 @@ module.exports = {
   createManagementExpenseFromWO,
   unlinkManagementExpenseCharges,
   buildEnhancedMonthlyReport,
+
+  // Water invoice
+  generateWaterInvoiceNumber,
+  createWaterInvoice,
+  getWaterInvoice,
+  listWaterInvoices,
+  updateWaterInvoice,
+  voidWaterInvoice,
+  deleteWaterInvoice,
+  getWaterRate,
+  updateWaterRate,
+  getWaterRateHistory,
+  getLatestWaterReading,
 };
