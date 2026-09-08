@@ -128,8 +128,8 @@ router.delete('/:id', async (req, res) => {
   try {
     const invoice = await store.getWaterInvoice(req.params.id);
     if (!invoice) return res.status(404).json({ error: 'Water invoice not found' });
-    if (invoice.status !== 'Draft') {
-      return res.status(400).json({ error: 'Only draft invoices can be deleted. Use void instead.' });
+    if (invoice.status === 'Paid' || invoice.status === 'Void') {
+      return res.status(400).json({ error: 'Cannot delete paid or void invoices.' });
     }
     await store.deleteWaterInvoice(req.params.id);
     res.json({ success: true });

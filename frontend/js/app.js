@@ -8686,6 +8686,7 @@ async function loadWaterBillInvoices() {
   const status = document.getElementById('wb-status-filter')?.value || '';
   const month = document.getElementById('wb-month-filter')?.value || '';
   const property = document.getElementById('wb-property-filter')?.value || '';
+  const unitFilter = document.getElementById('wb-unit-filter')?.value || '';
   const params = {};
   if (search) params.q = search;
   if (status) params.status = status;
@@ -8697,11 +8698,12 @@ async function loadWaterBillInvoices() {
     const tbody = document.getElementById('wb-list-tbody');
     if (!tbody) return;
     const invoices = data.water_invoices || [];
-    if (!invoices.length) {
+    const filtered = unitFilter ? invoices.filter(inv => (inv.unit_label || '').toLowerCase().includes(unitFilter.toLowerCase())) : invoices;
+    if (!filtered.length) {
       tbody.innerHTML = '<tr><td colspan="10" class="text-center text-slate-500 py-6">No water invoices found.</td></tr>';
       return;
     }
-    tbody.innerHTML = invoices.map(inv => {
+    tbody.innerHTML = filtered.map(inv => {
       const statusClass = { Draft: 'text-amber-400', Finalized: 'text-blue-400', Sent: 'text-green-400', Downloaded: 'text-blue-300', Paid: 'text-green-300', Void: 'text-rose-400' }[inv.status] || 'text-slate-400';
       const actions = [];
       actions.push(`<button class="text-cyan-400 hover:text-cyan-300 px-1" onclick="viewWaterInvoice(${inv.id})">View</button>`);
@@ -8713,6 +8715,7 @@ async function loadWaterBillInvoices() {
       }
       if (inv.status === 'Finalized' || inv.status === 'Sent' || inv.status === 'Downloaded') {
         actions.push(`<button class="text-amber-400 hover:text-amber-300 px-1" onclick="voidWaterInvoiceUI(${inv.id})">Void</button>`);
+        actions.push(`<button class="text-rose-400 hover:text-rose-300 px-1" onclick="deleteWaterInvoiceUI(${inv.id})">Delete</button>`);
       }
       const paymentStatus = inv.status === 'Paid' ? '<span class="text-green-300">Paid</span>' : '<span class="text-slate-500">Unpaid</span>';
       return `<tr class="border-b border-slate-800 hover:bg-slate-800/30">
@@ -8734,9 +8737,9 @@ async function loadWaterBillInvoices() {
 }
 
 async function populateWaterBillDropdowns() {
-  // Property dropdowns (filter + form)
+  // Property dropdowns (filter + form + rate management)
   try {
-    const houses = await api.houses();
+    const { houses } = await api.houses();
     waterBillHousesCache = houses || [];
     const filterSel = document.getElementById('wb-property-filter');
     const formSel = document.getElementById('wb-form-house');
@@ -8750,6 +8753,9 @@ async function populateWaterBillDropdowns() {
 
 // Property filter
 document.getElementById('wb-property-filter')?.addEventListener('change', loadWaterBillInvoices);
+
+// Unit filter
+document.getElementById('wb-unit-filter')?.addEventListener('input', debounce(loadWaterBillInvoices, 400));
 
 // Rate management - show rate when property selected
 document.getElementById('wb-rate-house')?.addEventListener('change', async function() {
@@ -8825,7 +8831,7 @@ function showWaterBillForm(invoice = null) {
     document.getElementById('wb-billing-month').value = invoice.billing_month || '';
     document.getElementById('wb-prev-reading').value = invoice.previous_reading || '';
     document.getElementById('wb-curr-reading').value = invoice.current_reading || '';
-    document.getElementById('wb-rate').value = `KES ${Number(invoice.rate_per_unit).toFixed(2)}`;
+    document.getElementById('wb-rate').value = Number(invoice.rate_per_unit).toFixed(2);
     document.getElementById('wb-notes').value = invoice.notes || '';
     waterBillCurrentTenant = { tenant_code: invoice.tenant_code, name: invoice.tenant_name, property_name: invoice.property_name, unit_label: invoice.unit_label };
     updateWaterBillArrears();
@@ -8858,7 +8864,7 @@ document.getElementById('wb-form-house')?.addEventListener('change', async funct
   if (!housePaybill) return;
   try {
     const data = await api.getWaterRate(housePaybill);
-    document.getElementById('wb-rate').value = `KES ${Number(data.rate_per_unit || 0).toFixed(2)}`;
+    document.getElementById('wb-rate').value = Number(data.rate_per_unit || 0).toFixed(2);
   } catch (err) { /* ignore */ }
 });
 
@@ -8917,7 +8923,7 @@ function updateWaterBillArrears() {
 }
 
 // Reading/rate changes → recalculate
-['wb-prev-reading', 'wb-curr-reading'].forEach(id => {
+['wb-prev-reading', 'wb-curr-reading', 'wb-rate'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', updateWaterBillCalc);
 });
 
@@ -9137,6 +9143,11 @@ async function viewWaterInvoice(id) {
         voidBtn.className = 'qc-btn text-sm'; voidBtn.style.background = '#d97706'; voidBtn.style.color = 'white'; voidBtn.textContent = 'Void';
         voidBtn.onclick = () => { document.getElementById('wb-detail-modal').style.display = 'none'; voidWaterInvoiceUI(inv.id); };
         btnRow.insertBefore(voidBtn, downloadBtn);
+        const delBtn2 = document.createElement('button');
+        delBtn2.type = 'button'; delBtn2.id = 'btn-delete-wb-detail';
+        delBtn2.className = 'qc-btn text-sm'; delBtn2.style.background = '#dc2626'; delBtn2.style.color = 'white'; delBtn2.textContent = 'Delete';
+        delBtn2.onclick = () => { document.getElementById('wb-detail-modal').style.display = 'none'; deleteWaterInvoiceUI(inv.id); };
+        btnRow.insertBefore(delBtn2, downloadBtn);
       }
     }
   } catch (err) {
@@ -9177,7 +9188,7 @@ document.getElementById('btn-send-wb')?.addEventListener('click', async function
 });
 
 async function deleteWaterInvoiceUI(id) {
-  if (!confirm('Delete this draft water invoice?')) return;
+  if (!confirm('Delete this water invoice?')) return;
   try {
     await api.deleteWaterInvoice(id);
     showToast('Water invoice deleted', 'success');

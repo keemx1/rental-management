@@ -2299,6 +2299,7 @@
               <select id="wb-property-filter" class="cyber-input w-48">
                 <option value="">All Properties</option>
               </select>
+              <input type="text" id="wb-unit-filter" class="cyber-input w-32" placeholder="Unit number..." />
               <input type="text" id="wb-search" class="cyber-input w-40" placeholder="Search invoice/tenant..." />
               <select id="wb-status-filter" class="cyber-input w-36">
                 <option value="">All Status</option>
@@ -2411,7 +2412,7 @@
               <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <label class="form-label">Water Rate (KES/unit)</label>
-                  <input type="text" id="wb-rate" class="cyber-input" readonly />
+                  <input type="number" id="wb-rate" class="cyber-input" min="0" step="0.01" />
                 </div>
                 <div>
                   <label class="form-label">Previous Reading</label>
@@ -4634,10 +4635,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=14"></script>
+  <script type="module" src="/js/app.js?v=15"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=14').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=15').catch(() => {});
     }
     document.querySelector('.app-shell')?.classList.add('login-mode');
   </script>
