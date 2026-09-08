@@ -5530,16 +5530,17 @@ async function createWaterInvoice(data) {
   const res = await query(
     `INSERT INTO water_invoices
        (wtr_number, tenant_code, tenant_name, property_name, house_paybill_number,
-        unit_label, billing_month, previous_reading, current_reading,
-        units_used, rate_per_unit, total_amount, due_date, status, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        unit_label, billing_month, payment_month, previous_reading, current_reading,
+        units_used, rate_per_unit, total_amount, due_date, status, payment_terms, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING *`,
     [
       wtrNumber, data.tenant_code, data.tenant_name || '', data.property_name || '',
       data.house_paybill_number || null, data.unit_label || '', data.billing_month,
+      data.payment_month || null,
       Number(data.previous_reading || 0), Number(data.current_reading || 0),
       unitsUsed, Number(data.rate_per_unit || 0), totalAmount,
-      data.due_date || null, data.status || 'Draft', data.notes || null,
+      data.due_date || null, data.status || 'Draft', data.payment_terms || null, data.notes || null,
     ]
   );
   return res.rows[0];
@@ -5588,7 +5589,7 @@ async function updateWaterInvoice(id, patch) {
   const vals = [];
   let idx = 1;
   const allowed = ['tenant_code', 'tenant_name', 'property_name', 'house_paybill_number', 'unit_label',
-    'billing_month', 'due_date', 'status', 'notes'];
+    'billing_month', 'payment_month', 'due_date', 'status', 'payment_terms', 'notes'];
   for (const k of allowed) {
     if (patch[k] !== undefined) { fields.push(`${k} = $${idx++}`); vals.push(patch[k]); }
   }
@@ -5649,6 +5650,18 @@ async function getLatestWaterReading(tenantCode) {
     [tenantCode]
   );
   return res.rows[0] ? Number(res.rows[0].current_reading) : 0;
+}
+
+async function findTenantByPropertyAndUnit(housePaybill, unitLabel) {
+  const res = await query(
+    `SELECT t.tenant_code AS id, t.tenant_code, t.name, t.phone_number, t.house_paybill_number AS house_id,
+            t.property_name, t.unit_label, t.rent_amount, t.status
+     FROM tenants t
+     WHERE t.house_paybill_number = $1 AND t.unit_label = $2 AND t.status = 'Active'
+     LIMIT 1`,
+    [housePaybill, unitLabel]
+  );
+  return res.rows[0] || null;
 }
 
 module.exports = {
@@ -5845,4 +5858,5 @@ module.exports = {
   updateWaterRate,
   getWaterRateHistory,
   getLatestWaterReading,
+  findTenantByPropertyAndUnit,
 };

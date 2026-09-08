@@ -4375,7 +4375,7 @@ function showInvoiceType(type) {
   document.getElementById('employee-rent-panel')?.classList.toggle('hidden', type !== 'employee-rent');
   if (type === 'employee-rent') { loadEmployeeRent(); loadEmployeeRentEmployees(); populatePropertyDropdowns(); }
   document.getElementById('water-bill-panel')?.classList.toggle('hidden', type !== 'water-bill');
-  if (type === 'water-bill') { loadWaterBillInvoices(); populateWaterBillPropertyDropdown(); }
+  if (type === 'water-bill') { loadWaterBillInvoices(); populateWaterBillDropdowns(); }
 }
 
 function resolveTenant(searchInputId, cacheKey) {
@@ -8663,16 +8663,19 @@ window.submitFutureTenancy = submitFutureTenancy;
 
 // ── Water Bill Invoices ─────────────────────────────────────────────────────
 
-let waterBillTenantsCache = [];
+let waterBillHousesCache = [];
+let waterBillCurrentTenant = null;
 
 async function loadWaterBillInvoices() {
   const search = document.getElementById('wb-search')?.value || '';
   const status = document.getElementById('wb-status-filter')?.value || '';
   const month = document.getElementById('wb-month-filter')?.value || '';
+  const property = document.getElementById('wb-property-filter')?.value || '';
   const params = {};
   if (search) params.q = search;
   if (status) params.status = status;
   if (month) params.billing_month = month;
+  if (property) params.house_paybill_number = property;
 
   try {
     const data = await api.listWaterInvoices(params);
@@ -8687,24 +8690,27 @@ async function loadWaterBillInvoices() {
       const statusClass = { Draft: 'text-amber-400', Finalized: 'text-blue-400', Sent: 'text-green-400', Downloaded: 'text-blue-300', Paid: 'text-green-300', Void: 'text-rose-400' }[inv.status] || 'text-slate-400';
       const actions = [];
       actions.push(`<button class="text-cyan-400 hover:text-cyan-300 px-1" onclick="viewWaterInvoice(${inv.id})">View</button>`);
-      if (inv.status === 'Draft') {
+      if (inv.status === 'Draft' || inv.status === 'Finalized' || inv.status === 'Downloaded' || inv.status === 'Sent') {
         actions.push(`<button class="text-blue-400 hover:text-blue-300 px-1" onclick="editWaterInvoice(${inv.id})">Edit</button>`);
-        actions.push(`<button class="text-rose-400 hover:text-rose-300 px-1" onclick="deleteWaterInvoiceUI(${inv.id})">×</button>`);
       }
-      if (inv.status === 'Finalized' || inv.status === 'Downloaded' || inv.status === 'Sent') {
+      if (inv.status === 'Draft') {
+        actions.push(`<button class="text-rose-400 hover:text-rose-300 px-1" onclick="deleteWaterInvoiceUI(${inv.id})">Delete</button>`);
+      }
+      if (inv.status !== 'Paid' && inv.status !== 'Void' && inv.status !== 'Draft') {
         actions.push(`<button class="text-amber-400 hover:text-amber-300 px-1" onclick="voidWaterInvoiceUI(${inv.id})">Void</button>`);
       }
+      const paymentStatus = inv.status === 'Paid' ? '<span class="text-green-300">Paid</span>' : '<span class="text-slate-500">Unpaid</span>';
       return `<tr class="border-b border-slate-800 hover:bg-slate-800/30">
         <td class="font-mono text-xs">${escapeHtml(inv.wtr_number)}</td>
-        <td>${escapeHtml(inv.tenant_name)}</td>
-        <td>${escapeHtml(inv.unit_label)}</td>
         <td>${escapeHtml(inv.property_name)}</td>
+        <td>${escapeHtml(inv.unit_label)}</td>
+        <td>${escapeHtml(inv.tenant_name)}</td>
         <td>${escapeHtml(inv.billing_month)}</td>
-        <td class="text-right font-mono">${Number(inv.units_used).toFixed(1)}</td>
-        <td class="text-right font-mono">${Number(inv.rate_per_unit).toFixed(0)}</td>
         <td class="text-right font-mono font-bold">${Number(inv.total_amount).toLocaleString()}</td>
+        <td>${inv.created_at ? new Date(inv.created_at).toLocaleDateString('en-GB') : ''}</td>
         <td class="${statusClass} font-semibold">${escapeHtml(inv.status)}</td>
-        <td class="text-right whitespace-nowrap">${actions.join('')}</td>
+        <td>${paymentStatus}</td>
+        <td class="text-right whitespace-nowrap">${actions.join(' ')}</td>
       </tr>`;
     }).join('');
   } catch (err) {
@@ -8712,29 +8718,23 @@ async function loadWaterBillInvoices() {
   }
 }
 
-async function populateWaterBillPropertyDropdown() {
-  const sel = document.getElementById('wb-rate-house');
-  if (!sel) return;
+async function populateWaterBillDropdowns() {
+  // Property dropdowns (filter + form)
   try {
     const houses = await api.listHouses();
-    sel.innerHTML = '<option value="">Select property</option>' + houses.map(h =>
-      `<option value="${h.paybill_number}">${escapeHtml(h.house_name)} (${h.paybill_number})</option>`
-    ).join('');
-  } catch (err) { /* ignore */ }
-
-  // Load tenants for form datalist
-  try {
-    const data = await api.listTenants();
-    waterBillTenantsCache = data.tenants || [];
-    const dl = document.getElementById('wb-tenant-list');
-    if (dl) {
-      dl.innerHTML = waterBillTenantsCache.map(t =>
-        `<option value="${escapeHtml(t.name)} (${t.tenant_code})">`
-      ).join('');
-    }
+    waterBillHousesCache = houses || [];
+    const filterSel = document.getElementById('wb-property-filter');
+    const formSel = document.getElementById('wb-form-house');
+    const opts = houses.map(h => `<option value="${h.paybill_number}">${escapeHtml(h.house_name)} (${h.paybill_number})</option>`).join('');
+    if (filterSel) filterSel.innerHTML = '<option value="">All Properties</option>' + opts;
+    if (formSel) formSel.innerHTML = '<option value="">Select property</option>' + opts;
   } catch (err) { /* ignore */ }
 }
 
+// Property filter
+document.getElementById('wb-property-filter')?.addEventListener('change', loadWaterBillInvoices);
+
+// Rate management - show rate when property selected
 document.getElementById('wb-rate-house')?.addEventListener('change', async function() {
   const housePaybill = this.value;
   const rateInput = document.getElementById('wb-rate-current');
@@ -8781,56 +8781,134 @@ document.getElementById('wb-search')?.addEventListener('input', debounce(loadWat
 document.getElementById('wb-status-filter')?.addEventListener('change', loadWaterBillInvoices);
 document.getElementById('wb-month-filter')?.addEventListener('change', loadWaterBillInvoices);
 
+// ── Water Bill Form ─────────────────────────────────────────────────────────
+
 function showWaterBillForm(invoice = null) {
   document.getElementById('wb-list-view')?.classList.add('hidden');
   document.getElementById('wb-form-view')?.classList.remove('hidden');
+  waterBillCurrentTenant = null;
+
   document.getElementById('wb-form-id').value = invoice ? invoice.id : '';
+  document.getElementById('wb-form-tenant-code').value = invoice ? invoice.tenant_code : '';
   document.getElementById('wb-form-title').textContent = invoice ? 'Edit Water Bill Invoice' : 'New Water Bill Invoice';
-  document.getElementById('wb-tenant').value = invoice ? `${invoice.tenant_name} (${invoice.tenant_code})` : '';
-  document.getElementById('wb-billing-month').value = invoice ? invoice.billing_month : '';
-  document.getElementById('wb-due-date').value = invoice ? (invoice.due_date || '') : '';
-  document.getElementById('wb-property').value = invoice ? invoice.property_name : '';
-  document.getElementById('wb-unit').value = invoice ? invoice.unit_label : '';
-  document.getElementById('wb-prev-reading').value = invoice ? invoice.previous_reading : '';
-  document.getElementById('wb-curr-reading').value = invoice ? invoice.current_reading : '';
-  document.getElementById('wb-rate').value = invoice ? invoice.rate_per_unit : '';
-  document.getElementById('wb-notes').value = invoice ? (invoice.notes || '') : '';
+  document.getElementById('wb-form-submit').textContent = invoice ? 'Update Water Bill' : 'Save Water Bill';
+
+  // Populate property dropdown
+  const formSel = document.getElementById('wb-form-house');
+  if (formSel && waterBillHousesCache.length) {
+    formSel.innerHTML = '<option value="">Select property</option>' + waterBillHousesCache.map(h =>
+      `<option value="${h.paybill_number}" ${invoice && invoice.house_paybill_number === h.paybill_number ? 'selected' : ''}>${escapeHtml(h.house_name)} (${h.paybill_number})</option>`
+    ).join('');
+  }
+
+  if (invoice) {
+    // Edit mode: fill in all fields
+    document.getElementById('wb-form-unit').value = invoice.unit_label || '';
+    document.getElementById('wb-tenant-display').textContent = invoice.tenant_name || '—';
+    document.getElementById('wb-billing-month').value = invoice.billing_month || '';
+    document.getElementById('wb-prev-reading').value = invoice.previous_reading || '';
+    document.getElementById('wb-curr-reading').value = invoice.current_reading || '';
+    document.getElementById('wb-rate').value = `KES ${Number(invoice.rate_per_unit).toFixed(2)}`;
+    document.getElementById('wb-notes').value = invoice.notes || '';
+    waterBillCurrentTenant = { tenant_code: invoice.tenant_code, name: invoice.tenant_name, property_name: invoice.property_name, unit_label: invoice.unit_label };
+    updateWaterBillArrears();
+    updateWaterBillCalc();
+  } else {
+    document.getElementById('wb-form-unit').value = '';
+    document.getElementById('wb-tenant-display').textContent = 'Enter property and unit';
+    document.getElementById('wb-billing-month').value = '';
+    document.getElementById('wb-prev-reading').value = '';
+    document.getElementById('wb-curr-reading').value = '';
+    document.getElementById('wb-rate').value = '';
+    document.getElementById('wb-notes').value = '';
+    document.getElementById('wb-payment-month').value = '';
+    document.getElementById('wb-due-date-display').value = '';
+    document.getElementById('wb-payment-terms').textContent = '—';
+    document.getElementById('wb-units-display').textContent = '0';
+    document.getElementById('wb-total-display').textContent = 'KES 0';
+  }
   document.getElementById('wb-form-result').textContent = '';
-  updateWaterBillCalc();
 }
 
-document.getElementById('wb-tenant')?.addEventListener('change', async function() {
-  const match = resolveTenantFromCache(this.value);
-  if (!match) return;
-  document.getElementById('wb-property').value = match.property_name || '';
-  document.getElementById('wb-unit').value = match.unit_label || '';
-  // Fetch rate for property
-  if (match.house_paybill_number) {
-    try {
-      const data = await api.getWaterRate(match.house_paybill_number);
-      document.getElementById('wb-rate').value = Number(data.rate_per_unit || 0).toFixed(2);
-    } catch (err) { /* ignore */ }
-  }
-  // Fetch latest reading for previous
+// Property change on form → load rate
+document.getElementById('wb-form-house')?.addEventListener('change', async function() {
+  const housePaybill = this.value;
+  waterBillCurrentTenant = null;
+  document.getElementById('wb-tenant-display').textContent = 'Enter unit number';
+  document.getElementById('wb-form-unit').value = '';
+  document.getElementById('wb-rate').value = '';
+  document.getElementById('wb-prev-reading').value = '';
+  if (!housePaybill) return;
   try {
-    const data = await api.getLatestWaterReading(match.tenant_code);
-    document.getElementById('wb-prev-reading').value = data.current_reading || 0;
+    const data = await api.getWaterRate(housePaybill);
+    document.getElementById('wb-rate').value = `KES ${Number(data.rate_per_unit || 0).toFixed(2)}`;
   } catch (err) { /* ignore */ }
-  updateWaterBillCalc();
 });
 
-function resolveTenantFromCache(searchVal) {
-  return waterBillTenantsCache.find(t => `${t.name} (${t.tenant_code})` === searchVal) || null;
+// Unit number change → find tenant
+document.getElementById('wb-form-unit')?.addEventListener('change', async function() {
+  const unitLabel = this.value.trim();
+  const housePaybill = document.getElementById('wb-form-house')?.value;
+  if (!housePaybill || !unitLabel) {
+    waterBillCurrentTenant = null;
+    document.getElementById('wb-tenant-display').textContent = 'Enter property and unit';
+    return;
+  }
+  try {
+    const data = await api.findTenantByPropertyAndUnit(housePaybill, unitLabel);
+    waterBillCurrentTenant = data.tenant;
+    document.getElementById('wb-tenant-display').textContent = waterBillCurrentTenant.name;
+    document.getElementById('wb-form-tenant-code').value = waterBillCurrentTenant.tenant_code;
+    // Fetch latest reading for previous
+    try {
+      const rData = await api.getLatestWaterReading(waterBillCurrentTenant.tenant_code);
+      document.getElementById('wb-prev-reading').value = rData.current_reading || 0;
+    } catch (err) { /* ignore */ }
+    updateWaterBillCalc();
+  } catch (err) {
+    waterBillCurrentTenant = null;
+    document.getElementById('wb-tenant-display').textContent = 'No active tenant found';
+    document.getElementById('wb-form-tenant-code').value = '';
+  }
+});
+
+// Billing month change → calculate payment month and due date
+document.getElementById('wb-billing-month')?.addEventListener('change', updateWaterBillArrears);
+
+function updateWaterBillArrears() {
+  const billingMonth = document.getElementById('wb-billing-month')?.value;
+  if (!billingMonth) {
+    document.getElementById('wb-payment-month').value = '';
+    document.getElementById('wb-due-date-display').value = '';
+    document.getElementById('wb-payment-terms').textContent = '—';
+    return;
+  }
+  // Payment month = next month
+  const parts = billingMonth.split('-');
+  let payYear = Number(parts[0]);
+  let payMonth = Number(parts[1]) + 1;
+  if (payMonth > 12) { payMonth = 1; payYear++; }
+  const paymentMonth = `${payYear}-${String(payMonth).padStart(2, '0')}`;
+  const dueDate = `${payYear}-${String(payMonth).padStart(2, '0')}-05`;
+
+  const billingLabel = new Date(`${billingMonth}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const paymentLabel = new Date(`${paymentMonth}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+  document.getElementById('wb-payment-month').value = paymentLabel;
+  document.getElementById('wb-due-date-display').value = new Date(dueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  document.getElementById('wb-payment-terms').textContent = `Payment Terms: This water bill is for consumption during ${billingLabel} and is billed in arrears. The amount due is payable together with ${paymentLabel} rent on or before the 5th of ${paymentLabel}.`;
 }
 
-['wb-prev-reading', 'wb-curr-reading', 'wb-rate'].forEach(id => {
+// Reading/rate changes → recalculate
+['wb-prev-reading', 'wb-curr-reading'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', updateWaterBillCalc);
 });
 
 function updateWaterBillCalc() {
   const prev = Number(document.getElementById('wb-prev-reading')?.value || 0);
   const curr = Number(document.getElementById('wb-curr-reading')?.value || 0);
-  const rate = Number(document.getElementById('wb-rate')?.value || 0);
+  const rateStr = document.getElementById('wb-rate')?.value || '0';
+  const rate = Number(rateStr.replace(/[^0-9.]/g, '') || 0);
   const units = curr - prev;
   const total = units * rate;
   const unitsEl = document.getElementById('wb-units-display');
@@ -8839,23 +8917,43 @@ function updateWaterBillCalc() {
   if (totalEl) totalEl.textContent = units >= 0 ? `KES ${total.toLocaleString()}` : 'KES 0';
 }
 
+// Form submit
 document.getElementById('water-bill-form')?.addEventListener('submit', async function(e) {
   e.preventDefault();
   const resultEl = document.getElementById('wb-form-result');
-  const searchVal = document.getElementById('wb-tenant')?.value || '';
-  const match = resolveTenantFromCache(searchVal);
-  if (!match) {
-    resultEl.textContent = 'Please select a valid tenant from the list.';
+  if (!waterBillCurrentTenant) {
+    resultEl.textContent = 'Please select a valid property and unit with an active tenant.';
     resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
     return;
   }
+  const rateStr = document.getElementById('wb-rate')?.value || '0';
+  const rate = Number(rateStr.replace(/[^0-9.]/g, '') || 0);
+  const billingMonth = document.getElementById('wb-billing-month')?.value;
+  if (!billingMonth) {
+    resultEl.textContent = 'Please select a billing month.';
+    resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    return;
+  }
+  // Calculate payment month and due date
+  const parts = billingMonth.split('-');
+  let payYear = Number(parts[0]);
+  let payMonth = Number(parts[1]) + 1;
+  if (payMonth > 12) { payMonth = 1; payYear++; }
+  const paymentMonth = `${payYear}-${String(payMonth).padStart(2, '0')}`;
+  const dueDate = `${paymentMonth}-05`;
+  const billingLabel = new Date(`${billingMonth}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const paymentLabel = new Date(`${paymentMonth}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const paymentTerms = `Payment Terms: This water bill is for consumption during ${billingLabel} and is billed in arrears. The amount due is payable together with ${paymentLabel} rent on or before the 5th of ${paymentLabel}.`;
+
   const body = {
-    tenant_code: match.tenant_code,
-    billing_month: document.getElementById('wb-billing-month')?.value,
+    tenant_code: waterBillCurrentTenant.tenant_code,
+    billing_month: billingMonth,
+    payment_month: paymentMonth,
     previous_reading: Number(document.getElementById('wb-prev-reading')?.value || 0),
     current_reading: Number(document.getElementById('wb-curr-reading')?.value || 0),
-    rate_per_unit: Number(document.getElementById('wb-rate')?.value || 0),
-    due_date: document.getElementById('wb-due-date')?.value || null,
+    rate_per_unit: rate,
+    due_date: dueDate,
+    payment_terms: paymentTerms,
     notes: document.getElementById('wb-notes')?.value || null,
   };
   const id = document.getElementById('wb-form-id')?.value;
@@ -8864,12 +8962,10 @@ document.getElementById('water-bill-form')?.addEventListener('submit', async fun
       await api.updateWaterInvoice(id, body);
       resultEl.textContent = 'Water bill updated successfully.';
       resultEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+      setTimeout(() => { cancelWaterBillForm(); loadWaterBillInvoices(); }, 1200);
     } else {
-      // Show review before finalizing
-      showWaterBillReview(body, match);
-      return;
+      showWaterBillReview(body, waterBillCurrentTenant);
     }
-    setTimeout(() => { cancelWaterBillForm(); loadWaterBillInvoices(); }, 1200);
   } catch (err) {
     resultEl.textContent = 'Error: ' + err.message;
     resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
@@ -8879,33 +8975,32 @@ document.getElementById('water-bill-form')?.addEventListener('submit', async fun
 function showWaterBillReview(body, tenant) {
   const units = body.current_reading - body.previous_reading;
   const total = units * body.rate_per_unit;
-  const billingDate = new Date(`${body.billing_month}-15T12:00:00`);
-  const prevMonth = new Date(billingDate);
-  prevMonth.setMonth(prevMonth.getMonth() - 1);
-  const consumptionLabel = prevMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  const billingLabel = billingDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const billingLabel = new Date(`${body.billing_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const paymentLabel = body.payment_month ? new Date(`${body.payment_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' }) : '';
+  const houseName = waterBillHousesCache.find(h => h.paybill_number === (tenant.house_id || tenant.house_paybill_number))?.house_name || '';
 
   const html = `
     <div class="grid grid-cols-2 gap-3">
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Tenant:</span> <span class="text-white font-semibold">${escapeHtml(tenant.name)}</span></div>
-      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Property:</span> <span class="text-white">${escapeHtml(tenant.property_name || '')}</span></div>
+      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Property:</span> <span class="text-white">${escapeHtml(houseName)}</span></div>
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Unit:</span> <span class="text-white">${escapeHtml(tenant.unit_label || '')}</span></div>
-      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Billing Period:</span> <span class="text-white">${escapeHtml(consumptionLabel)} (for ${escapeHtml(billingLabel)} billing)</span></div>
+      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Billing Month:</span> <span class="text-white">${escapeHtml(billingLabel)}</span></div>
+      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Payment Month:</span> <span class="text-white">${escapeHtml(paymentLabel)}</span></div>
+      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Due Date:</span> <span class="text-white">${body.due_date || 'N/A'}</span></div>
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Previous Reading:</span> <span class="text-white font-mono">${body.previous_reading}</span></div>
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Current Reading:</span> <span class="text-white font-mono">${body.current_reading}</span></div>
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Units Used:</span> <span class="text-cyan-400 font-mono font-bold">${units}</span></div>
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Rate/Unit:</span> <span class="text-white font-mono">KES ${Number(body.rate_per_unit).toFixed(2)}</span></div>
-      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Due Date:</span> <span class="text-white">${body.due_date || 'N/A'}</span></div>
     </div>
     <div class="bg-emerald-900/30 border border-emerald-600 rounded-lg p-4 text-center mt-3">
       <div class="text-sm text-emerald-300">Total Water Bill</div>
       <div class="text-2xl font-bold text-emerald-400">KES ${total.toLocaleString()}</div>
       <div class="text-xs text-slate-400 mt-1">${units} units × KES ${Number(body.rate_per_unit).toFixed(2)}</div>
     </div>
+    <div class="bg-slate-800/30 rounded p-3 text-xs text-slate-300 mt-3">${escapeHtml(body.payment_terms || '')}</div>
   `;
   document.getElementById('wb-review-content').innerHTML = html;
   document.getElementById('wb-review-modal').style.display = 'flex';
-  // Store body for confirm
   document.getElementById('wb-review-modal').dataset.body = JSON.stringify(body);
 }
 
@@ -8935,6 +9030,7 @@ function cancelWaterBillForm() {
   document.getElementById('wb-form-view')?.classList.add('hidden');
   document.getElementById('wb-list-view')?.classList.remove('hidden');
   document.getElementById('water-bill-form')?.reset();
+  waterBillCurrentTenant = null;
 }
 
 document.getElementById('btn-cancel-water-bill')?.addEventListener('click', cancelWaterBillForm);
@@ -8956,12 +9052,10 @@ async function viewWaterInvoice(id) {
     const units = Number(inv.units_used).toFixed(1);
     const rate = Number(inv.rate_per_unit).toFixed(2);
     const total = Number(inv.total_amount).toLocaleString();
-    const billingDate = new Date(`${inv.billing_month}-15T12:00:00`);
-    const prevMonth = new Date(billingDate);
-    prevMonth.setMonth(prevMonth.getMonth() - 1);
-    const consumptionLabel = prevMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-    const billingLabel = billingDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    const billingLabel = new Date(`${inv.billing_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    const paymentLabel = inv.payment_month ? new Date(`${inv.payment_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' }) : '';
     const statusClass = { Draft: 'text-amber-400', Finalized: 'text-blue-400', Sent: 'text-green-400', Paid: 'text-green-300', Void: 'text-rose-400' }[inv.status] || 'text-slate-400';
+    const paymentStatus = inv.status === 'Paid' ? '<span class="text-green-300 font-semibold">Paid</span>' : '<span class="text-slate-500">Unpaid</span>';
 
     document.getElementById('wb-detail-title').textContent = `Water Bill — ${inv.wtr_number}`;
     document.getElementById('wb-detail-content').innerHTML = `
@@ -8971,20 +9065,28 @@ async function viewWaterInvoice(id) {
         <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Tenant:</span> <span class="text-white font-semibold">${escapeHtml(inv.tenant_name)}</span></div>
         <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Property:</span> <span class="text-white">${escapeHtml(inv.property_name)}</span></div>
         <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Unit:</span> <span class="text-white">${escapeHtml(inv.unit_label)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Billing Period:</span> <span class="text-white">${escapeHtml(consumptionLabel)} (for ${escapeHtml(billingLabel)} billing)</span></div>
+        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Billing Month:</span> <span class="text-white">${escapeHtml(billingLabel)}</span></div>
+        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Payment Month:</span> <span class="text-white">${escapeHtml(paymentLabel)}</span></div>
+        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Due Date:</span> <span class="text-white">${inv.due_date || 'N/A'}</span></div>
         <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Previous Reading:</span> <span class="text-white font-mono">${Number(inv.previous_reading).toFixed(2)}</span></div>
         <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Current Reading:</span> <span class="text-white font-mono">${Number(inv.current_reading).toFixed(2)}</span></div>
         <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Units Used:</span> <span class="text-cyan-400 font-mono font-bold">${units}</span></div>
         <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Rate/Unit:</span> <span class="text-white font-mono">KES ${rate}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Due Date:</span> <span class="text-white">${inv.due_date || 'N/A'}</span></div>
+        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Payment Status:</span> ${paymentStatus}</div>
       </div>
       <div class="bg-emerald-900/30 border border-emerald-600 rounded-lg p-4 text-center mt-3">
         <div class="text-sm text-emerald-300">Total Water Bill</div>
         <div class="text-2xl font-bold text-emerald-400">KES ${total}</div>
         <div class="text-xs text-slate-400 mt-1">${units} units × KES ${rate}</div>
       </div>
-      ${inv.notes ? `<div class="bg-slate-800/30 rounded p-3 text-sm text-slate-300 mt-3">${escapeHtml(inv.notes)}</div>` : ''}
     `;
+    const termsDiv = document.getElementById('wb-detail-payment-terms');
+    if (inv.payment_terms) {
+      termsDiv.textContent = inv.payment_terms;
+      termsDiv.classList.remove('hidden');
+    } else {
+      termsDiv.classList.add('hidden');
+    }
     document.getElementById('wb-detail-modal').style.display = 'flex';
     document.getElementById('wb-detail-modal').dataset.invoiceId = inv.id;
     document.getElementById('wb-detail-modal').dataset.invoiceStatus = inv.status;

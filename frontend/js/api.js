@@ -874,4 +874,7 @@ export const api = {
   getLatestWaterReading(tenantCode) {
     return request(`/water-invoices/latest-reading/${encodeURIComponent(tenantCode)}`);
   },
+  findTenantByPropertyAndUnit(housePaybill, unitLabel) {
+    return request(`/water-invoices/find-tenant/${encodeURIComponent(housePaybill)}/${encodeURIComponent(unitLabel)}`);
+  },
 };

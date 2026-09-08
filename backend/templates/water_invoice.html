@@ -297,16 +297,16 @@
 
   <div class="grid-4col">
     <div class="detail-box">
-      <div class="label">BILLING PERIOD</div>
-      <div class="value">{{billing_period_label}}</div>
+      <div class="label">BILLING MONTH</div>
+      <div class="value">{{billing_month_label}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">PAYMENT MONTH</div>
+      <div class="value">{{payment_month_label}}</div>
     </div>
     <div class="detail-box">
       <div class="label">PAYMENT DUE DATE</div>
-      <div class="value">{{due_date}}</div>
-    </div>
-    <div class="detail-box">
-      <div class="label">INVOICE TYPE</div>
-      <div class="value">WATER BILL INVOICE</div>
+      <div class="value">{{due_date_label}}</div>
     </div>
     <div class="detail-box">
       <div class="label">INVOICE STATUS</div>
@@ -372,7 +372,7 @@
   {{notes_html}}
 
   <div class="note-box">
-    Payment is due by {{due_date}}. Please ensure timely payment to avoid disconnection of water services.
+    {{payment_terms}}
   </div>
 
   <div class="footer-bar"></div>

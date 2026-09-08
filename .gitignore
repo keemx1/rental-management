@@ -9,6 +9,8 @@ _server.pid
 Thumbs.db
 storage/documents/*.pdf
 storage/documents/*.xlsx
+backend/documents/*.pdf
+backend/documents/*.xlsx
 .wwebjs_auth/
 .wwebjs_auth_old*/
 .wwebjs_cache/

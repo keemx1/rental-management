@@ -598,11 +598,15 @@ function buildWaterInvoiceHtml(invoice) {
   const statusClass = statusMap[invoice.status] || 'draft';
 
   const billingMonthDate = new Date(`${invoice.billing_month}-15T12:00:00`);
-  const billingPeriodLabel = billingMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  // Water is billed for previous month
-  const prevMonth = new Date(billingMonthDate);
-  prevMonth.setMonth(prevMonth.getMonth() - 1);
-  const consumptionMonth = prevMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const billingMonthLabel = billingMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+  const paymentMonthLabel = invoice.payment_month
+    ? new Date(`${invoice.payment_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+    : '';
+
+  const dueDateLabel = invoice.due_date
+    ? new Date(invoice.due_date + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    : 'N/A';
 
   const notesHtml = invoice.notes
     ? `<div class="note-box" style="text-align: left; white-space: pre-wrap;">${invoice.notes}</div>`
@@ -613,10 +617,10 @@ function buildWaterInvoiceHtml(invoice) {
     tenant_name: invoice.tenant_name || '',
     property_name: invoice.property_name || '',
     unit_label: invoice.unit_label || '',
-    billing_period_label: `${consumptionMonth} (for ${billingPeriodLabel} billing)`,
-    billing_month: invoice.billing_month,
+    billing_month_label: billingMonthLabel,
+    payment_month_label: paymentMonthLabel,
+    due_date_label: dueDateLabel,
     date_issued: new Date(invoice.created_at).toISOString().slice(0, 10),
-    due_date: invoice.due_date || 'N/A',
     previous_reading: Number(invoice.previous_reading).toFixed(2),
     current_reading: Number(invoice.current_reading).toFixed(2),
     units_used: Number(invoice.units_used).toFixed(2),
@@ -624,6 +628,7 @@ function buildWaterInvoiceHtml(invoice) {
     total_amount: Number(invoice.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 }),
     status: invoice.status,
     status_class: statusClass,
+    payment_terms: invoice.payment_terms || 'Payment is due on the indicated due date.',
     notes_html: notesHtml,
   });
 }

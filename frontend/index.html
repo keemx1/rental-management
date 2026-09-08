@@ -2293,10 +2293,13 @@
 
         <!-- Water Bill List View -->
         <div id="wb-list-view">
-          <div class="max-w-6xl mx-auto mb-4 flex gap-3 items-center">
+          <div class="max-w-6xl mx-auto mb-4 flex gap-3 items-center flex-wrap">
             <h2 class="text-lg font-semibold text-white ml-3">Water Bill Invoices</h2>
-            <div class="ml-auto flex gap-2 items-center">
-              <input type="text" id="wb-search" class="cyber-input w-44" placeholder="Search invoice/tenant..." />
+            <div class="ml-auto flex gap-2 items-center flex-wrap">
+              <select id="wb-property-filter" class="cyber-input w-48">
+                <option value="">All Properties</option>
+              </select>
+              <input type="text" id="wb-search" class="cyber-input w-40" placeholder="Search invoice/tenant..." />
               <select id="wb-status-filter" class="cyber-input w-36">
                 <option value="">All Status</option>
                 <option value="Draft">Draft</option>
@@ -2307,7 +2310,7 @@
                 <option value="Void">Void</option>
               </select>
               <input type="month" id="wb-month-filter" class="cyber-input w-40" />
-              <button type="button" id="btn-new-water-bill" class="qc-btn qc-btn-primary text-sm">+ New Water Bill</button>
+              <button type="button" id="btn-new-water-bill" class="qc-btn qc-btn-primary text-sm">+ Add New Water Bill Invoice</button>
             </div>
           </div>
 
@@ -2316,15 +2319,15 @@
               <table class="w-full text-sm">
                 <thead>
                   <tr class="text-left text-slate-400 border-b border-slate-700">
-                    <th>Invoice No</th>
-                    <th>Tenant</th>
-                    <th>Unit</th>
+                    <th>Invoice Number</th>
                     <th>Property</th>
+                    <th>Unit</th>
+                    <th>Tenant Name</th>
                     <th>Billing Month</th>
-                    <th class="text-right">Units</th>
-                    <th class="text-right">Rate</th>
-                    <th class="text-right">Total</th>
-                    <th>Status</th>
+                    <th class="text-right">Amount</th>
+                    <th>Date Issued</th>
+                    <th>Invoice Status</th>
+                    <th>Payment Status</th>
                     <th class="text-right">Actions</th>
                   </tr>
                 </thead>
@@ -2369,42 +2372,51 @@
             <h3 class="text-lg font-semibold text-white mb-4" id="wb-form-title">New Water Bill Invoice</h3>
             <form id="water-bill-form" class="space-y-4">
               <input type="hidden" id="wb-form-id" />
+              <input type="hidden" id="wb-form-tenant-code" />
+
               <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label class="form-label">Tenant *</label>
-                  <input type="text" id="wb-tenant" class="cyber-input" list="wb-tenant-list" placeholder="Search tenant..." required />
-                  <datalist id="wb-tenant-list"></datalist>
+                  <label class="form-label">Property *</label>
+                  <select id="wb-form-house" class="cyber-input" required>
+                    <option value="">Select property</option>
+                  </select>
                 </div>
+                <div>
+                  <label class="form-label">Unit Number *</label>
+                  <input type="text" id="wb-form-unit" class="cyber-input" placeholder="e.g. B12" required />
+                </div>
+                <div class="flex items-end">
+                  <div id="wb-tenant-box" class="bg-slate-800/50 rounded-lg p-3 w-full">
+                    <div class="text-xs text-slate-400">Tenant Name</div>
+                    <div class="text-sm font-semibold text-white" id="wb-tenant-display">Enter property and unit</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label class="form-label">Billing Month *</label>
                   <input type="month" id="wb-billing-month" class="cyber-input" required />
                 </div>
                 <div>
+                  <label class="form-label">Payment Month</label>
+                  <input type="text" id="wb-payment-month" class="cyber-input" readonly />
+                </div>
+                <div>
                   <label class="form-label">Payment Due Date</label>
-                  <input type="date" id="wb-due-date" class="cyber-input" />
+                  <input type="text" id="wb-due-date-display" class="cyber-input" readonly />
                 </div>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
-                  <label class="form-label">Property</label>
-                  <input type="text" id="wb-property" class="cyber-input" readonly />
-                </div>
-                <div>
-                  <label class="form-label">Unit</label>
-                  <input type="text" id="wb-unit" class="cyber-input" readonly />
-                </div>
-                <div>
                   <label class="form-label">Water Rate (KES/unit)</label>
-                  <input type="number" id="wb-rate" class="cyber-input" min="0" step="0.01" required />
+                  <input type="text" id="wb-rate" class="cyber-input" readonly />
                 </div>
                 <div>
                   <label class="form-label">Previous Reading</label>
                   <input type="number" id="wb-prev-reading" class="cyber-input" min="0" step="0.01" />
                 </div>
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label class="form-label">Current Reading *</label>
                   <input type="number" id="wb-curr-reading" class="cyber-input" min="0" step="0.01" required />
@@ -2415,10 +2427,19 @@
                     <div class="text-lg font-bold text-cyan-400" id="wb-units-display">0</div>
                   </div>
                 </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div class="flex items-end">
-                  <div class="bg-slate-800/50 rounded-lg p-3 w-full">
-                    <div class="text-xs text-slate-400">Total Water Bill</div>
+                  <div class="bg-emerald-900/30 border border-emerald-600 rounded-lg p-3 w-full">
+                    <div class="text-xs text-emerald-300">Total Water Bill</div>
                     <div class="text-lg font-bold text-emerald-400" id="wb-total-display">KES 0</div>
+                  </div>
+                </div>
+                <div class="md:col-span-2 flex items-end">
+                  <div class="bg-slate-800/30 rounded-lg p-3 w-full">
+                    <div class="text-xs text-slate-400 mb-1">Payment Terms</div>
+                    <div class="text-xs text-slate-300" id="wb-payment-terms">—</div>
                   </div>
                 </div>
               </div>
@@ -2430,7 +2451,7 @@
 
               <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
                 <button type="button" class="action-btn" id="btn-cancel-water-bill">Cancel</button>
-                <button type="submit" class="qc-btn qc-btn-primary">Save Water Bill</button>
+                <button type="submit" class="qc-btn qc-btn-primary" id="wb-form-submit">Save Water Bill</button>
               </div>
               <p id="wb-form-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
             </form>
@@ -2454,6 +2475,7 @@
           <div class="glass-panel p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
             <h3 class="text-lg font-semibold text-white mb-4" id="wb-detail-title">Water Bill Invoice</h3>
             <div id="wb-detail-content" class="space-y-3 text-sm"></div>
+            <div id="wb-detail-payment-terms" class="bg-slate-800/30 rounded p-3 text-xs text-slate-300 mt-3 hidden"></div>
             <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-800">
               <button type="button" class="action-btn" id="btn-close-wb-detail">Close</button>
               <button type="button" class="qc-btn qc-btn-primary text-sm" id="btn-download-wb">Download PDF</button>
