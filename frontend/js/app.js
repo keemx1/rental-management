@@ -8921,7 +8921,8 @@ function updateWaterBillArrears() {
   const dueDateObj = new Date(`${paymentMonth}-05T12:00:00`);
   const dueDateLabel = dueDateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   document.getElementById('wb-due-date-display').value = dueDateLabel;
-  document.getElementById('wb-payment-terms').textContent = `Payment Terms: This water bill is for water consumption during ${billingLabel} and is billed in arrears. Payment is due together with ${paymentLabel} rent on or before ${dueDateLabel}. Payment should be made through the Paybill assigned to the property or the approved payment method used for rent.`;
+  const issueMonthLabel = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  document.getElementById('wb-payment-terms').textContent = `Water bill for ${billingLabel}, issued in ${issueMonthLabel}, is due on or before ${dueDateLabel}. Please ensure payment is made using the payment details provided below.`;
 }
 
 // Reading/rate changes → recalculate
@@ -8969,7 +8970,8 @@ document.getElementById('water-bill-form')?.addEventListener('submit', async fun
   const billingLabel = new Date(`${billingMonth}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
   const paymentLabel = new Date(`${paymentMonth}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
   const dueDateLabel = new Date(`${paymentMonth}-05T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-  const paymentTerms = `Payment Terms: This water bill is for water consumption during ${billingLabel} and is billed in arrears. Payment is due together with ${paymentLabel} rent on or before ${dueDateLabel}. Payment should be made through the Paybill assigned to the property or the approved payment method used for rent.`;
+  const issueMonthLabel = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const paymentTerms = `Water bill for ${billingLabel}, issued in ${issueMonthLabel}, is due on or before ${dueDateLabel}. Please ensure payment is made using the payment details provided below.`;
 
   const unitsUsed = Number(document.getElementById('wb-curr-reading')?.value || 0) - Number(document.getElementById('wb-prev-reading')?.value || 0);
   const totalAmount = unitsUsed * rate;

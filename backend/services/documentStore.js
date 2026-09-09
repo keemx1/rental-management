@@ -604,32 +604,64 @@ function buildWaterInvoiceHtml(invoice) {
     ? new Date(`${invoice.payment_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' })
     : '';
 
+  const issueMonthLabel = new Date(invoice.created_at).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
   const dueDateLabel = invoice.due_date
     ? new Date(invoice.due_date + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
     : 'N/A';
 
-  const notesHtml = invoice.notes
-    ? `<div class="note-box" style="text-align: left; white-space: pre-wrap;">${invoice.notes}</div>`
-    : '';
+  const dueDateOrdinal = invoice.due_date
+    ? (() => { const d = new Date(invoice.due_date + 'T12:00:00'); const day = d.getDate(); const suffix = ['th','st','nd','rd'][(day % 100 > 10 && day % 100 < 14) ? 0 : Math.min(day % 10, 3)]; return `${day}${suffix} ${d.toLocaleString('en-US', { month: 'long', year: 'numeric' })}`; })()
+    : 'N/A';
+
+  const unitsUsed = Number(invoice.units_used);
+  const ratePerUnit = Number(invoice.rate_per_unit);
+  const totalAmount = Number(invoice.total_amount);
+
+  const paymentTerms = `Water bill for ${billingMonthLabel}, issued in ${issueMonthLabel}, is due on or before ${dueDateOrdinal}. Please ensure payment is made using the payment details provided below.`;
+
+  const unitLabel = invoice.unit_label || invoice.tenant_code || '';
+
+  const paymentTermsHtml = `<strong>Payment Terms</strong><br>${paymentTerms}`;
+
+  const house = invoice.house || {};
+  const paymentMethod = (house.payment_method || 'paybill').toLowerCase();
+  let modeOfPayment = '';
+  if (paymentMethod === 'paybill' && house.payment_paybill) {
+    const acctFormat = house.account_number_format || '';
+    const acctNumber = acctFormat.replace(/\{\{TENANT_CODE\}\}/gi, invoice.tenant_code || '');
+    modeOfPayment = `M-PESA Paybill ${house.payment_paybill}<br>Account Number: ${unitLabel}${acctNumber ? ' (' + acctNumber + ')' : ''}`;
+  } else if (paymentMethod === 'till' && house.till_number) {
+    modeOfPayment = `M-PESA Till ${house.till_number}${house.till_name ? ' (' + house.till_name + ')' : ''}`;
+  } else if (paymentMethod === 'bank') {
+    modeOfPayment = `Bank Transfer<br>Bank: ${house.bank_name || 'N/A'}<br>Account Name: Gutenberg Elite Home & Property Managements<br>Account Number: ${house.bank_account || 'N/A'}`;
+  } else {
+    modeOfPayment = `Payment via ${house.payment_method || 'M-PESA'} — Contact management for payment details.`;
+  }
+
+  const defaultNotes = `Please quote your unit number (${unitLabel}) when making payment and forward the payment confirmation to the management office for updating of your account.`;
+
+  const notesText = invoice.notes || defaultNotes;
 
   return renderTemplate('water_invoice.html', {
     wtr_number: invoice.wtr_number,
     tenant_name: invoice.tenant_name || '',
     property_name: invoice.property_name || '',
-    unit_label: invoice.unit_label || '',
+    unit_label: unitLabel,
     billing_month_label: billingMonthLabel,
     payment_month_label: paymentMonthLabel,
     due_date_label: dueDateLabel,
     date_issued: new Date(invoice.created_at).toISOString().slice(0, 10),
     previous_reading: Number(invoice.previous_reading).toFixed(2),
     current_reading: Number(invoice.current_reading).toFixed(2),
-    units_used: Number(invoice.units_used).toFixed(2),
-    rate_per_unit: Number(invoice.rate_per_unit).toFixed(2),
-    total_amount: Number(invoice.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    units_used: unitsUsed.toFixed(2),
+    rate_per_unit: ratePerUnit.toFixed(2),
+    total_amount: totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 }),
     status: invoice.status,
     status_class: statusClass,
-    payment_terms: invoice.payment_terms || 'Payment is due on the indicated due date.',
-    notes_html: notesHtml,
+    payment_terms: paymentTermsHtml,
+    mode_of_payment: modeOfPayment,
+    notes_text: notesText,
   });
 }
 
@@ -637,6 +669,10 @@ async function generateAndStoreWaterInvoice(id, actor) {
   try {
     const invoice = await store.getWaterInvoice(id);
     if (!invoice) return null;
+
+    if (invoice.house_paybill_number) {
+      try { invoice.house = await store.getHouse(invoice.house_paybill_number); } catch (_) {}
+    }
 
     const filename = waterInvoiceDocumentName({
       wtrNumber: invoice.wtr_number,
