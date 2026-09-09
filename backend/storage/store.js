@@ -5526,13 +5526,25 @@ async function createWaterInvoice(data) {
   const wtrNumber = await generateWaterInvoiceNumber();
   const unitsUsed = Number(data.current_reading || 0) - Number(data.previous_reading || 0);
   if (unitsUsed < 0) throw new Error('Current reading must be >= previous reading');
-  const totalAmount = unitsUsed * Number(data.rate_per_unit || 0);
+  const waterBill = unitsUsed * Number(data.rate_per_unit || 0);
+  const rentAmount = Number(data.rent_amount || 0);
+  const garbageFee = Number(data.garbage_fee || 0);
+  const rentArrears = Number(data.rent_arrears || 0);
+  const waterArrears = Number(data.water_arrears || 0);
+  const garbageArrears = Number(data.garbage_arrears || 0);
+  const otherArrears = Number(data.other_arrears || 0);
+  const totalPreviousOutstanding = rentArrears + waterArrears + garbageArrears + otherArrears;
+  const totalCurrentCharges = rentAmount + waterBill + garbageFee;
+  const totalAmountPayable = totalCurrentCharges + totalPreviousOutstanding;
+  const totalAmount = totalAmountPayable;
   const res = await query(
     `INSERT INTO water_invoices
        (wtr_number, tenant_code, tenant_name, property_name, house_paybill_number,
         unit_label, billing_month, payment_month, previous_reading, current_reading,
-        units_used, rate_per_unit, total_amount, due_date, status, payment_terms, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        units_used, rate_per_unit, total_amount, due_date, status, payment_terms, notes,
+        rent_amount, garbage_fee, rent_arrears, water_arrears, garbage_arrears, other_arrears,
+        total_previous_outstanding, total_amount_payable)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
      RETURNING *`,
     [
       wtrNumber, data.tenant_code, data.tenant_name || '', data.property_name || '',
@@ -5541,6 +5553,8 @@ async function createWaterInvoice(data) {
       Number(data.previous_reading || 0), Number(data.current_reading || 0),
       unitsUsed, Number(data.rate_per_unit || 0), totalAmount,
       data.due_date || null, data.status || 'Draft', data.payment_terms || null, data.notes || null,
+      rentAmount, garbageFee, rentArrears, waterArrears, garbageArrears, otherArrears,
+      totalPreviousOutstanding, totalAmountPayable,
     ]
   );
   return res.rows[0];
@@ -5580,10 +5594,19 @@ async function updateWaterInvoice(id, patch) {
     previous_reading: patch.previous_reading != null ? Number(patch.previous_reading) : Number(existing.previous_reading),
     current_reading: patch.current_reading != null ? Number(patch.current_reading) : Number(existing.current_reading),
     rate_per_unit: patch.rate_per_unit != null ? Number(patch.rate_per_unit) : Number(existing.rate_per_unit),
+    rent_amount: patch.rent_amount != null ? Number(patch.rent_amount) : Number(existing.rent_amount),
+    garbage_fee: patch.garbage_fee != null ? Number(patch.garbage_fee) : Number(existing.garbage_fee),
+    rent_arrears: patch.rent_arrears != null ? Number(patch.rent_arrears) : Number(existing.rent_arrears),
+    water_arrears: patch.water_arrears != null ? Number(patch.water_arrears) : Number(existing.water_arrears),
+    garbage_arrears: patch.garbage_arrears != null ? Number(patch.garbage_arrears) : Number(existing.garbage_arrears),
+    other_arrears: patch.other_arrears != null ? Number(patch.other_arrears) : Number(existing.other_arrears),
   };
   const unitsUsed = prev.current_reading - prev.previous_reading;
   if (unitsUsed < 0) throw new Error('Current reading must be >= previous reading');
-  const totalAmount = unitsUsed * prev.rate_per_unit;
+  const waterBill = unitsUsed * prev.rate_per_unit;
+  const totalPreviousOutstanding = prev.rent_arrears + prev.water_arrears + prev.garbage_arrears + prev.other_arrears;
+  const totalCurrentCharges = prev.rent_amount + waterBill + prev.garbage_fee;
+  const totalAmountPayable = totalCurrentCharges + totalPreviousOutstanding;
 
   const fields = [];
   const vals = [];
@@ -5597,7 +5620,15 @@ async function updateWaterInvoice(id, patch) {
   fields.push(`current_reading = $${idx++}`); vals.push(prev.current_reading);
   fields.push(`units_used = $${idx++}`); vals.push(unitsUsed);
   fields.push(`rate_per_unit = $${idx++}`); vals.push(prev.rate_per_unit);
-  fields.push(`total_amount = $${idx++}`); vals.push(totalAmount);
+  fields.push(`rent_amount = $${idx++}`); vals.push(prev.rent_amount);
+  fields.push(`garbage_fee = $${idx++}`); vals.push(prev.garbage_fee);
+  fields.push(`rent_arrears = $${idx++}`); vals.push(prev.rent_arrears);
+  fields.push(`water_arrears = $${idx++}`); vals.push(prev.water_arrears);
+  fields.push(`garbage_arrears = $${idx++}`); vals.push(prev.garbage_arrears);
+  fields.push(`other_arrears = $${idx++}`); vals.push(prev.other_arrears);
+  fields.push(`total_previous_outstanding = $${idx++}`); vals.push(totalPreviousOutstanding);
+  fields.push(`total_amount_payable = $${idx++}`); vals.push(totalAmountPayable);
+  fields.push(`total_amount = $${idx++}`); vals.push(totalAmountPayable);
   fields.push(`updated_at = NOW()`); vals.push(id);
 
   const res = await query(
@@ -5616,7 +5647,7 @@ async function voidWaterInvoice(id, reason) {
 }
 
 async function deleteWaterInvoice(id) {
-  await query(`DELETE FROM water_invoices WHERE id = $1 AND status = 'Draft'`, [id]);
+  await query(`DELETE FROM water_invoices WHERE id = $1 AND status NOT IN ('Paid','Void')`, [id]);
 }
 
 async function getWaterRate(housePaybill) {
@@ -5663,6 +5694,16 @@ async function findTenantByPropertyAndUnit(housePaybill, unitLabel) {
      ORDER BY CASE WHEN t.unit_label = $2 THEN 0 ELSE 1 END
      LIMIT 1`,
     [housePaybill, unitLabel]
+  );
+  return res.rows[0] || null;
+}
+
+async function getTenantInvoiceData(tenantCode) {
+  const res = await query(
+    `SELECT tenant_code, name, property_name, unit_label, house_paybill_number,
+            rent_amount, garbage_fee_amount, arrears, arrears_manually_set
+     FROM tenants WHERE tenant_code = $1`,
+    [tenantCode]
   );
   return res.rows[0] || null;
 }
@@ -5862,4 +5903,5 @@ module.exports = {
   getWaterRateHistory,
   getLatestWaterReading,
   findTenantByPropertyAndUnit,
+  getTenantInvoiceData,
 };

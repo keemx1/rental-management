@@ -606,23 +606,26 @@ function buildWaterInvoiceHtml(invoice) {
 
   const issueMonthLabel = new Date(invoice.created_at).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
-  const dueDateLabel = invoice.due_date
-    ? new Date(invoice.due_date + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
-    : 'N/A';
-
   const dueDateOrdinal = invoice.due_date
     ? (() => { const d = new Date(invoice.due_date + 'T12:00:00'); const day = d.getDate(); const suffix = ['th','st','nd','rd'][(day % 100 > 10 && day % 100 < 14) ? 0 : Math.min(day % 10, 3)]; return `${day}${suffix} ${d.toLocaleString('en-US', { month: 'long', year: 'numeric' })}`; })()
     : 'N/A';
 
   const unitsUsed = Number(invoice.units_used);
   const ratePerUnit = Number(invoice.rate_per_unit);
-  const totalAmount = Number(invoice.total_amount);
+  const waterBill = unitsUsed * ratePerUnit;
+  const rentAmount = Number(invoice.rent_amount || 0);
+  const garbageFee = Number(invoice.garbage_fee || 0);
+  const totalCurrentCharges = rentAmount + waterBill + garbageFee;
+  const rentArrears = Number(invoice.rent_arrears || 0);
+  const waterArrears = Number(invoice.water_arrears || 0);
+  const garbageArrears = Number(invoice.garbage_arrears || 0);
+  const otherArrears = Number(invoice.other_arrears || 0);
+  const totalPreviousOutstanding = rentArrears + waterArrears + garbageArrears + otherArrears;
+  const totalAmountPayable = totalCurrentCharges + totalPreviousOutstanding;
 
   const paymentTerms = `Water bill for ${billingMonthLabel}, issued in ${issueMonthLabel}, is due on or before ${dueDateOrdinal}. Please ensure payment is made using the payment details provided below.`;
 
   const unitLabel = invoice.unit_label || invoice.tenant_code || '';
-
-  const paymentTermsHtml = `<strong>Payment Terms</strong><br>${paymentTerms}`;
 
   const house = invoice.house || {};
   const paymentMethod = (house.payment_method || 'paybill').toLowerCase();
@@ -639,7 +642,7 @@ function buildWaterInvoiceHtml(invoice) {
     modeOfPayment = `Payment via ${house.payment_method || 'M-PESA'} — Contact management for payment details.`;
   }
 
-  const defaultNotes = `Please quote your unit number (${unitLabel}) when making payment and forward the payment confirmation to the management office for updating of your account.`;
+  const defaultNotes = `Water charges for ${billingMonthLabel} are calculated from the recorded meter readings using the applicable water rate of KSh ${ratePerUnit.toLocaleString('en-US', { minimumFractionDigits: 2 })} per unit. Total consumption recorded is ${unitsUsed} units, resulting in a water bill of KSh ${waterBill.toLocaleString('en-US', { minimumFractionDigits: 2 })}. This invoice also includes the applicable rent, garbage fee and any previous outstanding balance.`;
 
   const notesText = invoice.notes || defaultNotes;
 
@@ -650,16 +653,26 @@ function buildWaterInvoiceHtml(invoice) {
     unit_label: unitLabel,
     billing_month_label: billingMonthLabel,
     payment_month_label: paymentMonthLabel,
-    due_date_label: dueDateLabel,
+    due_date_label: dueDateOrdinal,
     date_issued: new Date(invoice.created_at).toISOString().slice(0, 10),
     previous_reading: Number(invoice.previous_reading).toFixed(2),
     current_reading: Number(invoice.current_reading).toFixed(2),
     units_used: unitsUsed.toFixed(2),
     rate_per_unit: ratePerUnit.toFixed(2),
-    total_amount: totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    rent_amount: rentAmount.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    garbage_fee: garbageFee.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    water_bill: waterBill.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    total_current_charges: totalCurrentCharges.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    rent_arrears: rentArrears.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    water_arrears: waterArrears.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    garbage_arrears: garbageArrears.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    other_arrears: otherArrears.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    total_previous_outstanding: totalPreviousOutstanding.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    total_amount_payable: totalAmountPayable.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    total_amount: totalAmountPayable.toLocaleString('en-US', { minimumFractionDigits: 2 }),
     status: invoice.status,
     status_class: statusClass,
-    payment_terms: paymentTermsHtml,
+    payment_terms: paymentTerms,
     mode_of_payment: modeOfPayment,
     notes_text: notesText,
   });

@@ -28,7 +28,9 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { tenant_code, billing_month, payment_month, previous_reading, current_reading, due_date, payment_terms, notes } = req.body || {};
+    const { tenant_code, billing_month, payment_month, previous_reading, current_reading,
+            due_date, payment_terms, notes, rent_amount, garbage_fee,
+            rent_arrears, water_arrears, garbage_arrears, other_arrears } = req.body || {};
     if (!tenant_code) return res.status(400).json({ error: 'tenant_code required' });
     if (!billing_month) return res.status(400).json({ error: 'billing_month required' });
 
@@ -55,6 +57,12 @@ router.post('/', async (req, res) => {
       due_date: due_date || null,
       payment_terms: payment_terms || null,
       notes: notes || null,
+      rent_amount: rent_amount != null ? Number(rent_amount) : Number(tenant.rent_amount || 0),
+      garbage_fee: garbage_fee != null ? Number(garbage_fee) : 0,
+      rent_arrears: rent_arrears != null ? Number(rent_arrears) : 0,
+      water_arrears: water_arrears != null ? Number(water_arrears) : 0,
+      garbage_arrears: garbage_arrears != null ? Number(garbage_arrears) : 0,
+      other_arrears: other_arrears != null ? Number(other_arrears) : 0,
     });
 
     await store.logAudit({
@@ -244,7 +252,8 @@ router.get('/find-tenant/:housePaybill/:unitLabel', async (req, res) => {
   try {
     const tenant = await store.findTenantByPropertyAndUnit(req.params.housePaybill, req.params.unitLabel);
     if (!tenant) return res.status(404).json({ error: 'No active tenant found for this property and unit' });
-    res.json({ tenant });
+    const full = await store.getTenantInvoiceData(tenant.tenant_code);
+    res.json({ tenant: { ...tenant, ...full } });
   } catch (err) {
     res.status(500).json({ error: 'Failed to find tenant' });
   }

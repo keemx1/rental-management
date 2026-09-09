@@ -67,7 +67,7 @@
       margin-bottom: 8px;
     }
     .inv-title {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 700;
       color: #1a4b8c;
     }
@@ -99,12 +99,6 @@
       font-weight: 700;
       margin-bottom: 2px;
     }
-    .grid-2col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
     .grid-4col {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -132,13 +126,15 @@
       font-size: 11px;
       font-weight: 700;
       color: #1a4b8c;
-      margin: 8px 0 4px 0;
+      margin: 10px 0 4px 0;
       text-transform: uppercase;
+      border-bottom: 2px solid #1a4b8c;
+      padding-bottom: 2px;
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
     th {
       background: #1a4b8c;
@@ -176,7 +172,7 @@
       text-align: right;
       font-weight: 700;
     }
-    .totals-table tr.grand td:last-child {
+    .totals-table tr.grand td {
       background: #1a4b8c;
       color: white;
       font-weight: 700;
@@ -213,7 +209,6 @@
       background: #f0f0ff;
       font-size: 10px;
       color: #4338ca;
-      text-align: center;
     }
     .status-badge {
       display: inline-block;
@@ -254,6 +249,20 @@
       font-style: italic;
       color: #555;
     }
+    .grand-total-row td {
+      background: #1a4b8c !important;
+      color: white !important;
+      font-weight: 700 !important;
+      font-size: 12px !important;
+      text-align: right !important;
+    }
+    .outstanding-table td {
+      background: #fff5f5 !important;
+    }
+    .outstanding-table tr:last-child td {
+      background: #fee2e2 !important;
+      font-weight: 700 !important;
+    }
   </style>
 </head>
 <body>
@@ -270,7 +279,7 @@
   <div class="separator-bar"></div>
 
   <div class="inv-header">
-    <div class="inv-title">MONTHLY WATER BILL INVOICE</div>
+    <div class="inv-title">MONTHLY RENT & UTILITY INVOICE</div>
     <div class="inv-date">{{date_issued}}</div>
   </div>
 
@@ -314,7 +323,24 @@
     </div>
   </div>
 
-  <div class="section-label">Water Consumption Details</div>
+  <!-- ======================== CURRENT CHARGES ======================== -->
+  <div class="section-label">Current Charges</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Description</th>
+        <th style="text-align: right;">Amount (KES)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Monthly Rent</td>
+        <td style="text-align: right; font-weight: 700;">{{rent_amount}}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="section-label" style="margin-top: 6px;">Water Consumption Details</div>
   <table>
     <thead>
       <tr>
@@ -343,35 +369,92 @@
   </table>
 
   <div class="calc-box">
-    <div class="calc-title">Calculation</div>
+    <div class="calc-title">Water Bill Calculation</div>
     <div class="calc-formula">
       {{current_reading}} <span class="op">&minus;</span> {{previous_reading}} <span class="op">=</span> {{units_used}} units<br>
-      {{units_used}} <span class="op">&times;</span> KES {{rate_per_unit}} <span class="op">=</span> <strong>KES {{total_amount}}</strong>
+      {{units_used}} <span class="op">&times;</span> KES {{rate_per_unit}} <span class="op">=</span> <strong>KES {{water_bill}}</strong>
     </div>
   </div>
+
+  <table>
+    <tbody>
+      <tr>
+        <td>Water Bill</td>
+        <td style="text-align: right; font-weight: 700;">{{water_bill}}</td>
+      </tr>
+      <tr>
+        <td>Garbage Fee</td>
+        <td style="text-align: right; font-weight: 700;">{{garbage_fee}}</td>
+      </tr>
+    </tbody>
+  </table>
 
   <div class="totals-area">
     <div>
       <table class="totals-table">
         <tr>
-          <td>UNITS USED</td>
-          <td>{{units_used}} units</td>
-        </tr>
-        <tr>
-          <td>RATE PER UNIT</td>
-          <td>KES {{rate_per_unit}}</td>
-        </tr>
-        <tr class="grand">
-          <td>TOTAL WATER BILL</td>
-          <td>KES {{total_amount}}</td>
+          <td>TOTAL CURRENT CHARGES</td>
+          <td>{{total_current_charges}}</td>
         </tr>
       </table>
     </div>
   </div>
 
-  {{notes_html}}
+  <!-- ======================== PREVIOUS OUTSTANDING ======================== -->
+  <div class="section-label" style="margin-top: 12px;">Previous Outstanding Balance</div>
+  <table class="outstanding-table">
+    <thead>
+      <tr>
+        <th>Category</th>
+        <th style="text-align: right;">Amount (KES)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Rent Arrears</td>
+        <td style="text-align: right; font-weight: 700;">{{rent_arrears}}</td>
+      </tr>
+      <tr>
+        <td>Water Arrears</td>
+        <td style="text-align: right; font-weight: 700;">{{water_arrears}}</td>
+      </tr>
+      <tr>
+        <td>Garbage Arrears</td>
+        <td style="text-align: right; font-weight: 700;">{{garbage_arrears}}</td>
+      </tr>
+      <tr>
+        <td>Other Outstanding</td>
+        <td style="text-align: right; font-weight: 700;">{{other_arrears}}</td>
+      </tr>
+      <tr>
+        <td><strong>TOTAL PREVIOUS OUTSTANDING</strong></td>
+        <td style="text-align: right; font-weight: 700;">{{total_previous_outstanding}}</td>
+      </tr>
+    </tbody>
+  </table>
 
-  <div class="note-box">
+  <!-- ======================== GRAND TOTAL ======================== -->
+  <div class="totals-area" style="margin-top: 12px;">
+    <div>
+      <table class="totals-table">
+        <tr>
+          <td>TOTAL CURRENT CHARGES</td>
+          <td>{{total_current_charges}}</td>
+        </tr>
+        <tr>
+          <td>TOTAL PREVIOUS OUTSTANDING</td>
+          <td>{{total_previous_outstanding}}</td>
+        </tr>
+        <tr class="grand">
+          <td>TOTAL AMOUNT PAYABLE</td>
+          <td>KES {{total_amount_payable}}</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ======================== PAYMENT TERMS ======================== -->
+  <div class="note-box" style="margin-top: 14px;">
     <strong>Payment Terms</strong><br>
     {{payment_terms}}
   </div>

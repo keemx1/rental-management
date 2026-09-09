@@ -2370,7 +2370,7 @@
         <!-- Water Bill Form View (Create/Edit) -->
         <div id="wb-form-view" class="hidden">
           <div class="max-w-4xl mx-auto glass-panel p-6">
-            <h3 class="text-lg font-semibold text-white mb-4" id="wb-form-title">New Water Bill Invoice</h3>
+            <h3 class="text-lg font-semibold text-white mb-4" id="wb-form-title">New Monthly Rent & Utility Invoice</h3>
             <form id="water-bill-form" class="space-y-4">
               <input type="hidden" id="wb-form-id" />
               <input type="hidden" id="wb-form-tenant-code" />
@@ -2409,50 +2409,101 @@
                 </div>
               </div>
 
-              <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div>
-                  <label class="form-label">Water Rate (KES/unit)</label>
-                  <input type="number" id="wb-rate" class="cyber-input" min="0" step="0.01" />
-                </div>
-                <div>
-                  <label class="form-label">Previous Reading</label>
-                  <input type="number" id="wb-prev-reading" class="cyber-input" min="0" step="0.01" />
-                </div>
-                <div>
-                  <label class="form-label">Current Reading *</label>
-                  <input type="number" id="wb-curr-reading" class="cyber-input" min="0" step="0.01" required />
-                </div>
-                <div class="flex items-end">
-                  <div class="bg-slate-800/50 rounded-lg p-3 w-full">
-                    <div class="text-xs text-slate-400">Units Used</div>
-                    <div class="text-lg font-bold text-cyan-400" id="wb-units-display">0</div>
+              <!-- Current Charges -->
+              <div class="border border-cyan-800 rounded-lg p-4 bg-cyan-950/20">
+                <div class="text-xs font-semibold text-cyan-400 uppercase mb-3">Current Charges</div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label class="form-label">Monthly Rent (KES)</label>
+                    <input type="number" id="wb-rent-amount" class="cyber-input" min="0" step="0.01" />
+                  </div>
+                  <div>
+                    <label class="form-label">Garbage Fee (KES)</label>
+                    <input type="number" id="wb-garbage-fee" class="cyber-input" min="0" step="0.01" />
+                  </div>
+                  <div class="flex items-end">
+                    <div class="bg-emerald-900/30 border border-emerald-600 rounded-lg p-3 w-full">
+                      <div class="text-xs text-emerald-300">Total Current Charges</div>
+                      <div class="text-lg font-bold text-emerald-400" id="wb-current-charges-display">KES 0</div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div class="flex items-end">
-                  <div class="bg-emerald-900/30 border border-emerald-600 rounded-lg p-3 w-full">
-                    <div class="text-xs text-emerald-300">Total Water Bill</div>
-                    <div class="text-lg font-bold text-emerald-400" id="wb-total-display">KES 0</div>
+              <!-- Water Consumption -->
+              <div class="border border-slate-700 rounded-lg p-4 bg-slate-900/30">
+                <div class="text-xs font-semibold text-slate-400 uppercase mb-3">Water Consumption Details</div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label class="form-label">Water Rate (KES/unit)</label>
+                    <input type="number" id="wb-rate" class="cyber-input" min="0" step="0.01" />
                   </div>
-                </div>
-                <div class="md:col-span-2 flex items-end">
-                  <div class="bg-slate-800/30 rounded-lg p-3 w-full">
-                    <div class="text-xs text-slate-400 mb-1">Payment Terms</div>
-                    <div class="text-xs text-slate-300" id="wb-payment-terms">—</div>
+                  <div>
+                    <label class="form-label">Previous Reading</label>
+                    <input type="number" id="wb-prev-reading" class="cyber-input" min="0" step="0.01" />
+                  </div>
+                  <div>
+                    <label class="form-label">Current Reading *</label>
+                    <input type="number" id="wb-curr-reading" class="cyber-input" min="0" step="0.01" required />
+                  </div>
+                  <div class="flex items-end">
+                    <div class="bg-slate-800/50 rounded-lg p-3 w-full">
+                      <div class="text-xs text-slate-400">Units Used</div>
+                      <div class="text-lg font-bold text-cyan-400" id="wb-units-display">0</div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div>
-                <label class="form-label">Notes (optional)</label>
-                <textarea id="wb-notes" class="cyber-input" rows="2" placeholder="Additional notes..."></textarea>
+              <!-- Previous Outstanding -->
+              <div class="border border-amber-800 rounded-lg p-4 bg-amber-950/20">
+                <div class="text-xs font-semibold text-amber-400 uppercase mb-3">Previous Outstanding Balance</div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label class="form-label">Rent Arrears (KES)</label>
+                    <input type="number" id="wb-rent-arrears" class="cyber-input" min="0" step="0.01" />
+                  </div>
+                  <div>
+                    <label class="form-label">Water Arrears (KES)</label>
+                    <input type="number" id="wb-water-arrears" class="cyber-input" min="0" step="0.01" />
+                  </div>
+                  <div>
+                    <label class="form-label">Garbage Arrears (KES)</label>
+                    <input type="number" id="wb-garbage-arrears" class="cyber-input" min="0" step="0.01" />
+                  </div>
+                  <div>
+                    <label class="form-label">Other Arrears (KES)</label>
+                    <input type="number" id="wb-other-arrears" class="cyber-input" min="0" step="0.01" />
+                  </div>
+                </div>
+                <div class="flex justify-end mt-3">
+                  <div class="bg-amber-900/30 border border-amber-600 rounded-lg p-3">
+                    <div class="text-xs text-amber-300">Total Previous Outstanding</div>
+                    <div class="text-lg font-bold text-amber-400" id="wb-outstanding-display">KES 0</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Grand Total -->
+              <div class="bg-slate-800/50 border-2 border-cyan-600 rounded-lg p-4 text-center">
+                <div class="text-xs text-slate-400 mb-1">TOTAL AMOUNT PAYABLE</div>
+                <div class="text-2xl font-bold text-cyan-400" id="wb-grand-total-display">KES 0</div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-slate-800/30 rounded-lg p-3">
+                  <div class="text-xs text-slate-400 mb-1">Payment Terms</div>
+                  <div class="text-xs text-slate-300" id="wb-payment-terms">—</div>
+                </div>
+                <div>
+                  <label class="form-label">Notes (optional)</label>
+                  <textarea id="wb-notes" class="cyber-input" rows="2" placeholder="Additional notes..."></textarea>
+                </div>
               </div>
 
               <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
                 <button type="button" class="action-btn" id="btn-cancel-water-bill">Cancel</button>
-                <button type="submit" class="qc-btn qc-btn-primary" id="wb-form-submit">Save Water Bill</button>
+                <button type="submit" class="qc-btn qc-btn-primary" id="wb-form-submit">Save Invoice</button>
               </div>
               <p id="wb-form-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
             </form>
@@ -2462,7 +2513,7 @@
         <!-- Water Bill Review Modal -->
         <div id="wb-review-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" style="display:none;">
           <div class="glass-panel p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
-            <h3 class="text-lg font-semibold text-white mb-4">Review Water Bill Invoice</h3>
+            <h3 class="text-lg font-semibold text-white mb-4">Review Monthly Rent & Utility Invoice</h3>
             <div id="wb-review-content" class="space-y-3 text-sm"></div>
             <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-800">
               <button type="button" class="action-btn" id="btn-close-wb-review">Back to Edit</button>
@@ -2474,7 +2525,7 @@
         <!-- Water Bill Detail Modal -->
         <div id="wb-detail-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" style="display:none;">
           <div class="glass-panel p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
-            <h3 class="text-lg font-semibold text-white mb-4" id="wb-detail-title">Water Bill Invoice</h3>
+            <h3 class="text-lg font-semibold text-white mb-4" id="wb-detail-title">Monthly Rent & Utility Invoice</h3>
             <div id="wb-detail-content" class="space-y-3 text-sm"></div>
             <div id="wb-detail-payment-terms" class="bg-slate-800/30 rounded p-3 text-xs text-slate-300 mt-3 hidden"></div>
             <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-800">
@@ -4635,10 +4686,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=15"></script>
+  <script type="module" src="/js/app.js?v=16"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=15').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=16').catch(() => {});
     }
     document.querySelector('.app-shell')?.classList.add('login-mode');
   </script>

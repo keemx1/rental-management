@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gutenberg-v15';
+const CACHE_NAME = 'gutenberg-v16';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
