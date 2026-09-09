@@ -8918,8 +8918,10 @@ function updateWaterBillArrears() {
   const paymentLabel = new Date(`${paymentMonth}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   document.getElementById('wb-payment-month').value = paymentLabel;
-  document.getElementById('wb-due-date-display').value = new Date(dueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-  document.getElementById('wb-payment-terms').textContent = `Payment Terms: This water bill is for consumption during ${billingLabel} and is billed in arrears. The amount due is payable together with ${paymentLabel} rent on or before the 5th of ${paymentLabel}.`;
+  const dueDateObj = new Date(`${paymentMonth}-05T12:00:00`);
+  const dueDateLabel = dueDateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  document.getElementById('wb-due-date-display').value = dueDateLabel;
+  document.getElementById('wb-payment-terms').textContent = `Payment Terms: This water bill is for water consumption during ${billingLabel} and is billed in arrears. Payment is due together with ${paymentLabel} rent on or before ${dueDateLabel}. Payment should be made through the Paybill assigned to the property or the approved payment method used for rent.`;
 }
 
 // Reading/rate changes → recalculate
@@ -8966,7 +8968,12 @@ document.getElementById('water-bill-form')?.addEventListener('submit', async fun
   const dueDate = `${paymentMonth}-05`;
   const billingLabel = new Date(`${billingMonth}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
   const paymentLabel = new Date(`${paymentMonth}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  const paymentTerms = `Payment Terms: This water bill is for consumption during ${billingLabel} and is billed in arrears. The amount due is payable together with ${paymentLabel} rent on or before the 5th of ${paymentLabel}.`;
+  const dueDateLabel = new Date(`${paymentMonth}-05T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const paymentTerms = `Payment Terms: This water bill is for water consumption during ${billingLabel} and is billed in arrears. Payment is due together with ${paymentLabel} rent on or before ${dueDateLabel}. Payment should be made through the Paybill assigned to the property or the approved payment method used for rent.`;
+
+  const unitsUsed = Number(document.getElementById('wb-curr-reading')?.value || 0) - Number(document.getElementById('wb-prev-reading')?.value || 0);
+  const totalAmount = unitsUsed * rate;
+  const autoNotes = `Notes: Water charges for ${billingLabel} are calculated from the recorded water meter readings using the applicable water rate of KSh ${rate} per unit. Total consumption recorded is ${unitsUsed} units, resulting in a water bill of KSh ${totalAmount.toLocaleString()}.`;
 
   const body = {
     tenant_code: waterBillCurrentTenant.tenant_code,
@@ -8977,7 +8984,7 @@ document.getElementById('water-bill-form')?.addEventListener('submit', async fun
     rate_per_unit: rate,
     due_date: dueDate,
     payment_terms: paymentTerms,
-    notes: document.getElementById('wb-notes')?.value || null,
+    notes: document.getElementById('wb-notes')?.value?.trim() || autoNotes,
   };
   const id = document.getElementById('wb-form-id')?.value;
   try {
