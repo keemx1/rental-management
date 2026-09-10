@@ -2524,11 +2524,11 @@
 
         <!-- Water Bill Detail Modal -->
         <div id="wb-detail-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" style="display:none;">
-          <div class="glass-panel p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
-            <h3 class="text-lg font-semibold text-white mb-4" id="wb-detail-title">Monthly Rent & Utility Invoice</h3>
+          <div class="bg-white rounded-lg shadow-2xl p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+            <h3 class="text-lg font-bold text-gray-900 mb-4" id="wb-detail-title">Monthly Rent & Utility Invoice</h3>
             <div id="wb-detail-content" class="space-y-3 text-sm"></div>
-            <div id="wb-detail-payment-terms" class="bg-slate-800/30 rounded p-3 text-xs text-slate-300 mt-3 hidden"></div>
-            <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-800">
+            <div id="wb-detail-payment-terms" class="bg-gray-50 border border-gray-200 rounded p-3 text-xs text-gray-800 mt-3 hidden"></div>
+            <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-200">
               <button type="button" class="action-btn" id="btn-close-wb-detail">Close</button>
               <button type="button" class="qc-btn qc-btn-primary text-sm" id="btn-download-wb">Download PDF</button>
               <button type="button" class="qc-btn text-sm" id="btn-send-wb" style="background:#25d366;color:white;">Send via WhatsApp</button>
@@ -4686,10 +4686,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=16"></script>
+  <script type="module" src="/js/app.js?v=17"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=16').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=17').catch(() => {});
     }
     document.querySelector('.app-shell')?.classList.add('login-mode');
   </script>

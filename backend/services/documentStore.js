@@ -607,7 +607,16 @@ function buildWaterInvoiceHtml(invoice) {
   const issueMonthLabel = new Date(invoice.created_at).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   const dueDateOrdinal = invoice.due_date
-    ? (() => { const d = new Date(invoice.due_date + 'T12:00:00'); const day = d.getDate(); const suffix = ['th','st','nd','rd'][(day % 100 > 10 && day % 100 < 14) ? 0 : Math.min(day % 10, 3)]; return `${day}${suffix} ${d.toLocaleString('en-US', { month: 'long', year: 'numeric' })}`; })()
+    ? (() => {
+        const parts = String(invoice.due_date).split('-');
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10);
+        const day = parseInt(parts[2], 10);
+        if (isNaN(day) || isNaN(month) || isNaN(year)) return 'N/A';
+        const suffix = ['th','st','nd','rd'][(day % 100 > 10 && day % 100 < 14) ? 0 : Math.min(day % 10, 3)];
+        const monthName = ['', 'January','February','March','April','May','June','July','August','September','October','November','December'][month];
+        return `${day}${suffix} ${monthName} ${year}`;
+      })()
     : 'N/A';
 
   const unitsUsed = Number(invoice.units_used);

@@ -9170,6 +9170,16 @@ async function viewWaterInvoice(id) {
     const rate = Number(inv.rate_per_unit).toFixed(2);
     const billingLabel = new Date(`${inv.billing_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
     const paymentLabel = inv.payment_month ? new Date(`${inv.payment_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' }) : '';
+    const dueDateLabel = (() => {
+      if (!inv.due_date) return 'N/A';
+      const p = String(inv.due_date).split('-');
+      if (p.length < 3) return inv.due_date;
+      const day = parseInt(p[2], 10);
+      const month = parseInt(p[1], 10);
+      const year = parseInt(p[0], 10);
+      const months = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
+      return `${day} ${months[month]} ${year}`;
+    })();
     const statusClass = { Draft: 'text-amber-400', Finalized: 'text-blue-400', Sent: 'text-green-400', Paid: 'text-green-300', Void: 'text-rose-400' }[inv.status] || 'text-slate-400';
     const fmt = (v) => `KES ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
     const waterBill = Number(inv.units_used) * Number(inv.rate_per_unit);
@@ -9186,41 +9196,41 @@ async function viewWaterInvoice(id) {
     document.getElementById('wb-detail-title').textContent = `Monthly Rent & Utility Invoice — ${inv.wtr_number}`;
     document.getElementById('wb-detail-content').innerHTML = `
       <div class="grid grid-cols-2 gap-3">
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Invoice No:</span> <span class="text-white font-mono">${escapeHtml(inv.wtr_number)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Status:</span> <span class="${statusClass} font-semibold">${escapeHtml(inv.status)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Tenant:</span> <span class="text-white font-semibold">${escapeHtml(inv.tenant_name)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Property:</span> <span class="text-white">${escapeHtml(inv.property_name)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Unit:</span> <span class="text-white">${escapeHtml(inv.unit_label)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Billing Month:</span> <span class="text-white">${escapeHtml(billingLabel)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Payment Month:</span> <span class="text-white">${escapeHtml(paymentLabel)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Due Date:</span> <span class="text-white">${inv.due_date || 'N/A'}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Invoice No:</span><br><span class="text-black font-mono font-semibold">${escapeHtml(inv.wtr_number)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Status:</span><br><span class="${statusClass} font-semibold">${escapeHtml(inv.status)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Tenant:</span><br><span class="text-black font-semibold">${escapeHtml(inv.tenant_name)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Property:</span><br><span class="text-black">${escapeHtml(inv.property_name)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Unit:</span><br><span class="text-black">${escapeHtml(inv.unit_label)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Billing Month:</span><br><span class="text-black">${escapeHtml(billingLabel)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Payment Month:</span><br><span class="text-black">${escapeHtml(paymentLabel)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Due Date:</span><br><span class="text-black">${dueDateLabel}</span></div>
       </div>
 
-      <div class="text-xs font-semibold text-cyan-400 uppercase mt-3 mb-2">Current Charges</div>
+      <div class="text-xs font-bold text-blue-700 uppercase mt-3 mb-2 border-b-2 border-blue-700 pb-1">Current Charges</div>
       <div class="grid grid-cols-2 gap-3">
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Rent:</span> <span class="text-white font-semibold">${fmt(rentAmount)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Garbage Fee:</span> <span class="text-white font-semibold">${fmt(garbageFee)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Water:</span> <span class="text-cyan-400 font-mono font-bold">${fmt(waterBill)} (${units} units × KES ${rate})</span></div>
-        <div class="bg-cyan-900/30 border border-cyan-600 rounded p-2"><span class="text-cyan-300">Total Current:</span> <span class="text-cyan-400 font-bold">${fmt(totalCurrentCharges)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Rent:</span><br><span class="text-black font-semibold">${fmt(rentAmount)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Garbage Fee:</span><br><span class="text-black font-semibold">${fmt(garbageFee)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Water:</span><br><span class="text-blue-700 font-mono font-bold">${fmt(waterBill)} (${units} units × KES ${rate})</span></div>
+        <div class="bg-blue-50 border-2 border-blue-600 rounded p-2"><span class="text-blue-700 text-xs font-bold">Total Current:</span><br><span class="text-blue-800 font-bold text-lg">${fmt(totalCurrentCharges)}</span></div>
       </div>
 
-      <div class="text-xs font-semibold text-amber-400 uppercase mt-3 mb-2">Previous Outstanding</div>
+      <div class="text-xs font-bold text-amber-700 uppercase mt-3 mb-2 border-b-2 border-amber-600 pb-1">Previous Outstanding</div>
       <div class="grid grid-cols-2 gap-3">
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Rent Arrears:</span> <span class="text-white">${fmt(rentArrears)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Water Arrears:</span> <span class="text-white">${fmt(waterArrears)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Garbage Arrears:</span> <span class="text-white">${fmt(garbageArrears)}</span></div>
-        <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Other Arrears:</span> <span class="text-white">${fmt(otherArrears)}</span></div>
-        <div class="bg-amber-900/30 border border-amber-600 rounded p-2 col-span-2"><span class="text-amber-300">Total Outstanding:</span> <span class="text-amber-400 font-bold">${fmt(totalOutstanding)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Rent Arrears:</span><br><span class="text-black">${fmt(rentArrears)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Water Arrears:</span><br><span class="text-black">${fmt(waterArrears)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Garbage Arrears:</span><br><span class="text-black">${fmt(garbageArrears)}</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Other Arrears:</span><br><span class="text-black">${fmt(otherArrears)}</span></div>
+        <div class="bg-amber-50 border-2 border-amber-500 rounded p-2 col-span-2"><span class="text-amber-700 text-xs font-bold">Total Outstanding:</span><br><span class="text-amber-800 font-bold text-lg">${fmt(totalOutstanding)}</span></div>
       </div>
 
-      <div class="bg-slate-800/50 border-2 border-cyan-600 rounded-lg p-4 text-center mt-3">
-        <div class="text-sm text-slate-300">TOTAL AMOUNT PAYABLE</div>
-        <div class="text-2xl font-bold text-cyan-400">${fmt(grandTotal)}</div>
+      <div class="bg-blue-800 border-2 border-blue-900 rounded-lg p-4 text-center mt-3">
+        <div class="text-sm text-blue-200 font-semibold">TOTAL AMOUNT PAYABLE</div>
+        <div class="text-2xl font-bold text-white">${fmt(grandTotal)}</div>
       </div>
     `;
     const termsDiv = document.getElementById('wb-detail-payment-terms');
     if (inv.payment_terms) {
-      termsDiv.innerHTML = `<strong>Payment Terms</strong><br>${escapeHtml(inv.payment_terms)}`;
+      termsDiv.innerHTML = `<strong>Payment Terms:</strong> ${escapeHtml(inv.payment_terms)}`;
       termsDiv.classList.remove('hidden');
     } else {
       termsDiv.classList.add('hidden');
