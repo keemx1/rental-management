@@ -174,7 +174,7 @@ router.post('/:id/skip-overpayment', async (req, res) => {
 
 function parseMpesaMessage(raw) {
   const text = String(raw || '').replace(/\s+/g, ' ').trim();
-  const amountMatch = text.match(/([\d,]+(?:\.\d{1,2})?)\s*(?:Ksh|KES)/i) || text.match(/\b(?:Ksh|KES)\s*([\d,]+(?:\.\d{1,2})?)/i);
+  const amountMatch = text.match(/(\d[\d,]*(?:\.\d{1,2})?)\s*(?:Ksh|KES)/i) || text.match(/\b(?:Ksh|KES)\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
   const phoneMatch = text.match(/\b(?:254|0)?7\d{8}\b/);
   const tenantCodeMatch = text.match(/\bT\d{3,}\b/i);
   const houseNumberMatch = text.match(/\b(?:house|unit)\s*[:\-]?\s*([A-Za-z0-9\-]+)\b/i);
