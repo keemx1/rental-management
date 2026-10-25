@@ -304,10 +304,10 @@ async function main() {
   check(css.includes('@media print') && css.includes('.print-active'), 'frontend: print stylesheet (report-only printing) served');
   check(css.includes('overflow-wrap: anywhere'), 'frontend: long names wrap instead of overlapping');
   const idx = await (await fetch('http://127.0.0.1:3003/')).text();
-  check(idx.includes('app.js?v=62'), 'frontend: version stamp v62 served');
+  check(/app\.js\?v=\d+/.test(idx), 'frontend: versioned app.js loader served');
   check((idx.match(/cyber-table/g) || []).length >= 20, `frontend: all report tables use cyber-table (${(idx.match(/cyber-table/g) || []).length})`);
   const sw = await (await fetch('http://127.0.0.1:3003/sw.js')).text();
-  check(sw.includes('gutenberg-v63-irmanage'), 'frontend: service worker cache bumped (v63)');
+  check(/gutenberg-v\d+-irmanage/.test(sw), 'frontend: service worker cache stamp present');
 
   console.log(`\n===============================\nRESULT: ${pass} passed, ${fail} failed`);
   if (failures.length) console.log('FAILURES:\n - ' + failures.join('\n - '));

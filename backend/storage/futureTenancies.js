@@ -249,7 +249,40 @@ async function activateFutureTenancy(futureTenancyId, store) {
     }
 
     let finalTenantCode = tenantCode;
+    // House defaults for the new tenancy's recurring charges — computed once
+    // for BOTH branches (mirrors store.createTenant) so a re-let unit never
+    // inherits the previous tenant's garbage/water amounts.
+    let garbageFeeAmount = 0;
+    let waterChargeAmount = 0;
+    if (ft.house_paybill) {
+      try {
+        const hRes = await run('SELECT house_name, garbage_fee_enabled FROM houses WHERE paybill_number = $1', [ft.house_paybill]);
+        const house = hRes.rows[0];
+        if (house) {
+          if (house.garbage_fee_enabled === true || house.garbage_fee_enabled === 't') garbageFeeAmount = 2000;
+          try {
+            const chRes = await run('SELECT * FROM house_charges WHERE house_paybill = $1 AND enabled = TRUE ORDER BY sort_order, id', [ft.house_paybill]);
+            for (const hc of chRes.rows) {
+              const nm = String(hc.charge_name || '').toLowerCase();
+              if (nm.includes('garbage') && garbageFeeAmount === 0) garbageFeeAmount = Number(hc.amount) || 2000;
+              else if (nm.includes('water') && waterChargeAmount === 0) waterChargeAmount = Number(hc.amount) || 0;
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
+
+    // Permanence: seal any records still bound to the previous tenancy BEFORE
+    // this one takes over the row (vacate already seals; this is the safety
+    // net). The booking payments inserted below stay un-stamped — they belong
+    // to the NEW tenancy (NULL = current live tenancy).
+    if (tenantCode) {
+      try { await store.sealStrayTenancyRows(tenantCode); } catch (_) {}
+    }
+
     if (tenantRow) {
+      // Fresh tenancy starts financially clean: booking amounts REPLACE
+      // (never add to) whatever the previous tenant left on the shared unit row.
       await run(
         'UPDATE tenants SET name = $2, phone_number = $3, national_id = $4,' +
         ' rent_amount = $5, deposit_amount = $6,' +
@@ -257,37 +290,26 @@ async function activateFutureTenancy(futureTenancyId, store) {
         ' property_name = COALESCE($8, property_name),' +
         ' unit_label = COALESCE($9, unit_label),' +
         " status = 'Active', move_in_date = $10, rent_due_date = $11," +
-        ' deposit_paid = COALESCE(deposit_paid, 0) + $12,' +
-        ' rent_paid_this_month = COALESCE(rent_paid_this_month, 0) + $13,' +
-        ' credit_balance = COALESCE(credit_balance, 0) + $14,' +
+        ' deposit_paid = $12, rent_paid_this_month = $13, credit_balance = $14,' +
+        ' garbage_fee_amount = $15, water_charge_amount = $16,' +
+        ' arrears = 0, garbage_fee_paid = 0, water_charge_paid = 0,' +
+        ' advance_rent_until = NULL, advance_rent_balance = 0, opening_advance_rent = 0,' +
+        ' agreement_charge = 0, agreement_paid = 0, agreement_outstanding = 0,' +
+        ' move_out_date = NULL, exit_reason = NULL, notice_to_vacate_date = NULL,' +
         ' updated_at = NOW() WHERE tenant_code = $1',
         [tenantRow.tenant_code, ft.tenant_name, ft.phone_number, ft.national_id || null,
          Number(ft.rent_amount || 0), Number(ft.deposit_amount || 0),
          ft.house_paybill || null, ft.property_name || null, ft.unit_label || null,
-         today, rentDueDate, depositPaid, rentPaid, otherPaid]
+         today, rentDueDate, depositPaid, rentPaid, otherPaid, garbageFeeAmount, waterChargeAmount]
       );
       finalTenantCode = tenantRow.tenant_code;
     } else {
-      // Mirror store.createTenant defaults (garbage/water from house_charges).
-      let garbageFeeAmount = 0;
-      let waterChargeAmount = 0;
       let propertyName = ft.property_name || 'General';
       if (ft.house_paybill) {
         try {
-          const hRes = await run('SELECT house_name, garbage_fee_enabled FROM houses WHERE paybill_number = $1', [ft.house_paybill]);
+          const hRes = await run('SELECT house_name FROM houses WHERE paybill_number = $1', [ft.house_paybill]);
           const house = hRes.rows[0];
-          if (house) {
-            propertyName = house.house_name || propertyName;
-            if (house.garbage_fee_enabled === true || house.garbage_fee_enabled === 't') garbageFeeAmount = 2000;
-            try {
-              const chRes = await run('SELECT * FROM house_charges WHERE house_paybill = $1 AND enabled = TRUE ORDER BY sort_order, id', [ft.house_paybill]);
-              for (const hc of chRes.rows) {
-                const nm = String(hc.charge_name || '').toLowerCase();
-                if (nm.includes('garbage') && garbageFeeAmount === 0) garbageFeeAmount = Number(hc.amount) || 2000;
-                else if (nm.includes('water') && waterChargeAmount === 0) waterChargeAmount = Number(hc.amount) || 0;
-              }
-            } catch (_) {}
-          }
+          if (house) propertyName = house.house_name || propertyName;
         } catch (_) {}
       }
       await run(

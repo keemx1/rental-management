@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v62';
+const GEHM_VERSION = 'v63';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -2186,30 +2186,27 @@ function renderEiActions(invoice) {
   const editActions = document.getElementById('ei-actions-editing');
   const addLineWrap = document.getElementById('ei-add-line');
   const finalized = invoice && invoice.status === 'Finalized';
-  const editing = finalized && window._eiEditing;
+  // Finalized exit invoices are permanent records: the editing state no
+  // longer exists (the server refuses edits/deletes with 409 as well).
+  window._eiEditing = false;
   if (draftActions) draftActions.classList.toggle('hidden', finalized);
-  if (finalActions) finalActions.classList.toggle('hidden', !finalized || editing);
-  if (editActions) editActions.classList.toggle('hidden', !editing);
-  if (addLineWrap) addLineWrap.style.display = (!finalized || editing) ? '' : 'none';
-  // Disable/enable form fields based on editing state
+  if (finalActions) finalActions.classList.toggle('hidden', !finalized);
+  if (editActions) editActions.classList.add('hidden');
+  if (addLineWrap) addLineWrap.style.display = finalized ? 'none' : '';
+  // Disable form fields for finalized invoices
   const fields = ['ei-move-out-date', 'ei-exit-reason', 'ei-pro-rated-days', 'ei-rent-treatment-reason', 'ei-settlement-reason'];
   fields.forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.disabled = finalized && !editing;
+    if (el) el.disabled = finalized;
   });
   document.querySelectorAll('input[name="ei-rent-treatment"], input[name="ei-deposit-treatment"]').forEach(r => {
-    r.disabled = finalized && !editing;
+    r.disabled = finalized;
   });
   setTextEl('ei-number', invoice ? (invoice.exit_number || '—') : 'New Invoice');
   const badge = document.getElementById('ei-status-badge');
   if (badge) {
-    if (editing) {
-      badge.textContent = 'EDITING';
-      badge.className = 'sys-tag text-[10px] text-amber-300';
-    } else {
-      badge.textContent = finalized ? 'FINALIZED' : 'DRAFT';
-      badge.className = 'sys-tag text-[10px] ' + (finalized ? 'text-emerald-300' : 'text-amber-300');
-    }
+    badge.textContent = finalized ? 'FINALIZED' : 'DRAFT';
+    badge.className = 'sys-tag text-[10px] ' + (finalized ? 'text-emerald-300' : 'text-amber-300');
   }
 }
 
@@ -2769,7 +2766,10 @@ async function openArchiveDetail(id) {
 
       ${docs.length ? `<div class="bg-slate-900 border border-slate-700 rounded p-3">
         <p class="text-xs text-slate-500 font-mono mb-2">Documents (${docs.length})</p>
-        <div class="flex flex-wrap gap-2 text-xs font-mono">${docs.map(d => `<span class="bg-slate-800 rounded px-2 py-1">${escapeHtml(d.document_number || d.filename || d.doc_type || '—')}</span>`).join('')}</div>
+        <div class="flex flex-wrap gap-2 text-xs font-mono">${docs.map(d => (d.id && d.file_path)
+          ? `<button type="button" class="bg-slate-800 rounded px-2 py-1 text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline" data-doc-dl="${d.id}" title="Download this tenancy's document">${escapeHtml(d.doc_number || d.filename || d.doc_type || 'Document')} ⬇</button>`
+          : `<span class="bg-slate-800 rounded px-2 py-1">${escapeHtml(d.doc_number || d.document_number || d.filename || d.doc_type || '—')}</span>`
+        ).join('')}</div>
       </div>` : ''}
 
       ${stmts.length ? `<div class="bg-slate-900 border border-slate-700 rounded p-3">
@@ -2777,26 +2777,38 @@ async function openArchiveDetail(id) {
         <p class="text-sm">${stmts.map(s => escapeHtml(s.statement_number || s.id || 'statement')).join(', ')}</p>
       </div>` : ''}`;
 
-    // Load deposit refund info for this archive
-    if (a.tenant_code) {
+    // Document downloads: rows bound to this tenancy keep their files.
+    body.querySelectorAll('[data-doc-dl]').forEach((btn) => {
+      btn.addEventListener('click', () => downloadDocumentFile({ id: btn.getAttribute('data-doc-dl') }));
+    });
+
+    // Deposit refund for THIS tenancy: prefer the row bound to this archive
+    // (server-provided), then archive_id / exit-invoice matches — never a
+    // plain tenant_code match, which could hit a later tenant's refund.
+    let dr = a.deposit_refund_row || null;
+    if (!dr && a.tenant_code) {
       try {
         const { refunds } = await api.listDepositRefunds({ tenant: a.tenant_code, sort: 'newest' });
-        const dr = refunds.find(r => r.tenant_code === a.tenant_code);
-        if (dr) {
-          document.getElementById('archive-dr-section')?.classList.remove('hidden');
-          setTextEl('arch-dr-deposit', ksh(dr.deposit_paid));
-          setTextEl('arch-dr-deductions', ksh(dr.deductions_total));
-          setTextEl('arch-dr-refundable', ksh(dr.refundable_amount));
-          const statusMap = { pending: 'Pending', due_soon: 'Due Soon', due_today: 'Due Today', overdue: 'Overdue', refunded: 'Refunded', partially_refunded: 'Partially Refunded', no_refund_due: 'No Refund Due' };
-          const sEl = document.getElementById('arch-dr-status');
-          sEl.textContent = statusMap[dr.refund_status] || dr.refund_status;
-          sEl.className = 'font-bold ' + (dr.refund_status === 'refunded' ? 'text-green-400' : dr.refund_status === 'overdue' ? 'text-rose-400' : 'text-amber-400');
-          setTextEl('arch-dr-due', fmtDate(dr.refund_due_date));
-          setTextEl('arch-dr-refunded', ksh(dr.amount_refunded));
-          setTextEl('arch-dr-method', dr.payment_method || '—');
-          setTextEl('arch-dr-ref', dr.transaction_reference || '—');
-        }
+        dr = (exitInv && refunds.find((r) => r.exit_invoice_id === exitInv.id))
+          || refunds.find((r) => r.archive_id === a.id)
+          || null;
       } catch (_) {}
+    }
+    if (dr) {
+      document.getElementById('archive-dr-section')?.classList.remove('hidden');
+      setTextEl('arch-dr-deposit', ksh(dr.deposit_paid));
+      setTextEl('arch-dr-deductions', ksh(dr.deductions_total));
+      setTextEl('arch-dr-refundable', ksh(dr.refundable_amount));
+      const statusMap = { pending: 'Pending', due_soon: 'Due Soon', due_today: 'Due Today', overdue: 'Overdue', refunded: 'Refunded', partially_refunded: 'Partially Refunded', no_refund_due: 'No Refund Due' };
+      const sEl = document.getElementById('arch-dr-status');
+      sEl.textContent = statusMap[dr.refund_status] || dr.refund_status;
+      sEl.className = 'font-bold ' + (dr.refund_status === 'refunded' ? 'text-green-400' : dr.refund_status === 'overdue' ? 'text-rose-400' : 'text-amber-400');
+      setTextEl('arch-dr-due', fmtDate(dr.refund_due_date));
+      setTextEl('arch-dr-refunded', ksh(dr.amount_refunded));
+      setTextEl('arch-dr-method', dr.payment_method || '—');
+      setTextEl('arch-dr-ref', dr.transaction_reference || '—');
+    } else {
+      document.getElementById('archive-dr-section')?.classList.add('hidden');
     }
   } catch (err) {
     body.innerHTML = `<p class="text-rose-400">${escapeHtml(err.message)}</p>`;

@@ -348,6 +348,22 @@ async function updateTenant(id, patch, run) {
 }
 
 async function deleteTenant(id) {
+  // Permanent tenancy history: the unit row anchors every tenancy that ever
+  // occupied it (FK cascades on payments/penalties/agreements would destroy
+  // sealed records, and archives point at this code). Refuse when history exists.
+  const guarded = await query(
+    `SELECT 1 FROM tenancy_archive WHERE tenant_code = $1
+      UNION ALL
+     SELECT 1 FROM payments WHERE tenant_code = $1 AND tenancy_id IS NOT NULL
+      LIMIT 1`,
+    [id]
+  );
+  if (guarded.rows.length) {
+    return {
+      error: 'This unit has permanent tenancy history (archived tenancies and sealed financial records) and cannot be deleted.',
+      code: 'TENANCY_HISTORY',
+    };
+  }
   const res = await query('DELETE FROM tenants WHERE tenant_code = $1', [id]);
   return res.rowCount > 0;
 }
@@ -356,8 +372,9 @@ async function markUnitVacant(tenantCode) {
   const tenant = await getTenant(tenantCode);
   if (!tenant) return null;
 
-  await query('DELETE FROM payments WHERE tenant_code = $1', [tenantCode]);
-  await query('DELETE FROM penalties WHERE tenant_code = $1', [tenantCode]);
+  // Never destroy history: bind the tenancy's records to a permanent archive
+  // record instead of deleting them (legacy behaviour hard-deleted them here).
+  await sealStrayTenancyRows(tenantCode);
 
   // Vacancy reset: auto-close live payment arrangements for this unit.
   // History rows stay under the old tenant_code for audit; a new tenant
@@ -381,11 +398,19 @@ async function markUnitVacant(tenantCode) {
 }
 
 async function listPayments(filters = {}) {
+  // History stays visible (sealed payments keep the name of the tenant who
+  // actually paid, via the tenancy archive), but sealed PENDING rows are
+  // hidden — they can no longer be approved and belong to a closed tenancy.
   let q = `
-    SELECT p.*, p.tenant_code AS tenant_id, p.payment_date::text AS payment_date, t.name AS tenant_name, t.tenant_code
+    SELECT p.*, p.tenant_code AS tenant_id, p.payment_date::text AS payment_date,
+           CASE WHEN p.tenancy_id IS NOT NULL
+                THEN COALESCE(NULLIF(a.tenant_name, ''), t.name, p.tenant_code)
+                ELSE t.name END AS tenant_name,
+           t.tenant_code
     FROM payments p
     LEFT JOIN tenants t ON p.tenant_code = t.tenant_code
-    WHERE 1=1
+    LEFT JOIN tenancy_archive a ON a.id = p.tenancy_id
+    WHERE (p.tenancy_id IS NULL OR p.status = 'Approved')
   `;
   const params = [];
   if (filters.status) {
@@ -640,6 +665,15 @@ async function approvePayment(id) {
   const existingPayment = existing.rows[0];
   if (!existingPayment) return null;
 
+  // Payments bound to a completed tenancy are permanent history — never
+  // (re-)approved, repaired or re-allocated.
+  if (existingPayment.tenancy_id != null) {
+    return {
+      error: 'This payment belongs to a completed (archived) tenancy and is permanently preserved — it cannot be approved or re-processed.',
+      code: 'TENANCY_SEALED',
+    };
+  }
+
   if (existingPayment.status === 'Approved') {
     // Repair path: previously-approved payments that were never marked synced
     // (created before Phase 1) are recomputed and marked synced on approval.
@@ -691,11 +725,21 @@ async function approvePaymentOnce(id) {
     // payment date or current calendar date. Payment date = when the tenant paid.
     // Billing period = which rent cycle/month the payment covers.
     const preRes = await run(
-      `SELECT p.payment_type, p.payment_date::text AS payment_date, p.amount, p.tenant_code,
+      `SELECT p.payment_type, p.payment_date::text AS payment_date, p.amount, p.tenant_code, p.tenancy_id,
               t.rent_due_date::text AS rent_due_date
        FROM payments p JOIN tenants t ON t.tenant_code = p.tenant_code
        WHERE p.id = $1`, [id]);
     const prePay = preRes.rows[0];
+
+    // Payments bound to a completed tenancy are permanent — never
+    // re-approved, re-allocated or otherwise re-processed.
+    if (prePay && prePay.tenancy_id != null) {
+      await client.query('ROLLBACK');
+      return {
+        error: 'This payment belongs to a completed (archived) tenancy and is permanently preserved — it cannot be approved or re-processed.',
+        code: 'TENANCY_SEALED',
+      };
+    }
 
     // Derive billing_period from the tenant's rent_due_date.
     // rent_due_date always points to the NEXT due date (updated by rollover).
@@ -1181,7 +1225,7 @@ async function reconcileTenant(tenantCode) {
   const payRes = await query(
     `SELECT id, amount, payment_date::text AS payment_date, payment_type, billing_period,
             overpayment_amount, mpesa_reference, receipt_number, allocation_breakdown
-     FROM payments WHERE tenant_code = $1 AND status = 'Approved' ORDER BY payment_date ASC, id ASC`,
+     FROM payments WHERE tenant_code = $1 AND status = 'Approved' AND tenancy_id IS NULL ORDER BY payment_date ASC, id ASC`,
     [tenantCode]
   );
   const allPayments = payRes.rows;
@@ -1270,7 +1314,7 @@ async function reconcileTenant(tenantCode) {
   // Pre-fetch deposit applications for all billing periods
   const daRes = await query(
     `SELECT billing_period, COALESCE(SUM(amount_applied), 0) AS total
-     FROM deposit_applications WHERE tenant_code = $1 AND status = 'Active'
+     FROM deposit_applications WHERE tenant_code = $1 AND status = 'Active' AND tenancy_id IS NULL
      GROUP BY billing_period`,
     [tenantCode]
   );
@@ -1280,7 +1324,7 @@ async function reconcileTenant(tenantCode) {
   // Pre-fetch rent losses for all billing periods
   const lossRes = await query(
     `SELECT billing_period, COALESCE(SUM(rent_loss_amount), 0) AS total
-     FROM deposit_applications WHERE tenant_code = $1 AND status = 'Active' AND rent_loss_amount > 0
+     FROM deposit_applications WHERE tenant_code = $1 AND status = 'Active' AND rent_loss_amount > 0 AND tenancy_id IS NULL
      GROUP BY billing_period`,
     [tenantCode]
   );
@@ -1479,7 +1523,7 @@ async function getDepositApplicationPreview(tenantCode, billingPeriod) {
   // Get approved payments for this billing period
   const payRes = await query(
     `SELECT COALESCE(SUM(amount), 0) AS total FROM payments
-     WHERE tenant_code = $1 AND status = 'Approved' AND billing_period = $2`,
+     WHERE tenant_code = $1 AND status = 'Approved' AND billing_period = $2 AND tenancy_id IS NULL`,
     [tenantCode, billingPeriod]
   );
   const paymentsApplied = Number(payRes.rows[0]?.total || 0);
@@ -1487,7 +1531,7 @@ async function getDepositApplicationPreview(tenantCode, billingPeriod) {
   // Get existing deposit applications for this billing period
   const daRes = await query(
     `SELECT COALESCE(SUM(amount_applied), 0) AS total FROM deposit_applications
-     WHERE tenant_code = $1 AND billing_period = $2 AND status = 'Active'`,
+     WHERE tenant_code = $1 AND billing_period = $2 AND status = 'Active' AND tenancy_id IS NULL`,
     [tenantCode, billingPeriod]
   );
   const depositAlreadyApplied = Number(daRes.rows[0]?.total || 0);
@@ -1618,7 +1662,7 @@ async function recordRentLoss(tenantCode, amount, billingPeriod, authorizedBy, r
 
 async function getDepositApplications(tenantCode) {
   const res = await query(
-    `SELECT * FROM deposit_applications WHERE tenant_code = $1 ORDER BY created_at DESC`,
+    `SELECT * FROM deposit_applications WHERE tenant_code = $1 AND tenancy_id IS NULL ORDER BY created_at DESC`,
     [tenantCode]
   );
   return res.rows;
@@ -1628,6 +1672,14 @@ async function deletePayment(id, actor) {
   const target = await query('SELECT * FROM payments WHERE id = $1', [id]);
   const deleted = target.rows[0];
   if (!deleted) return { deleted: false };
+  // Payments bound to a completed tenancy are permanent history.
+  if (deleted.tenancy_id != null) {
+    return {
+      deleted: false,
+      error: 'This payment belongs to a completed (archived) tenancy and is permanently preserved — it cannot be deleted.',
+      code: 'TENANCY_SEALED',
+    };
+  }
   const auditBase = {
     payment_id: deleted.id,
     amount: Number(deleted.amount || 0),
@@ -1852,7 +1904,7 @@ async function recalculateAll(tenantCode, excludeId = null) {
   // excludeId (fallback-before-delete) keeps the doomed payment out of the
   // replay so counters are rebuilt before its row disappears.
   const payRes = await query(
-    `SELECT * FROM payments WHERE tenant_code = $1 AND status = 'Approved'${excludeId ? ' AND id <> $2' : ''} ORDER BY payment_date ASC, recorded_at ASC`,
+    `SELECT * FROM payments WHERE tenant_code = $1 AND status = 'Approved' AND tenancy_id IS NULL${excludeId ? ' AND id <> $2' : ''} ORDER BY payment_date ASC, recorded_at ASC`,
     excludeId ? [tenantCode, excludeId] : [tenantCode]
   );
 
@@ -3484,10 +3536,15 @@ async function getDashboardDrilldown(kind) {
     const res = await query(`
       SELECT p.id, p.amount, p.payment_date::text AS payment_date, p.mpesa_reference,
              p.receipt_number, p.payment_type, p.payment_mode,
-             t.tenant_code, t.name AS tenant_name, t.property_name,
+             t.tenant_code,
+             CASE WHEN p.tenancy_id IS NOT NULL
+                  THEN COALESCE(NULLIF(a.tenant_name, ''), t.name, t.tenant_code)
+                  ELSE t.name END AS tenant_name,
+             COALESCE(a.property_name, t.property_name) AS property_name,
              ${DASH_UNIT_DISPLAY} AS unit_display
       FROM payments p
       LEFT JOIN tenants t ON t.tenant_code = p.tenant_code
+      LEFT JOIN tenancy_archive a ON a.id = p.tenancy_id
       WHERE p.status = 'Approved' AND p.payment_date >= '${monthStart}'
       ORDER BY p.payment_date DESC, p.id DESC`);
     return {
@@ -3712,9 +3769,13 @@ async function getPropertyCollectionReport(houseId, billingMonth) {
   // Payments with billing_period matching (or payment_date in month for legacy)
   let payQ = `
     SELECT p.*, p.tenant_code AS tenant_id, p.payment_date::text AS payment_date,
-           t.name AS tenant_name, t.tenant_code
+           CASE WHEN p.tenancy_id IS NOT NULL
+                THEN COALESCE(NULLIF(a.tenant_name, ''), t.name, p.tenant_code)
+                ELSE t.name END AS tenant_name,
+           t.tenant_code
     FROM payments p
     LEFT JOIN tenants t ON p.tenant_code = t.tenant_code
+    LEFT JOIN tenancy_archive a ON a.id = p.tenancy_id
     WHERE p.status = 'Approved'
       AND (p.billing_period = $1 OR (p.billing_period IS NULL AND p.payment_date >= $2 AND p.payment_date < $3))
   `;
@@ -4148,7 +4209,7 @@ async function rolloverBody() {
     // the rent-directed portion of each payment counts toward its month —
     // deposit/arrears/penalty money must never close a rent month).
     const paymentsRes = await query(
-      `SELECT amount, payment_date::text AS payment_date, billing_period, allocation_breakdown FROM payments WHERE tenant_code = $1 AND status = 'Approved'`,
+      `SELECT amount, payment_date::text AS payment_date, billing_period, allocation_breakdown FROM payments WHERE tenant_code = $1 AND status = 'Approved' AND tenancy_id IS NULL`,
       [t.tenant_code]
     );
     const approvedPayments = paymentsRes.rows;
@@ -4263,7 +4324,7 @@ async function rolloverBody() {
 
 async function listPenalties(tenantCode) {
   const res = await query(
-    `SELECT * FROM penalties WHERE tenant_code = $1 ORDER BY created_at DESC`,
+    `SELECT * FROM penalties WHERE tenant_code = $1 AND tenancy_id IS NULL ORDER BY created_at DESC`,
     [tenantCode]
   );
   return res.rows.map(r => ({ ...r, amount: Number(r.amount) }));
@@ -4308,7 +4369,7 @@ async function deletePenalty(id) {
 }
 
 async function getOutstandingPenalties(tenantCode, category, run) {
-  let q = `SELECT COALESCE(SUM(amount), 0) AS total FROM penalties WHERE tenant_code = $1 AND status = 'Pending'`;
+  let q = `SELECT COALESCE(SUM(amount), 0) AS total FROM penalties WHERE tenant_code = $1 AND status = 'Pending' AND tenancy_id IS NULL`;
   const params = [tenantCode];
   if (category) {
     params.push(category);
@@ -4319,7 +4380,7 @@ async function getOutstandingPenalties(tenantCode, category, run) {
 }
 
 async function listPendingPenalties(tenantCode, category, run) {
-  let q = `SELECT * FROM penalties WHERE tenant_code = $1 AND status = 'Pending'`;
+  let q = `SELECT * FROM penalties WHERE tenant_code = $1 AND status = 'Pending' AND tenancy_id IS NULL`;
   const params = [tenantCode];
   if (category) {
     params.push(category);
@@ -4390,7 +4451,7 @@ async function getTenantStatement(tenantCode) {
   const paymentsRes = await query(
     `SELECT p.*, p.payment_date::text AS payment_date
      FROM payments p
-     WHERE p.tenant_code = $1 AND p.status = 'Approved'
+     WHERE p.tenant_code = $1 AND p.status = 'Approved' AND p.tenancy_id IS NULL
      ORDER BY p.payment_date ASC, p.id ASC`,
     [tenantCode]
   );
@@ -5769,7 +5830,7 @@ function getPaymentInstructionsText(house, tenantCode) {
 
 async function getApprovedPaymentCount(tenantCode, excludeId = null, run) {
   const res = await runOrQuery(run,
-    `SELECT COUNT(*)::int AS c FROM payments WHERE tenant_code = $1 AND status = 'Approved'${excludeId ? ' AND id <> $2' : ''}`,
+    `SELECT COUNT(*)::int AS c FROM payments WHERE tenant_code = $1 AND status = 'Approved' AND tenancy_id IS NULL${excludeId ? ' AND id <> $2' : ''}`,
     excludeId ? [tenantCode, excludeId] : [tenantCode]
   );
   return res.rows[0]?.c || 0;
@@ -5777,7 +5838,7 @@ async function getApprovedPaymentCount(tenantCode, excludeId = null, run) {
 
 async function hasApprovedRentPaymentFor(tenantCode, excludeId = null, run) {
   const res = await runOrQuery(run,
-    `SELECT COUNT(*)::int AS c FROM payments WHERE tenant_code = $1 AND status = 'Approved' AND (payment_type IS NULL OR payment_type = 'rent')${excludeId ? ' AND id <> $2' : ''}`,
+    `SELECT COUNT(*)::int AS c FROM payments WHERE tenant_code = $1 AND status = 'Approved' AND tenancy_id IS NULL AND (payment_type IS NULL OR payment_type = 'rent')${excludeId ? ' AND id <> $2' : ''}`,
     excludeId ? [tenantCode, excludeId] : [tenantCode]
   );
   return (res.rows[0]?.c || 0) > 0;
@@ -5866,7 +5927,7 @@ async function describeArrangement(row) {
   const dueDate = tenant && tenant.rent_due_date ? String(tenant.rent_due_date).slice(0, 10) : null;
   const payRes = await query(
     `SELECT COALESCE(SUM(amount), 0) AS paid, MAX(payment_date)::text AS last_paid
-     FROM payments WHERE tenant_code = $1 AND status = 'Approved'
+     FROM payments WHERE tenant_code = $1 AND status = 'Approved' AND tenancy_id IS NULL
        AND COALESCE(billing_period, LEFT(payment_date::text, 7)) = $2`,
     [row.tenant_code, row.billing_period]
   );
@@ -6167,6 +6228,14 @@ async function listExitInvoices(tenantCode = null) {
 async function updateExitInvoice(id, patch = {}) {
   const existing = await getExitInvoice(id);
   if (!existing) return null;
+  // A finalized exit invoice is the permanent record of how a tenancy ended —
+  // tenant details and every figure on it stay unchanged forever.
+  if (existing.status === 'Finalized') {
+    return {
+      error: 'This exit invoice is finalized. Finalized exit invoices are permanent and cannot be edited — tenant details and financial figures stay unchanged.',
+      code: 'EXIT_INVOICE_FINALIZED',
+    };
+  }
   const tenant = await getTenant(existing.tenant_code);
   const summary = tenant ? await getTenantExitSummary(existing.tenant_code) : null;
   const lines = Array.isArray(patch.lines) ? patch.lines : existing.lines;
@@ -6311,6 +6380,12 @@ async function finalizeExitInvoice(id, patch = {}, actor = null) {
 async function deleteExitInvoice(id) {
   const existing = await getExitInvoice(id);
   if (!existing) return false;
+  if (existing.status === 'Finalized') {
+    return {
+      error: 'This exit invoice is finalized and permanently preserved with its tenancy record. It cannot be deleted.',
+      code: 'EXIT_INVOICE_FINALIZED',
+    };
+  }
   await query('DELETE FROM deposit_refunds WHERE exit_invoice_id = $1', [id]);
   await query('DELETE FROM exit_invoices WHERE id = $1', [id]);
   return true;
@@ -6330,30 +6405,126 @@ function groupPaymentsByMonth(payments) {
     .sort((a, b) => a.month.localeCompare(b.month));
 }
 
+// ── Tenancy binding (permanence rules) ───────────────────────────────────────
+// Every money/document record a tenant produces carries `tenancy_id`:
+//   NULL               → belongs to the CURRENT live tenancy of this unit code
+//   tenancy_archive.id → permanently bound to one completed tenancy
+// Live tenant views only read NULL rows, and completed-tenancy rows are never
+// deleted, merged or relinked — so a new occupant of the same unit can never
+// alter the previous tenant's financial history.
+const TENANCY_SCOPED_TABLES = [
+  'payments', 'penalties', 'documents', 'water_invoices', 'deposit_applications',
+  'credit_allocations', 'message_logs', 'tenancy_agreements', 'inspections', 'maintenance_charges',
+];
+
+async function sealTenancyRows(tenantCode, archiveId) {
+  for (const table of TENANCY_SCOPED_TABLES) {
+    try {
+      await query(
+        `UPDATE ${table} SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL`,
+        [archiveId, tenantCode]
+      );
+    } catch (err) {
+      console.error(`[Tenancy] seal ${table} failed for ${tenantCode}:`, err.message);
+    }
+  }
+}
+
+// Safety net used at transitions: any row still un-stamped that provably
+// belonged to the PREVIOUS closed tenancy (recorded before that archive was
+// taken, or dated on/before its move-out) is sealed to it — so late money can
+// never bleed into the incoming tenancy. Rows newer than the previous close
+// stay NULL (they belong to the current/incoming tenancy).
+// allowCreate: when the unit has no archive at all (legacy re-let), create one
+// so the history has a permanent home instead of being destroyed. Never pass
+// allowCreate when an archive is about to be written anyway (vacate path).
+async function sealStrayTenancyRows(tenantCode, { allowCreate = false } = {}) {
+  try {
+    let stray = 0;
+    for (const table of TENANCY_SCOPED_TABLES) {
+      try {
+        const r = await query(
+          `SELECT COUNT(*)::int AS c FROM ${table} WHERE tenant_code = $1 AND tenancy_id IS NULL`,
+          [tenantCode]
+        );
+        stray += Number(r.rows[0].c);
+      } catch (_) { /* table without the column yet */ }
+    }
+    if (!stray) return null;
+
+    const prev = await query(
+      `SELECT id, archived_at, move_out_date::text AS move_out_date FROM tenancy_archive
+        WHERE tenant_code = $1 ORDER BY archived_at DESC LIMIT 1`,
+      [tenantCode]
+    );
+
+    if (!prev.rows.length) {
+      // No archive at all. Only auto-create one when explicitly allowed
+      // (re-let of a legacy unit); the vacate path writes its own archive next.
+      if (!allowCreate) return null;
+      const legacy = await archiveTenancy(tenantCode, {
+        reason: 'Auto-closed at re-let (legacy tenancy without archive)',
+        archived_by: 'system',
+      });
+      if (legacy) {
+        await sealTenancyRows(tenantCode, legacy.id);
+        return legacy.id;
+      }
+      return null;
+    }
+
+    const a = prev.rows[0];
+    const p = [a.id, tenantCode, a.archived_at, a.move_out_date || null];
+    const stamp = async (sql, params = p) => {
+      try { await query(sql, params); } catch (e) { console.error('[Tenancy] stray seal:', e.message); }
+    };
+    // Rows that existed when the snapshot was taken (recorded_at <= archived_at)
+    // or are dated inside the closed tenancy (payment_date/invoice_date <=
+    // move_out) are the previous tenancy's. Anything newer is the incoming
+    // tenancy's and stays live.
+    await stamp(`UPDATE payments SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND (recorded_at <= $3 OR payment_date <= $4::date)`);
+    await stamp(`UPDATE penalties SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND (created_at <= $3 OR invoice_date <= $4::date)`);
+    await stamp(`UPDATE documents SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND created_at <= $3`, p.slice(0, 3));
+    await stamp(`UPDATE water_invoices SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND (created_at <= $3 OR billing_month <= LEFT($4::text, 7))`);
+    await stamp(`UPDATE deposit_applications SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND (created_at <= $3 OR billing_period <= LEFT($4::text, 7))`);
+    await stamp(`UPDATE credit_allocations SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND applied_at <= $3`, p.slice(0, 3));
+    await stamp(`UPDATE message_logs SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND logged_at <= $3`, p.slice(0, 3));
+    await stamp(`UPDATE tenancy_agreements SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND created_at <= $3`, p.slice(0, 3));
+    await stamp(`UPDATE inspections SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND created_at <= $3`, p.slice(0, 3));
+    await stamp(`UPDATE maintenance_charges SET tenancy_id = $1 WHERE tenant_code = $2 AND tenancy_id IS NULL AND created_at <= $3`, p.slice(0, 3));
+    return a.id;
+  } catch (err) {
+    console.error(`[Tenancy] sealStray failed for ${tenantCode}:`, err.message);
+    return null;
+  }
+}
+
 async function archiveTenancy(tenantCode, options = {}) {
   const tenant = await getTenant(tenantCode);
   if (!tenant) return null;
 
+  // Snapshot only THIS tenancy's rows: previously sealed (tenancy_id NOT NULL)
+  // rows belong to earlier tenancies of the same unit code.
   const paymentsRes = await query(
-    `SELECT *, payment_date::text AS payment_date_text FROM payments WHERE tenant_code = $1 ORDER BY payments.payment_date ASC, id ASC`,
+    `SELECT *, payment_date::text AS payment_date_text FROM payments WHERE tenant_code = $1 AND tenancy_id IS NULL ORDER BY payments.payment_date ASC, id ASC`,
     [tenantCode]
   );
   const payments = paymentsRes.rows.map((r) => ({ ...r, payment_date: r.payment_date_text, amount: Number(r.amount) }));
 
   const penaltiesRes = await query(
-    `SELECT *, invoice_date::text AS invoice_date_text FROM penalties WHERE tenant_code = $1 ORDER BY penalties.invoice_date ASC, id ASC`,
+    `SELECT *, invoice_date::text AS invoice_date_text FROM penalties WHERE tenant_code = $1 AND tenancy_id IS NULL ORDER BY penalties.invoice_date ASC, id ASC`,
     [tenantCode]
   );
   const penalties = penaltiesRes.rows.map((r) => ({ ...r, invoice_date: r.invoice_date_text, amount: Number(r.amount) }));
 
   const docsRes = await query(
-    `SELECT id, doc_type, doc_number, title, filename, amount, doc_date::text AS doc_date, created_at FROM documents WHERE tenant_code = $1 ORDER BY created_at ASC`,
+    `SELECT id, doc_type, doc_number, title, filename, amount, doc_date::text AS doc_date, created_at FROM documents WHERE tenant_code = $1 AND tenancy_id IS NULL ORDER BY created_at ASC`,
     [tenantCode]
   );
   const documents = docsRes.rows.map((r) => ({ ...r, amount: r.amount != null ? Number(r.amount) : null }));
 
   const msgsRes = await query(
-    `SELECT id, message_type, message_body, status, whatsapp_message_id, failure_reason, logged_at FROM message_logs WHERE tenant_code = $1 ORDER BY logged_at ASC`,
+    `SELECT id, message_type, message_body, status, whatsapp_message_id, failure_reason, logged_at FROM message_logs WHERE tenant_code = $1 AND tenancy_id IS NULL ORDER BY logged_at ASC`,
     [tenantCode]
   );
   const messageLogs = msgsRes.rows;
@@ -6436,7 +6607,26 @@ async function archiveTenancy(tenantCode, options = {}) {
       options.archived_by || null,
     ]
   );
-  return getTenancyArchive(res.rows[0].id);
+  const archiveId = res.rows[0].id;
+
+  // ── Permanence: bind every record of this tenancy to it ───────────────
+  // From here on these rows are excluded from all live tenant views
+  // (tenancy_id IS NULL filters) and can never be deleted, merged or
+  // relinked by a future occupant of the same unit.
+  await sealTenancyRows(tenantCode, archiveId);
+
+  // Deposit refunds raised during this exit belong to this tenancy as well
+  // (older refunds already carry their own archive_id).
+  try {
+    await query(
+      `UPDATE deposit_refunds SET archive_id = $1 WHERE archive_id IS NULL AND tenant_code = $2`,
+      [archiveId, tenantCode]
+    );
+  } catch (err) {
+    console.error(`[Tenancy] deposit_refunds seal failed for ${tenantCode}:`, err.message);
+  }
+
+  return getTenancyArchive(archiveId);
 }
 
 async function getTenancyArchive(id) {
@@ -6452,6 +6642,46 @@ async function getTenancyArchive(id) {
   );
   if (!res.rows[0]) return null;
   const r = res.rows[0];
+
+  // Merge the snapshot with live rows still bound to this tenancy: the live
+  // row wins for equal ids (fresher status/receipt), and rows recorded after
+  // the snapshot (late payments, documents with files) are appended — so the
+  // archive always shows the COMPLETE history of this one tenancy.
+  const mergeById = (snap, live) => {
+    const byId = new Map();
+    for (const row of Array.isArray(snap) ? snap : []) {
+      if (row && row.id != null) byId.set(row.id, row);
+    }
+    for (const row of live || []) {
+      if (row && row.id != null) byId.set(row.id, row);
+    }
+    return Array.from(byId.values());
+  };
+
+  let livePayments = [];
+  let livePenalties = [];
+  let liveDocs = [];
+  let refundRow = null;
+  try {
+    const [p, pe, d, dr] = await Promise.all([
+      query(`SELECT *, payment_date::text AS payment_date_text FROM payments WHERE tenancy_id = $1 ORDER BY payment_date ASC, id ASC`, [id]),
+      query(`SELECT *, invoice_date::text AS invoice_date_text FROM penalties WHERE tenancy_id = $1 ORDER BY invoice_date ASC, id ASC`, [id]),
+      query(`SELECT id, doc_type, doc_number, title, filename, file_path, amount, doc_date::text AS doc_date, created_at FROM documents WHERE tenancy_id = $1 ORDER BY created_at ASC`, [id]),
+      query(`SELECT * FROM deposit_refunds WHERE archive_id = $1 ORDER BY id DESC LIMIT 1`, [id]),
+    ]);
+    livePayments = p.rows.map((x) => ({ ...x, payment_date: x.payment_date_text, amount: Number(x.amount) }));
+    livePenalties = pe.rows.map((x) => ({ ...x, invoice_date: x.invoice_date_text, amount: Number(x.amount) }));
+    liveDocs = d.rows.map((x) => ({ ...x, amount: x.amount != null ? Number(x.amount) : null }));
+    refundRow = dr.rows[0] || null;
+  } catch (err) {
+    console.error('[Tenancy] archive live merge failed:', err.message);
+  }
+
+  r.payments = mergeById(r.payments, livePayments);
+  r.penalties = mergeById(r.penalties, livePenalties);
+  r.documents = mergeById(r.documents, liveDocs);
+  r.deposit_refund_row = refundRow;
+
   return {
     ...r,
     rent_amount: Number(r.rent_amount || 0),
@@ -6520,6 +6750,28 @@ async function searchArchive(filters = {}) {
 }
 
 async function deleteArchive(id) {
+  // Completed tenancies are permanent: refuse when the tenancy has a
+  // finalized exit invoice OR when any financial/document rows are bound to
+  // it (deleting would orphan them and erase the accountability trail).
+  const guarded = await query(
+    `SELECT 1 FROM tenancy_archive a
+      WHERE a.id = $1
+        AND (
+          a.exit_invoice_number IS NOT NULL
+          OR EXISTS (SELECT 1 FROM exit_invoices e WHERE e.archive_id = a.id AND e.status = 'Finalized')
+          OR EXISTS (SELECT 1 FROM payments p WHERE p.tenancy_id = a.id)
+          OR EXISTS (SELECT 1 FROM penalties pe WHERE pe.tenancy_id = a.id)
+          OR EXISTS (SELECT 1 FROM documents d WHERE d.tenancy_id = a.id)
+        )
+      LIMIT 1`,
+    [id]
+  );
+  if (guarded.rows.length) {
+    return {
+      error: 'This tenancy is closed and preserved as a permanent historical record (it has a finalized exit invoice or bound financial records). Completed tenancies cannot be deleted.',
+      code: 'TENANCY_CLOSED',
+    };
+  }
   const res = await query('DELETE FROM tenancy_archive WHERE id = $1', [id]);
   return res.rowCount > 0;
 }
@@ -6569,6 +6821,11 @@ async function vacateTenancy(tenantCode, options = {}) {
   const tenant = await getTenant(tenantCode);
   if (!tenant) return null;
 
+  // Seal strays from EARLIER tenancies first (money dated before the previous
+  // move-out that was recorded late) so the snapshot below contains only THIS
+  // tenancy's rows.
+  await sealStrayTenancyRows(tenantCode, { allowCreate: false });
+
   const archive = await archiveTenancy(tenantCode, options);
   if (!archive) return null;
 
@@ -6615,12 +6872,13 @@ async function vacateTenancy(tenantCode, options = {}) {
 async function resetTenancyFinancials(tenantCode) {
   const tenant = await getTenant(tenantCode);
   if (!tenant) return null;
-  // The previous tenancy is archived (vacateTenancy/archiveTenancy) before this
-  // runs, so clearing the live rows preserves nothing that is not already in the
-  // archive. Live rows must be cleared so the new tenancy starts with a clean
-  // financial profile (including correct first-payment detection).
-  await query('DELETE FROM payments WHERE tenant_code = $1', [tenantCode]);
-  await query('DELETE FROM penalties WHERE tenant_code = $1', [tenantCode]);
+  // ── Permanence: the previous tenancy's records are NEVER deleted here ──
+  // vacateTenancy/archiveTenancy seals them to that tenancy's archive id;
+  // sealStrayTenancyRows is the safety net for anything un-stamped (legacy
+  // rows, late-recorded money). Live views only read tenancy_id IS NULL, so
+  // the new tenancy starts with a clean, separate financial profile while
+  // the previous tenant's full history remains permanently intact.
+  await sealStrayTenancyRows(tenantCode, { allowCreate: true });
   // New tenancy owns this code from here on: void the previous tenancy's
   // open register rows so they can never surface as the new tenant's
   // invoices (payment processing, suggestions, history). Rows stay for audit.
@@ -7532,7 +7790,7 @@ async function getWaterRateHistory(housePaybill) {
 
 async function getLatestWaterReading(tenantCode) {
   const res = await query(
-    `SELECT current_reading FROM water_invoices WHERE tenant_code = $1 ORDER BY created_at DESC LIMIT 1`,
+    `SELECT current_reading FROM water_invoices WHERE tenant_code = $1 AND tenancy_id IS NULL ORDER BY created_at DESC LIMIT 1`,
     [tenantCode]
   );
   return res.rows[0] ? Number(res.rows[0].current_reading) : 0;
@@ -7895,6 +8153,8 @@ module.exports = {
   updateWaterRate,
   getWaterRateHistory,
   getLatestWaterReading,
+  sealTenancyRows,
+  sealStrayTenancyRows,
   getRecentWaterUnits,
   buildWaterBillReport,
   findTenantByPropertyAndUnit,

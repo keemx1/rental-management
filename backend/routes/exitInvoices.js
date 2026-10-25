@@ -83,7 +83,7 @@ router.put('/:id', async (req, res) => {
     };
     const invoice = await store.updateExitInvoice(req.params.id, patch);
     if (!invoice) return res.status(404).json({ error: 'Exit invoice not found' });
-    if (invoice.error) return res.status(400).json({ error: invoice.error });
+    if (invoice.error) return res.status(409).json({ error: invoice.error, code: invoice.code });
     res.json({ exit_invoice: invoice });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update exit invoice: ' + err.message });
@@ -112,6 +112,7 @@ router.post('/:id/finalize', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const ok = await store.deleteExitInvoice(req.params.id);
+    if (ok && ok.error) return res.status(409).json({ error: ok.error, code: ok.code });
     if (!ok) return res.status(404).json({ error: 'Exit invoice not found' });
     res.json({ success: true });
   } catch (err) {

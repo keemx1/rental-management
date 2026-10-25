@@ -4975,9 +4975,8 @@
         <button type="button" id="btn-ei-cancel" class="qc-btn flex-1">Close</button>
       </div>
       <div id="ei-actions-final" class="hidden flex flex-col gap-2">
-        <div class="flex flex-wrap gap-2">
-          <button type="button" id="btn-ei-edit" class="qc-btn flex-1">✏️ Edit Invoice</button>
-          <button type="button" id="btn-ei-delete" class="qc-btn qc-btn-danger flex-1">🗑️ Delete Invoice</button>
+        <div class="bg-emerald-950/40 border border-emerald-700 rounded p-3 text-xs text-emerald-200 leading-relaxed">
+          <strong>Finalized — permanent record.</strong> Tenant details and every figure on a finalized exit invoice stay unchanged forever. Download or send the PDF for your records.
         </div>
         <div class="flex flex-wrap gap-2">
           <button type="button" id="btn-ei-download" class="qc-btn flex-1">⬇ Download PDF</button>
@@ -5414,10 +5413,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=62"></script>
+  <script type="module" src="/js/app.js?v=63"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=62').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=63').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

@@ -3,7 +3,7 @@
 Living record of every update applied to this repository
 (`origin → https://github.com/keemx1/rental-management`, branch `main`).
 
-**Last updated:** 2026-10-25 · app version `v62` · SW cache `gutenberg-v63-irmanage`
+**Last updated:** 2026-10-25 · app version `v63` · SW cache `gutenberg-v64-irmanage`
 
 ---
 
@@ -24,6 +24,7 @@ Run from the repo root (server must be up on port `3003`):
 |---|---|---|
 | Dashboard metrics | `node tests/test_dashboard_metrics.js` | 37 assertions — every dashboard card equals its drilldown rows; arrears/progress invariants |
 | Report formatting | `node tests/test_report_formatting.js` | 148 assertions — Excel layout (widths, wrapping, frozen headers, print titles, number formats, totals reconcile), PDF orientation, in-app report styles |
+| Tenancy permanence | `node tests/test_tenancy_history.js` | 50 assertions — two tenants re-letting one unit: previous tenancy's records never deleted/merged/relinked, finalized exit invoice immutable, archive shows complete per-tenancy payment history |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -114,6 +115,46 @@ Management Expenses PDF, Work Order PDF, and every in-app report table.
   services + official stamp/signature, tenant agreements, landlord sheets,
   water bill report, migration scripts, PWA icons, `multer` dependency.
 
+### 8. Tenancy-scoped financial history — permanent per-occupancy records (app `v63`)
+Unit history and tenancy history are now fully separated: the unit can be
+reused, but every completed tenancy keeps its own permanent financial and exit
+records. Nothing belonging to a previous tenant is ever deleted, merged or
+relinked when a new tenant takes the same unit.
+
+- **Tenancy binding:** `tenancy_id` (→ `tenancy_archive.id`) added to
+  `payments, penalties, documents, water_invoices, deposit_applications,
+  credit_allocations, message_logs, tenancy_agreements, inspections,
+  maintenance_charges` (migration `backend/scripts/migrate-tenancy-ids.js`,
+  backfilled). `NULL` = current live tenancy; a value = permanently bound to
+  one completed tenancy. Sealing happens automatically at vacate/archive.
+- **Re-let no longer destroys history:** `resetTenancyFinancials` used to
+  `DELETE FROM payments/penalties` on every new occupancy (the old code wiped
+  the previous tenant's money rows outright). It now seals any un-stamped
+  strays to the previous tenancy's archive instead — nothing is deleted.
+- **Both re-let paths start clean:** the reservation-activation path
+  (`activateFutureTenancy`) previously ADDED the new tenant's booking amounts
+  on top of the previous tenant's leftover `deposit_paid/rent_paid/credit`
+  counters (a real merge bug). It now resets all financial fields to fresh
+  values and applies only the new tenancy's own figures.
+- **Live views isolated:** every tenant-scoped balance/query (reconcile,
+  statements, penalties, deposit applications, water meter reading, first-payment
+  detection, rollover, profile) filters to `tenancy_id IS NULL` — the incoming
+  tenant can never see, inherit or be recalculated from the previous tenancy's
+  rows. Payment/revenue ledgers keep ALL rows (money received is real) but show
+  the HISTORICAL tenant's name via the archive join.
+- **Finalized exit invoices are immutable:** server refuses edit/delete with
+  409; the UI now shows a "Finalized — permanent record" notice instead of
+  Edit/Delete buttons (Download/Send remain).
+- **Closed tenancies are permanent:** archive deletion refused (409) when the
+  tenancy has a finalized exit invoice or bound financial rows; unit deletion
+  refused while it anchors history; unit/tenant code cannot be changed
+  (it anchors the whole history); sealed payments can never be deleted or
+  re-approved (409).
+- **Archive = complete history:** archive detail now merges the snapshot with
+  live rows bound to that tenancy — late-recorded payments appear in the
+  right tenancy, document chips become real downloads, and the deposit refund
+  is matched to that exact tenancy (archive_id) instead of the reused unit code.
+
 ---
 
 ## Open items / next
@@ -142,3 +183,4 @@ Management Expenses PDF, Work Order PDF, and every in-app report table.
 | 5 | Dashboard Command Center (DB cards, drilldowns, collection progress) | v61 |
 | 6 | System-wide report formatting (Excel/PDF/in-app) | v62 |
 | 7 | Repo housekeeping: tracked test suites, gitignore, pending-work commit | v62 |
+| 8 | Tenancy-scoped financial history: permanent per-occupancy records | v63 |

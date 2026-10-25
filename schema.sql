@@ -1490,3 +1490,21 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_invoice_register_voided ON invoice_register (voided);
+
+-- -- Tenancy-scoped records (permanence) ----------------------------------------
+-- tenancy_id binds a row to ONE completed tenancy (tenancy_archive.id).
+-- NULL = current live tenancy of the unit code. Previous tenancies' rows are
+-- never deleted, merged or relinked when a new tenant takes the same unit.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='tenancy_id') THEN ALTER TABLE payments ADD COLUMN tenancy_id INTEGER; END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='penalties' AND column_name='tenancy_id') THEN ALTER TABLE penalties ADD COLUMN tenancy_id INTEGER; END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='documents' AND column_name='tenancy_id') THEN ALTER TABLE documents ADD COLUMN tenancy_id INTEGER; END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='water_invoices' AND column_name='tenancy_id') THEN ALTER TABLE water_invoices ADD COLUMN tenancy_id INTEGER; END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deposit_applications' AND column_name='tenancy_id') THEN ALTER TABLE deposit_applications ADD COLUMN tenancy_id INTEGER; END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='credit_allocations' AND column_name='tenancy_id') THEN ALTER TABLE credit_allocations ADD COLUMN tenancy_id INTEGER; END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='message_logs' AND column_name='tenancy_id') THEN ALTER TABLE message_logs ADD COLUMN tenancy_id INTEGER; END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tenancy_agreements' AND column_name='tenancy_id') THEN ALTER TABLE tenancy_agreements ADD COLUMN tenancy_id INTEGER; END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='inspections' AND column_name='tenancy_id') THEN ALTER TABLE inspections ADD COLUMN tenancy_id INTEGER; END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maintenance_charges' AND column_name='tenancy_id') THEN ALTER TABLE maintenance_charges ADD COLUMN tenancy_id INTEGER; END IF;
+END $$;

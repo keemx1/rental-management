@@ -169,6 +169,7 @@ router.post('/:id/approve', async (req, res) => {
   try {
     const result = await store.approvePayment(req.params.id);
     if (!result) return res.status(404).json({ error: 'Payment not found' });
+    if (result.error) return res.status(409).json({ error: result.error, code: result.code });
     if (result.alreadyApproved) {
       return res.json({ success: true, payment: result.payment, tenant: result.tenant, whatsapp: { status: 'Skipped' }, alreadyApproved: true, sync: result.sync });
     }
@@ -1024,6 +1025,9 @@ router.post('/:id/resend-whatsapp', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const result = await store.deletePayment(req.params.id, req.user?.username);
+    if (result && result.error) {
+      return res.status(409).json({ error: result.error, code: result.code });
+    }
     if (!result || !result.deleted) {
       return res.status(404).json({ error: 'Payment not found' });
     }

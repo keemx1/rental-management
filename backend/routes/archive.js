@@ -43,8 +43,11 @@ router.get('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const ok = await store.deleteArchive(req.params.id);
-    if (!ok) return res.status(404).json({ error: 'Archive entry not found' });
+    const result = await store.deleteArchive(req.params.id);
+    if (result && result.error) {
+      return res.status(409).json({ error: result.error, code: result.code });
+    }
+    if (!result) return res.status(404).json({ error: 'Archive entry not found' });
     await store.logAudit({
       actor: req.user?.username,
       action: 'archive_deleted',

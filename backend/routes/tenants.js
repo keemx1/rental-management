@@ -126,6 +126,11 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
+    // The unit code permanently anchors every tenancy of this unit — never
+    // allow it to change (changing it would relink the whole financial history).
+    if (req.body.tenant_code !== undefined && String(req.body.tenant_code) !== String(req.params.id)) {
+      return res.status(400).json({ error: "Unit/tenant code cannot be changed — it permanently anchors this tenancy's records." });
+    }
     const allowed = [
       'name',
       'phone_number',
@@ -372,6 +377,9 @@ router.post('/:id/occupy', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const ok = await store.deleteTenant(req.params.id);
+    if (ok && ok.error) {
+      return res.status(409).json({ error: ok.error, code: ok.code });
+    }
     if (!ok) {
       return res.status(404).json({ error: 'Tenant not found' });
     }
@@ -501,7 +509,7 @@ router.get('/:id/profile', async (req, res) => {
     const house = tenant.house_id ? await store.getHouse(tenant.house_id) : null;
     const allPayments = await store.listPayments();
     const payments = allPayments
-      .filter(p => p.tenant_code === tenant.tenant_code)
+      .filter(p => p.tenant_code === tenant.tenant_code && (p.tenancy_id == null))
       .slice(0, 50);
 
     const approvedPayments = payments.filter(p => p.status === 'Approved');
@@ -526,7 +534,7 @@ router.get('/:id/profile', async (req, res) => {
       `SELECT mc.*, wo.wo_number AS wo_number_ref
        FROM maintenance_charges mc
        LEFT JOIN work_orders wo ON mc.work_order_id = wo.id
-       WHERE mc.tenant_code = $1
+       WHERE mc.tenant_code = $1 AND mc.tenancy_id IS NULL
        ORDER BY mc.created_at DESC LIMIT 20`,
       [tenant.tenant_code]
     );
