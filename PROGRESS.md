@@ -25,6 +25,7 @@ Run from the repo root (server must be up on port `3003`):
 | Dashboard metrics | `node tests/test_dashboard_metrics.js` | 37 assertions — every dashboard card equals its drilldown rows; arrears/progress invariants |
 | Report formatting | `node tests/test_report_formatting.js` | 148 assertions — Excel layout (widths, wrapping, frozen headers, print titles, number formats, totals reconcile), PDF orientation, in-app report styles |
 | Tenancy permanence | `node tests/test_tenancy_history.js` | 50 assertions — two tenants re-letting one unit: previous tenancy's records never deleted/merged/relinked, finalized exit invoice immutable, archive shows complete per-tenancy payment history |
+| Financial integrity | `node tests/test_financial_integrity.js` | 27 assertions — payments rejected against incomplete/non-existent/vacant tenancies at app AND database level, re-linking blocked, delete archives instead of destroying, RESTRICT constraints, origin + audit trail |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -155,6 +156,70 @@ relinked when a new tenant takes the same unit.
   right tenancy, document chips become real downloads, and the deposit refund
   is matched to that exact tenancy (archive_id) instead of the reused unit code.
 
+### 9. Financial integrity: ghost-record elimination + DB-level validation & audit (app `v63`)
+Investigation traced every ghost/orphan class, then eliminated it and built
+constraints so it cannot recur.
+
+**Traced findings (production audit):**
+- **"Ledger IE" / "Ledger OC"** = test-tenant codes `LEDGER-IE` ("Inv New") and
+  `LEDGER-OC` ("Occ New") from an admin test run on 2026-10-14: created,
+  archived, then hard-deleted — leaving detached message logs/receipts. The
+  full `LEDGER-*` family (38 codes) is preserved in `audit_log` as the
+  traceable origin; the tenants themselves are gone.
+- Mariana House itself had **no orphan payments** — its ghosts were detached
+  documents (ME6/MD1 exit invoices, MA9 invoice) and old detached receipts.
+- Root causes: `ON DELETE CASCADE` on payments/penalties (history vanished on
+  tenant delete), `SET NULL` on documents/message_logs (history detached),
+  no validation on payment creation, blank archives from vacating identity-less
+  rows, and `logLedgerEntry` inserting payments with zero validation.
+
+**Eliminated (backend/scripts/cleanup-ghost-records.js, ran with --apply):**
+- 8 exit-invoice + 13 invoice documents re-attached to their real tenancies
+  (incl. Mariana's ME6/MD1/MA9 records)
+- 376 orphan receipt registry rows purged (no payment/register/tenant — legacy
+  bootstrap batch + deleted test payments); full list preserved in
+  `audit_log (orphan_receipts_purged)`, PDF files untouched on disk
+- 385 test-fixture message logs purged (LEDGER-/SA5FIX/CARE2/ADVR families),
+  sample preserved in `audit_log (test_message_logs_purged)`
+- 6 tenants stuck with `status=''` reconciled from live data
+- blank archive #59 (test record "TENAN") deleted
+- Remaining by design: 59 non-receipt business documents without a linkable
+  tenant (work orders/statements/reports) and 1,401 non-fixture detached
+  message logs — reported, not destroyed (informational residue).
+
+**Prevention — application layer:**
+- `validateTenancyForFinancials()` enforces: tenant exists + has a person
+  (non-blank name) + is not Vacant + linked to an existing property. Applied
+  in `createPayment` (covers manual entry, M-Pesa parsing, offline sync),
+  `approvePayment` (a Pending payment whose tenant left can no longer be
+  approved → no receipt, no allocation, no WhatsApp confirmation),
+  `ensureReceiptPdf` (belt: logs `receipt_blocked` audit), and rewritten
+  `logLedgerEntry` (now goes through createPayment + audit).
+- Incomplete-tenancy rejections return HTTP 409 with a clear reason; missing
+  units return 404.
+- Payment origin recorded: `payments.source` = manual | mpesa_parse | booking
+  | ledger_adjustment, set by each entry path.
+- Vacating an identity-less unit with no financial history now REFUSES
+  (`NOTHING_TO_ARCHIVE`) instead of writing a blank archive record.
+- Deleting a tenant now **archives the complete tenancy** (identity + payments
+  snapshot + sealing) and keeps the unit row as a Vacant placeholder — returns
+  `{archived: true, archive_id}`. Only truly empty placeholders are hard-deleted.
+
+**Prevention — database level (`migrate-financial-integrity.js`, ran on prod):**
+- All financial FKs switched/added to `ON DELETE RESTRICT` (payments,
+  penalties, tenancy_agreements, documents, message_logs, water_invoices,
+  exit_invoices, deposit_refunds, and *.tenancy_id → tenancy_archive) — a
+  tenant or tenancy row that anchors history can never be deleted under it.
+- BEFORE INSERT triggers on payments/penalties/exit_invoices/deposit_refunds
+  reject records whose tenant is missing, nameless, vacant or property-less;
+  any UPDATE that rewrites `tenant_code` is rejected outright (re-linking
+  history is impossible). Water invoices use a lenient variant (vacant-unit
+  caretaker billing is legitimate).
+- AFTER INSERT/UPDATE triggers write `audit_log` rows
+  (`financial_record_inserted`, `financial_payment_approved`) carrying origin,
+  tenant, amount, reference and tenancy id — every financial record now has a
+  database-enforced, traceable origin.
+
 ---
 
 ## Open items / next
@@ -184,3 +249,4 @@ relinked when a new tenant takes the same unit.
 | 6 | System-wide report formatting (Excel/PDF/in-app) | v62 |
 | 7 | Repo housekeeping: tracked test suites, gitignore, pending-work commit | v62 |
 | 8 | Tenancy-scoped financial history: permanent per-occupancy records | v63 |
+| 9 | Ghost-record elimination + DB-level validation, RESTRICT FKs, origin audit | v63 |

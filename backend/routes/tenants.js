@@ -232,6 +232,9 @@ router.patch('/:id/vacant', async (req, res) => {
       reason,
       archived_by: archived_by || req.user?.username,
     });
+    if (result && result.error) {
+      return res.status(409).json({ error: result.error, code: result.code });
+    }
     if (!result) return res.status(404).json({ error: 'Tenant not found' });
     res.json({ tenant: result.tenant, archive: result.archive });
   } catch (err) {
@@ -376,11 +379,15 @@ router.post('/:id/occupy', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const ok = await store.deleteTenant(req.params.id);
-    if (ok && ok.error) {
-      return res.status(409).json({ error: ok.error, code: ok.code });
+    const result = await store.deleteTenant(req.params.id, req.user?.username);
+    if (result && result.error) {
+      return res.status(409).json({ error: result.error, code: result.code });
     }
-    if (!ok) {
+    if (result && result.archived) {
+      // Deletion of a real tenant = complete tenancy archived (never destroyed).
+      return res.json({ success: true, archived: true, archive_id: result.archive_id, message: result.message });
+    }
+    if (!result) {
       return res.status(404).json({ error: 'Tenant not found' });
     }
     res.json({ success: true });

@@ -23,6 +23,16 @@ const RECEIPT_GEN_TIMEOUT_MS = 60000;
 // FINAL approved payment/allocation data. Never recalculated separately.
 async function ensureReceiptPdf(tenant, payment, allocation) {
   try {
+    // Receipts are financial documents: never generate one for an incomplete
+    // or non-existent tenancy (approval blocks it too — this is the belt).
+    const invalid = await store.validateTenancyForFinancials(payment?.tenant_code || tenant?.tenant_code);
+    if (invalid) {
+      await store.logAudit({
+        actor: 'system', action: 'receipt_blocked', entityType: 'payment',
+        entityId: String(payment?.id || ''), details: { reason: invalid.error },
+      }).catch?.(() => {});
+      return null;
+    }
     const existing = await store.findReceiptDocument(payment.id);
     if (existing && existing.file_path && fs.existsSync(existing.file_path)) return existing;
     const doc = await Promise.race([
@@ -158,7 +168,11 @@ router.post('/', async (req, res) => {
       cheque_number,
       payment_datetime,
       client_txn_id: client_txn_id || null,
+      source: req.body?.source || 'manual',
     });
+    if (payment && payment.error) {
+      return res.status(409).json({ error: payment.error, code: payment.code });
+    }
     res.status(201).json({ payment });
   } catch (err) {
     res.status(500).json({ error: 'Failed to record payment' });
@@ -728,7 +742,13 @@ router.post('/approve-from-message', async (req, res) => {
       sender_account: parsed.phone_number || null,
       payment_datetime: parsed.payment_date ? new Date(parsed.payment_date + 'T12:00:00').toISOString() : null,
       client_txn_id: clientTxnId,
+      source: 'mpesa_parse',
     });
+    if (payment && payment.error) {
+      // Parsed messages must never create payments against incomplete or
+      // non-existent tenancies — reject before anything else happens.
+      return res.status(409).json({ error: payment.error, code: payment.code });
+    }
     if (payment._idempotentReplay) {
       const replayTenant = await store.getTenant(payment.tenant_code);
       return res.json({
@@ -743,6 +763,11 @@ router.post('/approve-from-message', async (req, res) => {
     }
 
     const approved = await store.approvePayment(payment.id);
+    if (approved && approved.error) {
+      // Incomplete/absent tenancy at approval time: no receipt, no allocation,
+      // no WhatsApp confirmation. The Pending payment stays for review.
+      return res.status(409).json({ error: approved.error, code: approved.code, payment_id: payment.id });
+    }
     if (!approved) {
       return res.status(500).json({ error: 'Failed to approve payment after creating it' });
     }
@@ -861,7 +886,11 @@ router.post('/approve-cash-pesalink', async (req, res) => {
       payment_mode,
       payment_datetime: paymentDateTime,
       client_txn_id: clientTxnId,
+      source: 'manual',
     });
+    if (payment && payment.error) {
+      return res.status(409).json({ error: payment.error, code: payment.code });
+    }
     if (payment._idempotentReplay) {
       const replayTenant = await store.getTenant(payment.tenant_code);
       return res.json({
@@ -875,6 +904,9 @@ router.post('/approve-cash-pesalink', async (req, res) => {
     }
 
     const approved = await store.approvePayment(payment.id);
+    if (approved && approved.error) {
+      return res.status(409).json({ error: approved.error, code: approved.code, payment_id: payment.id });
+    }
     if (!approved) {
       return res.status(500).json({ error: 'Failed to approve payment' });
     }

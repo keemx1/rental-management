@@ -84,12 +84,14 @@ const one = async (sql, params) => (await query(sql, params)).rows[0];
 async function main() {
   await cleanup();
 
-  // ── 1. Tenant A moves in ───────────────────────────────────────────────────
+  // ── 1. Tenant A moves in (a real property — DB now validates the chain) ───
+  const house = (await one(`SELECT paybill_number, house_name FROM houses ORDER BY paybill_number LIMIT 1`));
   const A = await store.createTenant({
     tenant_code: CODE,
     name: 'Tenant Alpha Histtest',
     phone_number: '+254700000101',
     property_name: 'ZZ Tenancy Test Property',
+    house_id: house ? house.paybill_number : null,
     rent_amount: 10000,
     deposit_amount: 5000,
     garbage_fee_amount: 2000,
@@ -121,7 +123,6 @@ async function main() {
   check(!!penA, '1d. A penalty created');
 
   // Water invoice for A (raw insert — test fixture)
-  const house = (await one(`SELECT paybill_number, house_name FROM houses ORDER BY paybill_number LIMIT 1`));
   if (house) {
     await query(
       `INSERT INTO water_invoices (wtr_number, tenant_code, tenant_name, property_name, house_paybill_number, unit_label, billing_month, previous_reading, current_reading, units_used, rate_per_unit, total_amount, status)
@@ -306,8 +307,9 @@ async function main() {
   check(gPays.length === 1 && gPays[0].tenancy_id == null, '9h. booking payment is live (belongs to new tenancy)', gPays);
 
   // ── 10. Unit row itself is protected while it anchors history ─────────────
-  const delTenant = await store.deleteTenant(CODE);
-  check(delTenant && delTenant.error, '10. unit delete refused (anchors permanent history)', delTenant);
+  const delTenant = await store.deleteTenant(CODE, 'test');
+  check(delTenant && delTenant.archived === true && delTenant.archive_id,
+    '10. unit delete archives the complete tenancy instead of destroying it', delTenant);
 
   const totalRows = Number((await one(`SELECT COUNT(*)::int AS c FROM payments WHERE tenant_code = $1`, [CODE])).c);
   // A: rent + deposit + late payment · B: rent · C: booking deposit = 5

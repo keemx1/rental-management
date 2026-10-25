@@ -347,25 +347,56 @@ async function updateTenant(id, patch, run) {
   return { ...res.rows[0], rent_amount: Number(res.rows[0].rent_amount) };
 }
 
-async function deleteTenant(id) {
-  // Permanent tenancy history: the unit row anchors every tenancy that ever
-  // occupied it (FK cascades on payments/penalties/agreements would destroy
-  // sealed records, and archives point at this code). Refuse when history exists.
-  const guarded = await query(
-    `SELECT 1 FROM tenancy_archive WHERE tenant_code = $1
-      UNION ALL
-     SELECT 1 FROM payments WHERE tenant_code = $1 AND tenancy_id IS NOT NULL
-      LIMIT 1`,
-    [id]
-  );
-  if (guarded.rows.length) {
-    return {
-      error: 'This unit has permanent tenancy history (archived tenancies and sealed financial records) and cannot be deleted.',
-      code: 'TENANCY_HISTORY',
-    };
+async function deleteTenant(id, actor = null) {
+  const tenant = await getTenant(id);
+  if (!tenant) return false;
+
+  // Anything real — identity or financial/document/message history — is
+  // ARCHIVED as a complete tenancy instead of being deleted (requirement:
+  // deleting/vacating must archive the full history, never leave a blank or
+  // destroyed record). Hard deletion is only allowed for truly empty unit
+  // placeholders (no name, no history).
+  const hasIdentity = String(tenant.name || '').trim() !== '';
+  let historyCount = 0;
+  try {
+    const hist = await query(
+      `SELECT (
+         (SELECT COUNT(*) FROM payments WHERE tenant_code = $1) +
+         (SELECT COUNT(*) FROM penalties WHERE tenant_code = $1) +
+         (SELECT COUNT(*) FROM documents WHERE tenant_code = $1) +
+         (SELECT COUNT(*) FROM water_invoices WHERE tenant_code = $1) +
+         (SELECT COUNT(*) FROM message_logs WHERE tenant_code = $1) +
+         (SELECT COUNT(*) FROM tenancy_agreements WHERE tenant_code = $1) +
+         (SELECT COUNT(*) FROM exit_invoices WHERE tenant_code = $1) +
+         (SELECT COUNT(*) FROM deposit_refunds WHERE tenant_code = $1) +
+         (SELECT COUNT(*) FROM tenancy_archive WHERE tenant_code = $1)
+       )::int AS n`,
+      [id]
+    );
+    historyCount = Number(hist.rows[0].n);
+  } catch (_) { historyCount = hasIdentity ? 1 : 0; }
+
+  if (!hasIdentity && historyCount === 0) {
+    // Empty placeholder unit row — nothing exists to preserve.
+    const res = await query('DELETE FROM tenants WHERE tenant_code = $1', [id]);
+    return res.rowCount > 0;
   }
-  const res = await query('DELETE FROM tenants WHERE tenant_code = $1', [id]);
-  return res.rowCount > 0;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const vac = await vacateTenancy(id, {
+    reason: 'Tenant record deleted — complete tenancy history archived',
+    move_out_date: tenant.move_out_date || today,
+    archived_by: actor || 'system',
+  });
+  if (vac && vac.error) return vac;
+  if (!vac || !vac.archive) {
+    return { error: 'Could not archive this tenancy — delete refused to protect its history.', code: 'ARCHIVE_FAILED' };
+  }
+  return {
+    archived: true,
+    archive_id: vac.archive.id,
+    message: 'Tenant archived — complete tenancy and financial history preserved in Archive.',
+  };
 }
 
 async function markUnitVacant(tenantCode) {
@@ -624,6 +655,38 @@ async function getConflictResolutions(clientTxnIds) {
   return out;
 }
 
+/**
+ * Tenancy completeness check for anything financial: the tenant must exist,
+ * belong to an actual person (non-blank name), be occupied (not Vacant) and
+ * be linked to a property that exists. Returns null when valid, otherwise an
+ * error object { error, code: 'INCOMPLETE_TENANCY' }.
+ */
+async function validateTenancyForFinancials(tenantCode) {
+  const code = String(tenantCode || '').trim();
+  if (!code) {
+    return { error: 'Rejected: no unit/tenant specified for this financial record.', code: 'INCOMPLETE_TENANCY' };
+  }
+  const t = await getTenant(code);
+  if (!t) {
+    return { error: `Rejected: unit/tenant "${code}" does not exist.`, code: 'INCOMPLETE_TENANCY' };
+  }
+  if (!String(t.name || '').trim()) {
+    return { error: `Rejected: unit "${code}" has no tenant assigned — incomplete tenancy record.`, code: 'INCOMPLETE_TENANCY' };
+  }
+  if (String(t.status || '').trim() === 'Vacant') {
+    return { error: `Rejected: unit "${code}" is vacant — assign a tenant before recording financial activity.`, code: 'INCOMPLETE_TENANCY' };
+  }
+  const houseId = t.house_id || t.house_paybill_number;
+  if (!houseId) {
+    return { error: `Rejected: tenant "${code}" is not linked to a property.`, code: 'INCOMPLETE_TENANCY' };
+  }
+  const house = await getHouse(houseId);
+  if (!house) {
+    return { error: `Rejected: tenant "${code}" references a property that does not exist.`, code: 'INCOMPLETE_TENANCY' };
+  }
+  return null;
+}
+
 async function createPayment(data) {
   // Idempotency: an offline device may upload the same payment twice
   // (retry after timeout, double sync). The client_txn_id UUID identifies
@@ -633,10 +696,14 @@ async function createPayment(data) {
     const existing = await findPaymentByClientTxnId(data.client_txn_id);
     if (existing) return { ...existing, amount: Number(existing.amount), _idempotentReplay: true };
   }
+  // Every payment must tie to a complete, occupied tenancy (manual entry,
+  // M-Pesa parsing, offline sync and imports all funnel through here).
+  const invalid = await validateTenancyForFinancials(data.tenant_id);
+  if (invalid) return invalid;
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const res = await query(
-    `INSERT INTO payments (tenant_code, amount, mpesa_reference, status, payment_date, notes, payment_type, payment_mode, sender_account, receiver_account, cheque_number, payment_datetime, client_txn_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    `INSERT INTO payments (tenant_code, amount, mpesa_reference, status, payment_date, notes, payment_type, payment_mode, sender_account, receiver_account, cheque_number, payment_datetime, client_txn_id, source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING *, tenant_code AS tenant_id, payment_date::text AS payment_date`,
     [
       String(data.tenant_id),
@@ -651,7 +718,8 @@ async function createPayment(data) {
       data.receiver_account || null,
       data.cheque_number || null,
       data.payment_datetime || null,
-      data.client_txn_id || null
+      data.client_txn_id || null,
+      data.source || 'manual'
     ]
   );
   return { ...res.rows[0], amount: Number(res.rows[0].amount) };
@@ -673,6 +741,12 @@ async function approvePayment(id) {
       code: 'TENANCY_SEALED',
     };
   }
+
+  // The tenancy must still be complete at approval time: a Pending payment
+  // whose tenant left (or was wiped) must never produce a receipt,
+  // allocation or WhatsApp confirmation.
+  const invalidTenancy = await validateTenancyForFinancials(existingPayment.tenant_code);
+  if (invalidTenancy) return invalidTenancy;
 
   if (existingPayment.status === 'Approved') {
     // Repair path: previously-approved payments that were never marked synced
@@ -3045,11 +3119,28 @@ async function applyCreditBalance(tenantCode, amount, target, opts = {}) {
 }
 
 async function logLedgerEntry(tenantCode, type, amount, description) {
-  await query(
-    `INSERT INTO payments (tenant_code, amount, mpesa_reference, status, payment_date, notes, payment_type)
-     VALUES ($1, $2, $3, 'Approved', CURRENT_DATE, $4, 'rent')`,
-    [tenantCode, amount, `LEDGER-${type.toUpperCase()}-${Date.now()}`, description]
-  );
+  // Ledger adjustments are financial records too: same tenancy validation,
+  // same origin tracking — never a raw INSERT.
+  const row = await createPayment({
+    tenant_id: tenantCode,
+    amount,
+    mpesa_reference: `LEDGER-${String(type || 'adj').toUpperCase()}-${Date.now()}`,
+    notes: description,
+    status: 'Approved',
+    payment_type: 'rent',
+    source: 'ledger_adjustment',
+  });
+  if (row && row.error) {
+    console.error(`[Ledger] entry rejected for ${tenantCode}: ${row.error}`);
+    return null;
+  }
+  try {
+    await logAudit({
+      actor: 'system', action: 'ledger_entry', entityType: 'payment',
+      entityId: String(row.id), details: { type, amount, description },
+    });
+  } catch (_) {}
+  return row;
 }
 
 function mapPendingOverpaymentRow(r) {
@@ -6821,6 +6912,32 @@ async function vacateTenancy(tenantCode, options = {}) {
   const tenant = await getTenant(tenantCode);
   if (!tenant) return null;
 
+  // Never create a blank archive: a tenancy with no identity AND no financial
+  // history has nothing to preserve — refuse instead of writing an empty
+  // record that would pollute the archive.
+  const hasIdentity = String(tenant.name || '').trim() !== '';
+  if (!hasIdentity) {
+    try {
+      const hist = await query(
+        `SELECT (
+           (SELECT COUNT(*) FROM payments WHERE tenant_code = $1) +
+           (SELECT COUNT(*) FROM penalties WHERE tenant_code = $1) +
+           (SELECT COUNT(*) FROM water_invoices WHERE tenant_code = $1) +
+           (SELECT COUNT(*) FROM exit_invoices WHERE tenant_code = $1) +
+           (SELECT COUNT(*) FROM deposit_refunds WHERE tenant_code = $1) +
+           (SELECT COUNT(*) FROM tenancy_archive WHERE tenant_code = $1)
+         )::int AS n`,
+        [tenantCode]
+      );
+      if (!Number(hist.rows[0].n)) {
+        return {
+          error: 'Nothing to archive: this unit has no tenant identity and no financial history — refusing to create a blank archive record.',
+          code: 'NOTHING_TO_ARCHIVE',
+        };
+      }
+    } catch (_) { /* fall through — archive with whatever exists */ }
+  }
+
   // Seal strays from EARLIER tenancies first (money dated before the previous
   // move-out that was recorded late) so the snapshot below contains only THIS
   // tenancy's rows.
@@ -8155,6 +8272,7 @@ module.exports = {
   getLatestWaterReading,
   sealTenancyRows,
   sealStrayTenancyRows,
+  validateTenancyForFinancials,
   getRecentWaterUnits,
   buildWaterBillReport,
   findTenantByPropertyAndUnit,

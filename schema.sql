@@ -1508,3 +1508,14 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='inspections' AND column_name='tenancy_id') THEN ALTER TABLE inspections ADD COLUMN tenancy_id INTEGER; END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maintenance_charges' AND column_name='tenancy_id') THEN ALTER TABLE maintenance_charges ADD COLUMN tenancy_id INTEGER; END IF;
 END $$;
+
+-- -- Financial integrity (migrate-financial-integrity.js applies constraints,
+--    validation triggers and audit triggers on a live database) ---------------
+-- payments.source: origin of every payment (manual | mpesa_parse | booking |
+-- ledger_adjustment). All FKs on financial tables are ON DELETE RESTRICT;
+-- BEFORE INSERT triggers reject records whose tenant is missing/incomplete/
+-- vacant or has no valid property; AFTER INSERT triggers write audit_log rows.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='source') THEN ALTER TABLE payments ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'manual'; END IF;
+END $$;

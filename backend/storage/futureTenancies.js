@@ -357,8 +357,8 @@ async function activateFutureTenancy(futureTenancyId, store) {
         'INSERT INTO payments (tenant_code, amount, mpesa_reference, status, payment_date,' +
         ' notes, payment_type, payment_mode, payment_datetime,' +
         " approved_at, recorded_at, billing_period, receipt_number," +
-        " sync_status, synced_at, future_payment_id)" +
-        " VALUES ($1,$2,$3,'Approved',$4,$5,$6,$7,$8,$9,$10,$11,$12,'synced',NOW(),$13)",
+        " sync_status, synced_at, future_payment_id, source)" +
+        " VALUES ($1,$2,$3,'Approved',$4,$5,$6,$7,$8,$9,$10,$11,$12,'synced',NOW(),$13,'booking')",
         [finalTenantCode, Number(fp.amount), fp.mpesa_reference || null,
          fpDateStr || today, notes, purposeToType(fp.purpose),
          fp.payment_mode || null, payDate,
