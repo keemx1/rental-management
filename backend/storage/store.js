@@ -3372,6 +3372,158 @@ function dashDaysBetween(fromIso, toIso) {
   return Math.max(0, Math.round((new Date(toIso + 'T12:00:00Z') - new Date(fromIso + 'T12:00:00Z')) / 86400000));
 }
 
+// ── House collection position ────────────────────────────────────────────────
+// Overall financial collection performance of ONE house for a billing period,
+// computed LIVE from the existing billing/invoice/payment records — nothing is
+// stored or entered manually, so every charge edit and every payment
+// (record/approve/delete/allocation) is reflected on the next request.
+//
+// EXPECTED = all legitimate charges raised for the period:
+//   rent (current occupancies covering the period; mid-period joiners use
+//   their recorded first-billing charge) + new-tenant deposits raised in the
+//   period + water (metered invoices for the period, else flat monthly
+//   charges) + garbage + penalties invoiced in the period + maintenance
+//   (work-order costs) charged to the period + exit-invoice charges raised in
+//   the period (final rent + deduction lines; carried-forward arrears from
+//   earlier periods are deliberately excluded to avoid double counting).
+//
+// COLLECTED = every approved payment for the house in the period, regardless
+//   of category — the SAME period predicate the Collection Report uses
+//   (billing_period, with payment_date fallback for legacy rows).
+async function getHouseCollectionPosition(houseId, period) {
+  const labels = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+  const cur = new Date().toISOString().slice(0, 7);
+  const p = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(period || '')) ? String(period) : cur;
+  const [py, pm] = p.split('-').map(Number);
+  const periodStart = `${p}-01`;
+  const periodEnd = `${pm === 12 ? py + 1 : py}-${String(pm === 12 ? 1 : pm + 1).padStart(2, '0')}-01`; // exclusive
+
+  // ── Expected: rent + garbage + flat water (occupancies covering period) ──
+  const occ = await query(
+    `SELECT rent_amount, garbage_fee_amount, water_charge_amount,
+            move_in_date::text AS move_in_date, first_billing_method, first_billing_charge
+       FROM tenants
+      WHERE house_paybill_number = $1
+        AND status <> 'Vacant'
+        AND COALESCE(TRIM(name), '') <> ''
+        AND (move_in_date IS NULL OR move_in_date < $2)`,
+    [houseId, periodEnd]
+  );
+  let rentExpected = 0;
+  let garbageExpected = 0;
+  let flatWater = 0;
+  for (const t of occ.rows) {
+    const joinedInPeriod = t.move_in_date && String(t.move_in_date) >= periodStart && String(t.move_in_date) < periodEnd;
+    if (joinedInPeriod && t.first_billing_method != null && t.first_billing_charge != null) {
+      rentExpected += Number(t.first_billing_charge); // recorded prorated/waived first charge
+    } else {
+      rentExpected += Number(t.rent_amount || 0);
+    }
+    garbageExpected += Number(t.garbage_fee_amount || 0);
+    flatWater += Number(t.water_charge_amount || 0);
+  }
+
+  // New-tenant deposits raised during the period (paid or not).
+  const dep = await query(
+    `SELECT COALESCE(SUM(deposit_amount), 0)::float8 AS total FROM tenants
+      WHERE house_paybill_number = $1 AND move_in_date >= $2 AND move_in_date < $3`,
+    [houseId, periodStart, periodEnd]
+  );
+  const depositsExpected = Number(dep.rows[0].total || 0);
+
+  // Water: metered invoices raised for the period win; else flat monthly charges.
+  const winv = await query(
+    `SELECT COALESCE(SUM(total_amount), 0)::float8 AS total, COUNT(*)::int AS n
+       FROM water_invoices WHERE house_paybill_number = $1 AND billing_month = $2`,
+    [houseId, p]
+  );
+  const waterExpected = Number(winv.rows[0].n) > 0 ? Number(winv.rows[0].total) : flatWater;
+
+  // Penalties invoiced during the period.
+  const pen = await query(
+    `SELECT COALESCE(SUM(pe.amount), 0)::float8 AS total
+       FROM penalties pe JOIN tenants t ON t.tenant_code = pe.tenant_code
+      WHERE t.house_paybill_number = $1 AND pe.invoice_date >= $2 AND pe.invoice_date < $3`,
+    [houseId, periodStart, periodEnd]
+  );
+  const penaltiesExpected = Number(pen.rows[0].total || 0);
+
+  // Maintenance (work-order costs) charged to the period.
+  const mc = await query(
+    `SELECT COALESCE(SUM(mc.total_cost), 0)::float8 AS total
+       FROM maintenance_charges mc JOIN work_orders wo ON wo.id = mc.work_order_id
+      WHERE wo.house_paybill_number = $1 AND mc.charge_month = $2`,
+    [houseId, p]
+  );
+  const maintenanceExpected = Number(mc.rows[0].total || 0);
+
+  // Exit invoices raised during the period: final rent charged + deduction
+  // lines. Carried-forward arrears (outstanding_balance) is NOT counted —
+  // it was raised in an earlier period.
+  const ex = await query(
+    `SELECT rent_charged_amount, lines FROM exit_invoices
+      WHERE house_paybill_number = $1 AND move_out_date >= $2 AND move_out_date < $3`,
+    [houseId, periodStart, periodEnd]
+  );
+  let exitRent = 0;
+  let exitLines = 0;
+  for (const e of ex.rows) {
+    exitRent += Number(e.rent_charged_amount || 0);
+    let lines = e.lines;
+    try { if (typeof lines === 'string') lines = JSON.parse(lines); } catch (_) { lines = []; }
+    for (const l of Array.isArray(lines) ? lines : []) exitLines += Number(l.amount || 0);
+  }
+
+  const expectedBy = {
+    rent: Math.round(rentExpected),
+    deposits: Math.round(depositsExpected),
+    water: Math.round(waterExpected),
+    garbage: Math.round(garbageExpected),
+    penalties: Math.round(penaltiesExpected),
+    maintenance: Math.round(maintenanceExpected),
+    exit_charges: Math.round(exitRent + exitLines),
+  };
+  const expected = Object.values(expectedBy).reduce((s, v) => s + v, 0);
+
+  // ── Collected: every approved payment in the period (any category) ──────
+  // Same predicate as the Collection Report: billing_period first, with a
+  // payment_date fallback for legacy rows that never got a billing period.
+  const periodPredicate = `(p.billing_period = $2 OR (p.billing_period IS NULL AND p.payment_date >= $3 AND p.payment_date < $4))`;
+  const col = await query(
+    `SELECT COALESCE(SUM(p.amount), 0)::float8 AS total
+       FROM payments p JOIN tenants t ON t.tenant_code = p.tenant_code
+      WHERE t.house_paybill_number = $1 AND p.status = 'Approved'
+        AND ${periodPredicate}`,
+    [houseId, p, periodStart, periodEnd]
+  );
+  const collected = Number(col.rows[0].total || 0);
+
+  const colByType = await query(
+    `SELECT COALESCE(NULLIF(p.payment_type, ''), 'other') AS type, COALESCE(SUM(p.amount), 0)::float8 AS total
+       FROM payments p JOIN tenants t ON t.tenant_code = p.tenant_code
+      WHERE t.house_paybill_number = $1 AND p.status = 'Approved'
+        AND ${periodPredicate}
+      GROUP BY 1 ORDER BY 2 DESC`,
+    [houseId, p, periodStart, periodEnd]
+  );
+
+  const remaining = expected - collected;
+  const percent = expected > 0 ? Math.round((collected / expected) * 1000) / 10 : 0;
+
+  return {
+    period: p,
+    period_label: `${labels[pm - 1]} ${py}`,
+    expected,
+    expected_by: expectedBy,
+    collected,
+    collected_by_type: colByType.rows.map((r) => ({ type: r.type, amount: Math.round(Number(r.total)) })),
+    remaining,
+    over_collected: remaining < 0,
+    percent,
+  };
+}
+
 async function getDashboardMetrics() {
   const today = DASH_TODAY();
   const monthStart = today.slice(0, 8) + '01';
@@ -8653,6 +8805,7 @@ module.exports = {
   updateWaterRate,
   getWaterRateHistory,
   getLatestWaterReading,
+  getHouseCollectionPosition,
   sealTenancyRows,
   sealStrayTenancyRows,
   validateTenancyForFinancials,

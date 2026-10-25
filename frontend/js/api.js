@@ -342,7 +342,11 @@ export const api = {
     return request(`/houses/${id}`, { method: 'DELETE' });
   },
   houseDashboard(id) {
-    return request(`/houses/${id}/dashboard`);
+    return request(`/houses/${encodeURIComponent(id)}/dashboard`);
+  },
+  houseCollection(id, period) {
+    const qs = period ? `?period=${encodeURIComponent(period)}` : '';
+    return request(`/houses/${encodeURIComponent(id)}/collection${qs}`);
   },
   templates() {
     return request('/templates');

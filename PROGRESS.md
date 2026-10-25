@@ -3,7 +3,7 @@
 Living record of every update applied to this repository
 (`origin → https://github.com/keemx1/rental-management`, branch `main`).
 
-**Last updated:** 2026-10-25 · app version `v65` · SW cache `gutenberg-v66-irmanage`
+**Last updated:** 2026-10-25 · app version `v66` · SW cache `gutenberg-v67-irmanage`
 
 ---
 
@@ -28,6 +28,7 @@ Run from the repo root (server must be up on port `3003`):
 | Financial integrity | `node tests/test_financial_integrity.js` | 27 assertions — payments rejected against incomplete/non-existent/vacant tenancies at app AND database level, re-linking blocked, delete archives instead of destroying, RESTRICT constraints, origin + audit trail |
 | Archive payment history | `node tests/test_archive_history.js` | 41 assertions — per-tenancy chronological payments with allocations and exact balance-before/after, complete financial summary, exit-invoice link, no bleed from later tenants of the same unit |
 | WhatsApp report send | `node tests/test_report_whatsapp.js` | 26 assertions — sent attachment is the same valid .xlsx as Download with the correct spreadsheet mimetype, delivery vs generation failures reported separately (502/500), cleanup never surfaces as an error |
+| House collection position | `node tests/test_house_collection.js` | 29 assertions — expected (rent/deposits/water/garbage/penalties/maintenance/exit charges) and collected (any category) per period, remaining + %, mid-period joiner included, live recompute on charge/payment changes |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -290,6 +291,35 @@ Download button).
   confirms "generated and sent to <number>".
 - Download flow untouched (baseline asserted by the new suite).
 
+### 12. House Dashboard — overall collection position (app `v66`)
+Each House Dashboard now shows four live figures for a selected billing
+period, computed automatically from existing billing/invoice/payment records
+(no manual figures, no workflow change):
+
+- **TOTAL AMOUNT EXPECTED** — all legitimate charges raised for the period:
+  rent for occupancies covering it (mid-period joiners use their recorded
+  first-billing charge), new-tenant deposits raised in the period, water
+  (metered invoices for the period, else flat monthly charges), garbage,
+  penalties invoiced in the period, maintenance (work-order costs) charged to
+  the period, and exit-invoice charges raised in the period (final rent +
+  deduction lines — carried-forward arrears excluded to avoid double
+  counting). Per-component breakdown shown under the figure.
+- **TOTAL AMOUNT COLLECTED** — every approved payment for the house in the
+  period regardless of category, using the SAME period predicate as the
+  Collection Report (billing_period with payment-date fallback for legacy
+  rows). Payment-type breakdown shown under the figure.
+- **REMAINING BALANCE** = expected − collected (over-collection reported
+  separately rather than as a confusing negative).
+- **COLLECTION %** = collected ÷ expected × 100 (green ≥90, amber ≥60).
+
+**Live by construction:** `GET /api/houses/:id/collection?period=YYYY-MM`
+(`store.getHouseCollectionPosition`) runs fresh queries per request — new
+tenants' charges join the moment they're created, and every payment
+recorded/approved/deleted/allocated or charge edited is reflected on the next
+load or period change (all proven by the test). The dashboard loads the
+figures whenever it opens and re-fetches when the new billing-period month
+input changes; defaults to the current month.
+
 ---
 
 ## Open items / next
@@ -322,3 +352,4 @@ Download button).
 | 9 | Ghost-record elimination + DB-level validation, RESTRICT FKs, origin audit | v63 |
 | 10 | Archive: clickable tenant name → complete per-tenancy payment history | v64 |
 | 11 | WhatsApp report send: correct .xlsx mimetype + honest stage-based errors | v65 |
+| 12 | House Dashboard: live collection position (expected/collected/remaining/%) | v66 |

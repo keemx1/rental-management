@@ -143,6 +143,21 @@ router.get('/:id/dashboard', async (req, res) => {
   }
 });
 
+// Overall collection position for one house + billing period: expected vs
+// collected vs remaining vs %, computed live from billing/invoice/payment
+// records (no stored/manual figures — reflects every charge & payment edit).
+router.get('/:id/collection', async (req, res) => {
+  try {
+    const house = await store.getHouse(req.params.id);
+    if (!house) return res.status(404).json({ error: 'House not found' });
+    const collection = await store.getHouseCollectionPosition(req.params.id, req.query.period);
+    res.json({ collection: { ...collection, house_name: house.house_name, house_id: house.paybill_number } });
+  } catch (err) {
+    console.error('[Houses] collection position:', err);
+    res.status(500).json({ error: 'Failed to compute collection position: ' + err.message });
+  }
+});
+
 router.post('/', async (req, res) => {
   try {
     const { house_name, total_units, paybill_number, notes, garbage_fee_enabled, payment_method, payment_paybill, account_number_format, till_number } = req.body;

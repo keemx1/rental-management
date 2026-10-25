@@ -1055,6 +1055,42 @@
           </div>
         </div>
 
+        <!-- COLLECTION POSITION — live figures from billing/invoice/payment records -->
+        <div class="glass-panel p-5" id="house-collection-panel">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <span class="sys-tag">[COLLECTION POSITION]</span>
+              <p class="text-xs text-slate-500 font-mono mt-1">Overall financial collection performance for this house — <span id="hc-period-label">—</span></p>
+            </div>
+            <label class="flex items-center gap-2 text-xs font-mono text-slate-500">
+              Billing period
+              <input type="month" id="house-collection-period" class="cyber-input" />
+            </label>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="metric-card glass-panel p-3">
+              <p class="text-xs text-slate-500 font-mono">TOTAL AMOUNT EXPECTED</p>
+              <p id="hc-expected" class="metric-value text-xl mt-1 font-orbitron">KES 0</p>
+              <p id="hc-expected-detail" class="text-[11px] text-slate-500 font-mono mt-1 leading-snug">—</p>
+            </div>
+            <div class="metric-card metric-green glass-panel p-3">
+              <p class="text-xs text-slate-500 font-mono">TOTAL AMOUNT COLLECTED</p>
+              <p id="hc-collected" class="metric-value text-xl mt-1 font-orbitron text-green-600">KES 0</p>
+              <p id="hc-collected-detail" class="text-[11px] text-slate-500 font-mono mt-1 leading-snug">—</p>
+            </div>
+            <div class="metric-card glass-panel p-3">
+              <p class="text-xs text-slate-500 font-mono">REMAINING BALANCE</p>
+              <p id="hc-remaining" class="metric-value text-xl mt-1 font-orbitron text-rose-500">KES 0</p>
+              <p id="hc-remaining-note" class="text-[11px] text-slate-500 font-mono mt-1 leading-snug">&nbsp;</p>
+            </div>
+            <div class="metric-card glass-panel p-3">
+              <p class="text-xs text-slate-500 font-mono">COLLECTION %</p>
+              <p id="hc-pct" class="metric-value text-xl mt-1 font-orbitron">0%</p>
+              <p class="text-[11px] text-slate-500 font-mono mt-1 leading-snug">Collected ÷ Expected × 100</p>
+            </div>
+          </div>
+        </div>
+
         <div class="glass-panel p-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p class="text-xs text-slate-500 font-mono mb-1">VACANT HOUSE NUMBERS</p>
@@ -5456,10 +5492,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=65"></script>
+  <script type="module" src="/js/app.js?v=66"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=65').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=66').catch(() => {});
     }
     // Safety: never trap the user behind the splash â€” if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

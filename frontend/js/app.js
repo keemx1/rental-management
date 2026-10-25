@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v65';
+const GEHM_VERSION = 'v66';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -3388,6 +3388,8 @@ async function openHouseDashboard(houseId) {
 
 async function loadHouseDashboardPage(houseId) {
   if (!houseId) return;
+  // Collection position loads independently of the units table (always fresh).
+  loadHouseCollection(houseId);
   const titleEl = document.getElementById('house-page-title');
   const subtitleEl = document.getElementById('house-page-subtitle');
   const tenantsTbody = document.getElementById('house-page-tenants-tbody');
@@ -3440,6 +3442,49 @@ async function loadHouseDashboardPage(houseId) {
     tenantsTbody.innerHTML = tenants.map((t) => renderDashboardTenantRow(t, false)).join('');
   } catch (err) {
     tenantsTbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-500">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+// Collection position for the House Dashboard: four live figures computed
+// server-side from billing/invoice/payment records for the selected period.
+async function loadHouseCollection(houseId) {
+  if (!houseId) return;
+  const input = document.getElementById('house-collection-period');
+  const currentDefault = new Date().toISOString().slice(0, 7);
+  if (input && !input.value) input.value = currentDefault;
+  const period = (input && input.value) || currentDefault;
+  try {
+    const { collection: c } = await api.houseCollection(houseId, period);
+    setTextEl('hc-period-label', c.period_label || c.period || '—');
+    setTextEl('hc-expected', `KES ${Number(c.expected || 0).toLocaleString()}`);
+    const expParts = Object.entries(c.expected_by || {})
+      .filter(([, v]) => Number(v) > 0)
+      .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${Number(v).toLocaleString()}`);
+    setTextEl('hc-expected-detail', expParts.length ? expParts.join(' · ') : 'No charges raised in this period');
+    setTextEl('hc-collected', `KES ${Number(c.collected || 0).toLocaleString()}`);
+    const colParts = (c.collected_by_type || [])
+      .filter((x) => Number(x.amount) > 0)
+      .map((x) => `${x.type}: ${Number(x.amount).toLocaleString()}`);
+    setTextEl('hc-collected-detail', colParts.length ? colParts.join(' · ') : 'No payments received in this period');
+    if (Number(c.remaining) < 0) {
+      setTextEl('hc-remaining', 'KES 0');
+      setTextEl('hc-remaining-note', `Over-collected: KES ${Math.abs(Number(c.remaining)).toLocaleString()}`);
+    } else {
+      setTextEl('hc-remaining', `KES ${Number(c.remaining || 0).toLocaleString()}`);
+      setTextEl('hc-remaining-note', '\u00a0');
+    }
+    const pct = Number(c.percent || 0);
+    setTextEl('hc-pct', `${pct}%`);
+    const pctEl = document.getElementById('hc-pct');
+    if (pctEl) {
+      pctEl.className = `metric-value text-xl mt-1 font-orbitron ${pct >= 90 ? 'text-green-600' : pct >= 60 ? 'text-amber-500' : 'text-rose-500'}`;
+    }
+  } catch (err) {
+    setTextEl('hc-period-label', '—');
+    ['hc-expected', 'hc-collected', 'hc-remaining', 'hc-pct'].forEach((id) => setTextEl(id, '—'));
+    setTextEl('hc-expected-detail', escapeHtml(err.message));
+    setTextEl('hc-collected-detail', '');
+    setTextEl('hc-remaining-note', '');
   }
 }
 
@@ -4062,6 +4107,11 @@ document.getElementById('btn-house-back')?.addEventListener('click', () => {
   activeHouseId = null;
   setHash('#');
   showView('houses');
+});
+
+// Collection position: recompute when the billing period changes.
+document.getElementById('house-collection-period')?.addEventListener('change', () => {
+  if (activeHouseId) loadHouseCollection(activeHouseId);
 });
 
 document.getElementById('btn-td-back')?.addEventListener('click', () => {
