@@ -20,7 +20,7 @@
   <meta name="apple-mobile-web-app-title" content="Gutenberg Elite" />
   <style>
     /* Boot splash: covers the app until the session check decides
-       login vs dashboard — no more login-page flash on refresh. */
+       login vs dashboard â€” no more login-page flash on refresh. */
     #boot-splash {
       position: fixed; inset: 0; z-index: 10000;
       display: flex; align-items: center; justify-content: center;
@@ -32,7 +32,7 @@
 </head>
 
 <body class="h-full">
-  <div id="boot-splash">Loading GEHPM…</div>
+  <div id="boot-splash">Loading GEHPMâ€¦</div>
   <div class="quantum-bg" aria-hidden="true">
     <div class="quantum-grid"></div>
     <div class="quantum-scanline"></div>
@@ -185,12 +185,12 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
             </div>
             <div class="sidebar-user-details">
-              <div class="sidebar-username" id="nav-username">—</div>
+              <div class="sidebar-username" id="nav-username">â€”</div>
               <button type="button" id="logout-btn" class="sidebar-signout">Sign Out</button>
             </div>
           </div>
           <div class="text-[10px] font-mono text-slate-500 mt-2" id="gehm-version" style="cursor:pointer" title="Open diagnostics">app v60</div>
-          <button type="button" id="btn-install-app" class="hidden mt-2 text-[11px] font-semibold text-indigo-300 hover:text-indigo-100">📲 Install App</button>
+          <button type="button" id="btn-install-app" class="hidden mt-2 text-[11px] font-semibold text-indigo-300 hover:text-indigo-100">ðŸ“² Install App</button>
         </div>
       </div>
     </aside>
@@ -236,7 +236,7 @@
 
       <!-- Mobile User Profile -->
       <div class="mb-8 border-b border-slate-200 pb-6">
-        <p class="font-orbitron text-lg text-slate-800" id="nav-username-mobile">—</p>
+        <p class="font-orbitron text-lg text-slate-800" id="nav-username-mobile">â€”</p>
         <span class="sys-tag text-[10px] mt-2 inline-block" id="nav-role-mobile">ADMINISTRATOR</span>
       </div>
 
@@ -310,32 +310,32 @@
           <div class="metric-card glass-panel p-4" data-drill="tenants" role="button" tabindex="0" aria-label="View all tenants">
             <span class="sys-tag">[TENANTS]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">TOTAL</p>
-            <p id="metric-total" class="metric-value text-3xl mt-1 font-orbitron">—</p>
+            <p id="metric-total" class="metric-value text-3xl mt-1 font-orbitron">â€”</p>
           </div>
           <div class="metric-card glass-panel p-4" data-drill="vacant" role="button" tabindex="0" aria-label="View vacant units">
             <span class="sys-tag">[VACANT]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">VACANT UNITS</p>
-            <p id="metric-vacant" class="metric-value text-3xl mt-1 font-orbitron">—</p>
+            <p id="metric-vacant" class="metric-value text-3xl mt-1 font-orbitron">â€”</p>
           </div>
           <div class="metric-card metric-warn glass-panel p-4" data-drill="overdue" role="button" tabindex="0" aria-label="View overdue units">
             <span class="sys-tag">[OVERDUE]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">OVERDUE</p>
-            <p id="metric-overdue" class="metric-value text-3xl mt-1 font-orbitron">—</p>
+            <p id="metric-overdue" class="metric-value text-3xl mt-1 font-orbitron">â€”</p>
           </div>
           <div class="metric-card metric-green glass-panel p-4" data-drill="revenue" role="button" tabindex="0" aria-label="View collected rent payments">
             <span class="sys-tag">[REVENUE]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">COLLECTED MTD</p>
-            <p id="metric-revenue" class="metric-value text-xl mt-1 font-orbitron">—</p>
+            <p id="metric-revenue" class="metric-value text-xl mt-1 font-orbitron">â€”</p>
           </div>
           <div class="metric-card metric-warn glass-panel p-4" data-drill="due7" role="button" tabindex="0" aria-label="View rent due in seven days">
             <span class="sys-tag">[DUE_7D]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">DUE IN 7 DAYS</p>
-            <p id="metric-due7" class="metric-value text-3xl mt-1 font-orbitron">—</p>
+            <p id="metric-due7" class="metric-value text-3xl mt-1 font-orbitron">â€”</p>
           </div>
           <div class="metric-card metric-warn glass-panel p-4" data-drill="pending" role="button" tabindex="0" aria-label="View pending payments">
             <span class="sys-tag">[PENDING]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">PENDING PAYMENTS</p>
-            <p id="metric-pending" class="metric-value text-3xl mt-1 font-orbitron">—</p>
+            <p id="metric-pending" class="metric-value text-3xl mt-1 font-orbitron">â€”</p>
           </div>
           <div class="metric-card glass-panel p-4" data-drill="arrears" role="button" tabindex="0" aria-label="View arrears and outstanding balances">
             <span class="sys-tag">[ARREARS]</span>
@@ -344,14 +344,14 @@
           </div>
         </div>
 
-        <!-- COLLECTION PROGRESS — expected / collected / outstanding / % for the billing period -->
+        <!-- COLLECTION PROGRESS â€” expected / collected / outstanding / % for the billing period -->
         <div id="collection-progress-panel" class="glass-panel p-5" data-drill="progress" role="button" tabindex="0" aria-label="View collection progress breakdown">
           <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
             <div>
               <span class="sys-tag">[COLLECTION]</span>
-              <p class="text-xs text-slate-500 font-mono mt-1">COLLECTION PROGRESS · <span id="cp-period">—</span></p>
+              <p class="text-xs text-slate-500 font-mono mt-1">COLLECTION PROGRESS Â· <span id="cp-period">â€”</span></p>
             </div>
-            <p id="cp-pct" class="text-2xl font-orbitron font-bold text-green-600">—</p>
+            <p id="cp-pct" class="text-2xl font-orbitron font-bold text-green-600">â€”</p>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
             <div>
@@ -399,7 +399,7 @@
             <h3 class="text-lg font-semibold text-slate-800">WhatsApp Status</h3>
             <div id="wa-status-badge" class="flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-sm">
               <span id="wa-status-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
-              <span id="wa-status-text" class="text-slate-700">Checking…</span>
+              <span id="wa-status-text" class="text-slate-700">Checkingâ€¦</span>
             </div>
           </div>
 
@@ -446,16 +446,16 @@
           <p class="text-sm text-slate-500 mb-4">Scan this QR code using the WhatsApp account you want to use for tenant notifications.</p>
           <div id="wa-qr-container" class="flex justify-center mb-4">
             <div class="w-64 h-64 bg-white rounded-lg flex items-center justify-center border border-slate-200">
-              <p class="text-slate-400 text-sm">Generating QR code…</p>
+              <p class="text-slate-400 text-sm">Generating QR codeâ€¦</p>
             </div>
           </div>
           <ol class="text-left text-sm text-slate-500 space-y-1 max-w-xs mx-auto mb-4">
             <li>1. Open WhatsApp on your phone</li>
-            <li>2. Go to Settings → Linked Devices</li>
+            <li>2. Go to Settings â†’ Linked Devices</li>
             <li>3. Tap "Link a Device"</li>
             <li>4. Scan this QR code</li>
           </ol>
-          <div id="wa-qr-status" class="text-sm text-amber-600">Waiting for scan…</div>
+          <div id="wa-qr-status" class="text-sm text-amber-600">Waiting for scanâ€¦</div>
           <button type="button" class="qc-btn qc-btn-primary mt-3" onclick="waSimulateScan()">Simulate Scan</button>
         </div>
 
@@ -523,7 +523,7 @@
         <div class="glass-panel p-5">
           <h3 class="text-lg font-semibold mb-3 text-slate-800">Message Templates</h3>
           <div id="wa-templates-list" class="space-y-2">
-            <p class="text-slate-400 text-sm">Loading templates…</p>
+            <p class="text-slate-400 text-sm">Loading templatesâ€¦</p>
           </div>
         </div>
 
@@ -559,9 +559,9 @@
             <div class="flex items-center gap-4">
               <div id="sms-status-badge" class="flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-sm">
                 <span id="sms-status-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
-                <span id="sms-status-text" class="text-slate-700">Checking…</span>
+                <span id="sms-status-text" class="text-slate-700">Checkingâ€¦</span>
               </div>
-              <div id="sms-balance-display" class="flex items-center gap-4 text-sm">—</div>
+              <div id="sms-balance-display" class="flex items-center gap-4 text-sm">â€”</div>
             </div>
           </div>
 
@@ -573,7 +573,7 @@
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
             <div>
-              <label class="text-xs text-slate-500">API Token <span class="text-slate-400">(write-only — leave blank to keep current)</span></label>
+              <label class="text-xs text-slate-500">API Token <span class="text-slate-400">(write-only â€” leave blank to keep current)</span></label>
               <input type="password" id="sms-api-token" placeholder="Paste Bytewave API token" class="qc-input mt-1" autocomplete="off">
             </div>
             <div>
@@ -635,13 +635,13 @@
             <p id="td-subtitle" class="section-desc">Details and payment history</p>
           </div>
           <div class="flex gap-2">
-            <button type="button" id="btn-td-back" class="qc-btn">← Back</button>
-            <button type="button" id="btn-td-notice" class="qc-btn">📋 Notice to Vacate</button>
-            <button type="button" id="btn-td-exit-invoice" class="qc-btn qc-btn-secondary">🚪 Exit Invoice</button>
-            <button type="button" id="btn-td-statement" class="qc-btn">📄 Statement</button>
+            <button type="button" id="btn-td-back" class="qc-btn">â† Back</button>
+            <button type="button" id="btn-td-notice" class="qc-btn">ðŸ“‹ Notice to Vacate</button>
+            <button type="button" id="btn-td-exit-invoice" class="qc-btn qc-btn-secondary">ðŸšª Exit Invoice</button>
+            <button type="button" id="btn-td-statement" class="qc-btn">ðŸ“„ Statement</button>
             <button type="button" id="btn-td-edit" class="qc-btn">Edit Tenant</button>
-            <button type="button" id="btn-td-deposit-rent" class="qc-btn qc-btn-secondary">🏦 Use Deposit for Rent</button>
-            <button type="button" id="btn-td-message" class="qc-btn qc-btn-primary">📲 Send Message</button>
+            <button type="button" id="btn-td-deposit-rent" class="qc-btn qc-btn-secondary">ðŸ¦ Use Deposit for Rent</button>
+            <button type="button" id="btn-td-message" class="qc-btn qc-btn-primary">ðŸ“² Send Message</button>
           </div>
         </header>
 
@@ -650,9 +650,9 @@
           <div class="flex items-center justify-between mb-2">
             <div>
               <span class="sys-tag">[PAYMENT_STATUS]</span>
-              <p id="td-payment-status-text" class="font-orbitron text-lg text-white mt-1">—</p>
+              <p id="td-payment-status-text" class="font-orbitron text-lg text-white mt-1">â€”</p>
             </div>
-            <span id="td-balance-label" class="font-mono font-bold text-xl text-rose-400">KES —</span>
+            <span id="td-balance-label" class="font-mono font-bold text-xl text-rose-400">KES â€”</span>
           </div>
           <div class="w-full bg-slate-700 rounded-full h-2 mb-2">
             <div id="td-payment-bar" class="h-2 rounded-full bg-green-500 transition-all" style="width:0%"></div>
@@ -700,11 +700,11 @@
           <div class="flex items-center justify-between mb-2">
             <div>
               <span class="sys-tag">[MGMT_ARRANGEMENT]</span>
-              <p class="font-orbitron text-sm text-white mt-1">Payment Arrangement <span class="text-slate-500 text-xs font-mono">— management only, never shown to tenant</span></p>
+              <p class="font-orbitron text-sm text-white mt-1">Payment Arrangement <span class="text-slate-500 text-xs font-mono">â€” management only, never shown to tenant</span></p>
             </div>
             <span id="td-arr-status" class="font-mono text-xs font-bold text-slate-400">NONE</span>
           </div>
-          <div id="td-arr-body" class="text-xs font-mono text-slate-400">Loading…</div>
+          <div id="td-arr-body" class="text-xs font-mono text-slate-400">Loadingâ€¦</div>
           <div id="td-arr-history-wrap" class="mt-2 hidden">
             <p class="text-xs text-slate-500 font-mono mb-1">History (audit)</p>
             <div class="overflow-x-auto"><table class="data-grid w-full">
@@ -732,7 +732,7 @@
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div class="metric-card glass-panel p-4">
             <span class="sys-tag">[TENANT_STATUS]</span>
-            <p id="td-metric-status" class="mt-2">—</p>
+            <p id="td-metric-status" class="mt-2">â€”</p>
           </div>
           <div class="metric-card metric-green glass-panel p-4">
             <p class="text-xs text-slate-500 font-mono mt-1">TOTAL PAID</p>
@@ -756,47 +756,47 @@
               <tbody>
                 <tr class="border-b border-slate-700">
                   <td class="py-2 text-slate-400 font-mono w-1/3">Name</td>
-                  <td id="td-info-name" class="py-2 text-white font-semibold">—</td>
+                  <td id="td-info-name" class="py-2 text-white font-semibold">â€”</td>
                 </tr>
                 <tr class="border-b border-slate-700">
                   <td class="py-2 text-slate-400 font-mono">Unit Code</td>
-                  <td id="td-info-code" class="py-2 font-mono text-purple-300">—</td>
+                  <td id="td-info-code" class="py-2 font-mono text-purple-300">â€”</td>
                 </tr>
                 <tr class="border-b border-slate-700">
                   <td class="py-2 text-slate-400 font-mono">Phone</td>
-                  <td id="td-info-phone" class="py-2 font-mono text-slate-300">—</td>
+                  <td id="td-info-phone" class="py-2 font-mono text-slate-300">â€”</td>
                 </tr>
                 <tr class="border-b border-slate-700">
                   <td class="py-2 text-slate-400 font-mono">National ID</td>
-                  <td id="td-info-national-id" class="py-2 font-mono text-slate-300">—</td>
+                  <td id="td-info-national-id" class="py-2 font-mono text-slate-300">â€”</td>
                 </tr>
                 <tr class="border-b border-slate-700">
                   <td class="py-2 text-slate-400 font-mono">Guardian / Emergency Contact</td>
-                  <td id="td-info-guardian" class="py-2 font-mono text-slate-300">—</td>
+                  <td id="td-info-guardian" class="py-2 font-mono text-slate-300">â€”</td>
                 </tr>
                 <tr class="border-b border-slate-700">
                   <td class="py-2 text-slate-400 font-mono">Rent (KES)</td>
-                  <td id="td-info-rent" class="py-2 font-mono text-green-400">—</td>
+                  <td id="td-info-rent" class="py-2 font-mono text-green-400">â€”</td>
                 </tr>
                 <tr>
                   <td class="py-2 text-slate-400 font-mono">Next Rent Due</td>
-                  <td id="td-info-due" class="py-2 font-mono text-amber-400 font-bold">—</td>
+                  <td id="td-info-due" class="py-2 font-mono text-amber-400 font-bold">â€”</td>
                 </tr>
                 <tr>
                   <td class="py-2 text-slate-400 font-mono">Move-in Date</td>
-                  <td id="td-info-movein" class="py-2 font-mono text-slate-300">—</td>
+                  <td id="td-info-movein" class="py-2 font-mono text-slate-300">â€”</td>
                 </tr>
                 <tr>
                   <td class="py-2 text-slate-400 font-mono">Agreement Fee</td>
-                  <td id="td-info-agreement" class="py-2 font-mono text-amber-400">—</td>
+                  <td id="td-info-agreement" class="py-2 font-mono text-amber-400">â€”</td>
                 </tr>
                 <tr>
                   <td class="py-2 text-slate-400 font-mono">Water Charges</td>
-                  <td id="td-info-water" class="py-2 font-mono text-cyan-400">—</td>
+                  <td id="td-info-water" class="py-2 font-mono text-cyan-400">â€”</td>
                 </tr>
                 <tr>
                   <td class="py-2 text-slate-400 font-mono">Water Charge Paid</td>
-                  <td id="td-info-water-paid" class="py-2 font-mono text-cyan-400">—</td>
+                  <td id="td-info-water-paid" class="py-2 font-mono text-cyan-400">â€”</td>
                 </tr>
               </tbody>
             </table>
@@ -807,15 +807,15 @@
               <tbody>
                 <tr class="border-b border-slate-700">
                   <td class="py-2 text-slate-400 font-mono w-1/2">House Name</td>
-                  <td id="td-house-name" class="py-2 text-white font-semibold">—</td>
+                  <td id="td-house-name" class="py-2 text-white font-semibold">â€”</td>
                 </tr>
                 <tr class="border-b border-slate-700">
                   <td class="py-2 text-slate-400 font-mono">House ID</td>
-                  <td id="td-house-paybill" class="py-2 font-mono text-cyan-400">—</td>
+                  <td id="td-house-paybill" class="py-2 font-mono text-cyan-400">â€”</td>
                 </tr>
                 <tr>
                   <td class="py-2 text-slate-400 font-mono">Total Units</td>
-                  <td id="td-house-units" class="py-2 font-mono text-slate-300">—</td>
+                  <td id="td-house-units" class="py-2 font-mono text-slate-300">â€”</td>
                 </tr>
               </tbody>
             </table>
@@ -970,13 +970,13 @@
             </div>
             <div>
               <p class="text-xs text-slate-500">Status</p>
-              <p id="td-dr-status" class="font-bold">—</p>
+              <p id="td-dr-status" class="font-bold">â€”</p>
             </div>
           </div>
           <div class="flex justify-between items-center mt-3">
             <div class="font-mono text-sm">
-              <span class="text-slate-400">Due: </span><span id="td-dr-due" class="text-amber-400">—</span>
-              <span class="text-slate-400 ml-4">Countdown: </span><span id="td-dr-countdown" class="font-bold">—</span>
+              <span class="text-slate-400">Due: </span><span id="td-dr-due" class="text-amber-400">â€”</span>
+              <span class="text-slate-400 ml-4">Countdown: </span><span id="td-dr-countdown" class="font-bold">â€”</span>
             </div>
             <button type="button" id="btn-td-view-refund" class="qc-btn qc-btn-primary text-sm">View Refund</button>
           </div>
@@ -1020,7 +1020,7 @@
             <p id="house-page-subtitle" class="section-desc">Clients, occupancy &amp; actions</p>
           </div>
           <div class="flex gap-2">
-            <button type="button" id="btn-house-back" class="qc-btn">← Back</button>
+            <button type="button" id="btn-house-back" class="qc-btn">â† Back</button>
             <button type="button" id="btn-house-edit" class="qc-btn">Edit house</button>
           </div>
         </header>
@@ -1058,7 +1058,7 @@
         <div class="glass-panel p-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p class="text-xs text-slate-500 font-mono mb-1">VACANT HOUSE NUMBERS</p>
-            <p id="house-page-vacants-list" class="text-sm text-slate-300 font-mono">—</p>
+            <p id="house-page-vacants-list" class="text-sm text-slate-300 font-mono">â€”</p>
           </div>
           <div class="flex gap-2">
             <button type="button" id="btn-house-import-tenant" class="qc-btn qc-btn-secondary"
@@ -1091,7 +1091,7 @@
             <p class="section-num">02 / HOUSE</p>
             <h2 id="house-edit-title" class="section-title text-2xl">Add house</h2>
           </div>
-          <button type="button" id="btn-house-edit-back" class="qc-btn">← Back</button>
+          <button type="button" id="btn-house-edit-back" class="qc-btn">â† Back</button>
         </header>
 
         <div class="glass-panel p-6 max-w-2xl">
@@ -1188,7 +1188,7 @@
           </div>
         </div>
         <div class="flex gap-2 flex-wrap">
-          <input id="tenant-search" type="search" placeholder="Search name, code, phone…"
+          <input id="tenant-search" type="search" placeholder="Search name, code, phoneâ€¦"
             class="cyber-input max-w-xs" />
           <select id="tenant-filter-status" class="cyber-input font-mono">
             <option value="">All statuses</option>
@@ -1379,7 +1379,7 @@
         <header class="section-head">
           <p class="section-num">03 / PAYMENTS</p>
           <h2 class="section-title text-2xl">Rent payments</h2>
-          <p class="section-desc">Record and approve tenant payments — WhatsApp confirmation on approve</p>
+          <p class="section-desc">Record and approve tenant payments â€” WhatsApp confirmation on approve</p>
         </header>
 
         <div class="glass-panel p-4 space-y-3">
@@ -1398,7 +1398,7 @@
           <!-- M-Pesa: paste message -->
           <div id="payment-mpesa-section">
             <textarea id="payment-raw-message" rows="4" class="cyber-input"
-              placeholder="Paste the M-Pesa SMS / message here…"></textarea>
+              placeholder="Paste the M-Pesa SMS / message hereâ€¦"></textarea>
           </div>
 
           <!-- Cash: manual entry -->
@@ -1615,19 +1615,19 @@
               <div id="rent-invoice-info" class="hidden grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div class="bg-slate-800/60 rounded-lg p-3">
                   <div class="text-xs text-slate-400">TENANT</div>
-                  <div class="text-sm font-semibold text-white mt-1" id="rent-invoice-info-name">—</div>
+                  <div class="text-sm font-semibold text-white mt-1" id="rent-invoice-info-name">â€”</div>
                 </div>
                 <div class="bg-slate-800/60 rounded-lg p-3">
                   <div class="text-xs text-slate-400">PROPERTY / UNIT</div>
-                  <div class="text-sm font-semibold text-white mt-1" id="rent-invoice-info-unit">—</div>
+                  <div class="text-sm font-semibold text-white mt-1" id="rent-invoice-info-unit">â€”</div>
                 </div>
                 <div class="bg-slate-800/60 rounded-lg p-3">
                   <div class="text-xs text-slate-400">MONTHLY RENT</div>
-                  <div class="text-sm font-semibold text-white mt-1" id="rent-invoice-info-rent">—</div>
+                  <div class="text-sm font-semibold text-white mt-1" id="rent-invoice-info-rent">â€”</div>
                 </div>
                 <div class="bg-slate-800/60 rounded-lg p-3">
                   <div class="text-xs text-slate-400">PHONE</div>
-                  <div class="text-sm font-semibold text-white mt-1" id="rent-invoice-info-phone">—</div>
+                  <div class="text-sm font-semibold text-white mt-1" id="rent-invoice-info-phone">â€”</div>
                 </div>
               </div>
 
@@ -1802,7 +1802,7 @@
                   </div>
                 </div>
 
-                <!-- Dynamic fields container — populated by JS based on category -->
+                <!-- Dynamic fields container â€” populated by JS based on category -->
                 <div id="mnt-dynamic-fields" class="space-y-4"></div>
 
                 <!-- Multi-Plot Expenses (staff reimbursement only) -->
@@ -2751,7 +2751,7 @@
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="bg-slate-800/30 rounded-lg p-3">
                   <div class="text-xs text-slate-400 mb-1">Payment Terms</div>
-                  <div class="text-xs text-slate-300" id="wb-payment-terms">—</div>
+                  <div class="text-xs text-slate-300" id="wb-payment-terms">â€”</div>
                 </div>
                 <div>
                   <label class="form-label">Notes (optional)</label>
@@ -2917,7 +2917,7 @@
                 <div>
                   <label class="form-label">Property Name</label>
                   <select id="wo-property" class="cyber-input" required>
-                    <option value="">— Select Property —</option>
+                    <option value="">â€” Select Property â€”</option>
                   </select>
                   <input type="hidden" id="wo-house-id" />
                 </div>
@@ -3077,7 +3077,7 @@
 
         <div class="glass-panel p-6 w-full">
           <h3 class="text-md font-semibold text-white mb-1">Recent Inspections</h3>
-          <p class="section-desc mb-3">Property inspections — conducted online or offline, synced automatically</p>
+          <p class="section-desc mb-3">Property inspections â€” conducted online or offline, synced automatically</p>
           <div class="overflow-x-auto">
             <table class="w-full text-left cyber-table text-sm">
               <thead>
@@ -3150,7 +3150,7 @@
         </div>
         <div class="glass-panel p-6 max-w-xl mx-auto mt-6">
           <h3 class="form-label mb-2">Receipt &amp; Invoice Numbering</h3>
-          <p class="text-xs text-slate-500 mb-4">Receipt and invoice numbers are generated automatically and are lifetime continuous — the sequence never resets.</p>
+          <p class="text-xs text-slate-500 mb-4">Receipt and invoice numbers are generated automatically and are lifetime continuous â€” the sequence never resets.</p>
           <div class="flex flex-col gap-2 text-sm font-mono">
             <div class="flex items-center justify-between px-3 py-2 rounded border border-slate-700 bg-slate-900">
               <span class="text-slate-400">Receipt Format</span>
@@ -3220,7 +3220,7 @@
         <div class="glass-panel p-6">
           <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h3 class="form-label mb-0">Stored Documents</h3>
-            <p id="documents-count" class="text-xs font-mono text-slate-500">—</p>
+            <p id="documents-count" class="text-xs font-mono text-slate-500">â€”</p>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-left cyber-table text-sm">
@@ -3294,12 +3294,12 @@
             <input type="hidden" id="doc-letter-id" />
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
               <div>
-                <label class="form-label">Tenant (auto-fills details — optional)</label>
-                <select id="doc-letter-tenant" class="cyber-input w-full"><option value="">— No tenant —</option></select>
+                <label class="form-label">Tenant (auto-fills details â€” optional)</label>
+                <select id="doc-letter-tenant" class="cyber-input w-full"><option value="">â€” No tenant â€”</option></select>
               </div>
               <div>
                 <label class="form-label">Property (for property-wide batch)</label>
-                <select id="doc-letter-property" class="cyber-input w-full"><option value="">— No property —</option></select>
+                <select id="doc-letter-property" class="cyber-input w-full"><option value="">â€” No property â€”</option></select>
               </div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
@@ -3324,7 +3324,7 @@
               <textarea id="doc-letter-body" rows="12" class="cyber-input w-full font-mono text-xs mt-1"></textarea>
               <div class="flex items-center gap-2 mt-1">
                 <select id="doc-placeholder-pick" class="cyber-input text-xs flex-1">
-                  <option value="">— Insert placeholder at cursor (Subject / Recipient / Body) —</option>
+                  <option value="">â€” Insert placeholder at cursor (Subject / Recipient / Body) â€”</option>
                 </select>
                 <button type="button" id="btn-doc-placeholder-insert" class="action-btn text-xs">Insert</button>
               </div>
@@ -3352,10 +3352,10 @@
         <div id="custom-notice-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div class="glass-panel p-6 max-w-4xl w-full max-h-[92vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-1">
-              <h3 class="form-label mb-0">Custom Notice — Blank Letterhead</h3>
+              <h3 class="form-label mb-0">Custom Notice â€” Blank Letterhead</h3>
               <button type="button" class="text-slate-400 hover:text-white text-xl" id="btn-cn-close">&times;</button>
             </div>
-            <p class="text-xs text-slate-500 mb-4">Official letterhead, footer and watermark are automatic. One separate notice is created per tenant and saved under that tenant — nothing is sent until you click Send on each notice.</p>
+            <p class="text-xs text-slate-500 mb-4">Official letterhead, footer and watermark are automatic. One separate notice is created per tenant and saved under that tenant â€” nothing is sent until you click Send on each notice.</p>
 
             <div class="mb-3">
               <label class="form-label">Notice For</label>
@@ -3369,15 +3369,15 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
               <div id="cn-tenant-wrap">
                 <label class="form-label">Tenant</label>
-                <select id="cn-tenant" class="cyber-input w-full"><option value="">— Select tenant —</option></select>
+                <select id="cn-tenant" class="cyber-input w-full"><option value="">â€” Select tenant â€”</option></select>
               </div>
               <div id="cn-unit-wrap" class="hidden">
                 <label class="form-label">Unit Number</label>
-                <select id="cn-unit" class="cyber-input w-full"><option value="">— Select unit —</option></select>
+                <select id="cn-unit" class="cyber-input w-full"><option value="">â€” Select unit â€”</option></select>
               </div>
               <div id="cn-property-wrap" class="hidden">
                 <label class="form-label">Property</label>
-                <select id="cn-property" class="cyber-input w-full"><option value="">— Select property —</option></select>
+                <select id="cn-property" class="cyber-input w-full"><option value="">â€” Select property â€”</option></select>
               </div>
               <div id="cn-scope-wrap" class="hidden">
                 <label class="form-label">Tenants in Property</label>
@@ -3438,7 +3438,7 @@
           <div>
             <span class="sys-tag">[INVOICE_REGISTER]</span>
             <h2 class="section-title mt-1">Invoice <span class="accent">Register</span></h2>
-            <p class="section-desc">Permanent record of every issued invoice — rent, maintenance, penalty &amp; exit. Never deleted; original PDFs stay re-viewable and re-sendable.</p>
+            <p class="section-desc">Permanent record of every issued invoice â€” rent, maintenance, penalty &amp; exit. Never deleted; original PDFs stay re-viewable and re-sendable.</p>
           </div>
           <div class="flex flex-wrap gap-2">
             <button type="button" id="btn-ir-all" class="qc-btn qc-btn-primary">All Invoices</button>
@@ -3450,7 +3450,7 @@
         <div class="glass-panel p-6">
           <h3 class="form-label mb-3">Issued Invoices by Month</h3>
           <div id="ir-monthly" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-            <div class="text-slate-500 text-sm">Loading monthly summary…</div>
+            <div class="text-slate-500 text-sm">Loading monthly summaryâ€¦</div>
           </div>
         </div>
 
@@ -3495,7 +3495,7 @@
         <div class="glass-panel p-6">
           <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h3 class="form-label mb-0">Invoice Register Entries</h3>
-            <p id="ir-count" class="text-xs font-mono text-slate-500">—</p>
+            <p id="ir-count" class="text-xs font-mono text-slate-500">â€”</p>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-left cyber-table text-sm">
@@ -3543,7 +3543,7 @@
               <div>
                 <label class="form-label">Recipient WhatsApp Number</label>
                 <input type="tel" id="ir-share-phone" class="cyber-input" placeholder="e.g. 0712345678" />
-                <p class="text-xs text-slate-500 mt-1">Defaults to the tenant's number on file. Reuses the original invoice PDF — no new number issued.</p>
+                <p class="text-xs text-slate-500 mt-1">Defaults to the tenant's number on file. Reuses the original invoice PDF â€” no new number issued.</p>
               </div>
               <p id="ir-share-status" class="text-sm font-mono text-amber-400"></p>
             </div>
@@ -3557,7 +3557,7 @@
         <div id="ir-edit-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div class="glass-panel p-6 max-w-md w-full">
             <h3 class="form-label mb-1">Edit Invoice Amount</h3>
-            <p class="text-xs text-slate-500 mb-4" id="ir-edit-context">—</p>
+            <p class="text-xs text-slate-500 mb-4" id="ir-edit-context">â€”</p>
             <div class="space-y-4">
               <div>
                 <label class="form-label">Total Amount (KES)</label>
@@ -3608,17 +3608,17 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div class="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
                 <p class="text-xs text-slate-400 uppercase font-bold mb-1">Revenue Collected</p>
-                <p class="text-2xl font-bold text-green-400" id="mr-revenue">—</p>
+                <p class="text-2xl font-bold text-green-400" id="mr-revenue">â€”</p>
                 <p class="text-xs text-slate-500" id="mr-revenue-count"></p>
               </div>
               <div class="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
                 <p class="text-xs text-slate-400 uppercase font-bold mb-1">Total Maintenance Expenses</p>
-                <p class="text-2xl font-bold text-amber-400" id="mr-expenses">—</p>
+                <p class="text-2xl font-bold text-amber-400" id="mr-expenses">â€”</p>
                 <p class="text-xs text-slate-500" id="mr-expenses-detail"></p>
               </div>
               <div class="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
                 <p class="text-xs text-slate-400 uppercase font-bold mb-1">Outstanding Recovery</p>
-                <p class="text-2xl font-bold text-rose-400" id="mr-outstanding">—</p>
+                <p class="text-2xl font-bold text-rose-400" id="mr-outstanding">â€”</p>
                 <p class="text-xs text-slate-500" id="mr-recovery-detail"></p>
               </div>
             </div>
@@ -3810,7 +3810,7 @@
             </div>
             <div class="flex flex-wrap gap-3 mb-4 items-end">
               <div>
-                <label class="form-label text-xs">Unit (optional — blank = all units)</label>
+                <label class="form-label text-xs">Unit (optional â€” blank = all units)</label>
                 <input type="text" id="mr-water-unit" class="cyber-input font-mono" placeholder="e.g. A1" />
               </div>
               <button type="button" id="btn-generate-water-report" class="action-btn">Generate Report</button>
@@ -3917,7 +3917,7 @@
               </div>
               <div class="bg-slate-800/50 rounded-lg p-4 text-center">
                 <p class="text-xs text-slate-400 mb-1">Period</p>
-                <p class="text-lg font-bold text-white font-mono" id="mer-period">—</p>
+                <p class="text-lg font-bold text-white font-mono" id="mer-period">â€”</p>
               </div>
             </div>
 
@@ -4002,7 +4002,7 @@
           <div>
             <span class="sys-tag">[TENANCY_ARCHIVE]</span>
             <h2 class="section-title mt-1">Tenancy <span class="accent">Archive</span></h2>
-            <p class="section-desc">Permanent record of every completed tenancy — payments, invoices, statements, maintenance &amp; exit snapshots</p>
+            <p class="section-desc">Permanent record of every completed tenancy â€” payments, invoices, statements, maintenance &amp; exit snapshots</p>
           </div>
           <button type="button" id="btn-archive-refresh" class="qc-btn qc-btn-primary">Refresh</button>
         </div>
@@ -4035,7 +4035,7 @@
         <div class="glass-panel overflow-x-auto">
           <div class="p-4 border-b border-slate-700 flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-orbitron text-white">Archived Tenancies</h3>
-            <p id="archive-count" class="text-xs font-mono text-slate-500">—</p>
+            <p id="archive-count" class="text-xs font-mono text-slate-500">â€”</p>
           </div>
           <table class="data-grid w-full min-w-[900px]">
             <thead>
@@ -4190,12 +4190,12 @@
               <label class="form-label">Sort By</label>
               <select id="dr-sort" class="cyber-input w-full">
                 <option value="status">Priority</option>
-                <option value="due_asc">Due Date ↑</option>
-                <option value="due_desc">Due Date ↓</option>
-                <option value="exit_desc">Exit Date ↓</option>
-                <option value="exit_asc">Exit Date ↑</option>
-                <option value="amount_desc">Amount ↓</option>
-                <option value="tenant_asc">Tenant A→Z</option>
+                <option value="due_asc">Due Date â†‘</option>
+                <option value="due_desc">Due Date â†“</option>
+                <option value="exit_desc">Exit Date â†“</option>
+                <option value="exit_asc">Exit Date â†‘</option>
+                <option value="amount_desc">Amount â†“</option>
+                <option value="tenant_asc">Tenant Aâ†’Z</option>
               </select>
             </div>
             <button type="button" id="btn-dr-clear" class="qc-btn text-sm">Clear</button>
@@ -4232,7 +4232,7 @@
             <h2 class="section-title text-2xl">User Management</h2>
           </header>
           <button type="button" id="btn-add-user" class="qc-btn qc-btn-primary">+ Add user</button>
-    <button type="button" id="btn-install-pwa" class="qc-btn">📲 Download App</button>
+    <button type="button" id="btn-install-pwa" class="qc-btn">ðŸ“² Download App</button>
         </div>
         <div class="glass-panel overflow-x-auto">
           <table class="data-grid w-full min-w-[700px]">
@@ -4260,10 +4260,10 @@
         </div>
         <div class="glass-panel p-6 max-w-3xl">
           <h3 class="font-orbitron text-white">Official GEHPM Stamp</h3>
-          <p class="text-xs text-slate-500 mt-1 mb-4">Transparent-background PNG preferred. Applied automatically to finalized PDFs (download / generate / send) in each document's authorization area — never in editors or previews. Replacing the stamp updates all future PDFs with no template changes.</p>
+          <p class="text-xs text-slate-500 mt-1 mb-4">Transparent-background PNG preferred. Applied automatically to finalized PDFs (download / generate / send) in each document's authorization area â€” never in editors or previews. Replacing the stamp updates all future PDFs with no template changes.</p>
           <div class="flex flex-wrap items-center gap-4 mb-4">
             <img id="stamp-preview" class="hidden max-h-32 border border-slate-700 rounded bg-white p-1" alt="Official stamp preview" />
-            <div class="text-sm font-mono text-slate-300" id="stamp-status">Loading…</div>
+            <div class="text-sm font-mono text-slate-300" id="stamp-status">Loadingâ€¦</div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <input type="file" id="stamp-file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="cyber-input text-xs" />
@@ -4275,10 +4275,10 @@
         </div>
         <div class="glass-panel p-6 max-w-3xl">
           <h3 class="font-orbitron text-white">Authorized Signature</h3>
-          <p class="text-xs text-slate-500 mt-1 mb-4">Pre-assigns the authorized signatory on letter documents (signature image + holder name in the signature block) so downloads are never left blank. Applies to previews and finalized PDFs — never in editor inputs. Replacing updates all future documents.</p>
+          <p class="text-xs text-slate-500 mt-1 mb-4">Pre-assigns the authorized signatory on letter documents (signature image + holder name in the signature block) so downloads are never left blank. Applies to previews and finalized PDFs â€” never in editor inputs. Replacing updates all future documents.</p>
           <div class="flex flex-wrap items-center gap-4 mb-4">
             <img id="sig-preview" class="hidden max-h-32 border border-slate-700 rounded bg-white p-1" alt="Signature preview" />
-            <div class="text-sm font-mono text-slate-300" id="sig-status">Loading…</div>
+            <div class="text-sm font-mono text-slate-300" id="sig-status">Loadingâ€¦</div>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
             <div><label class="form-label text-xs">Signature Holder Name</label><input type="text" id="sig-holder" class="cyber-input w-full text-xs" placeholder="e.g. David Muiruri" /></div>
@@ -4304,7 +4304,7 @@
         <div class="flex items-center gap-2">
           <button type="button" id="btn-conflicts-pending" class="qc-btn qc-btn-primary">Pending</button>
           <button type="button" id="btn-conflicts-resolved" class="qc-btn">Resolved</button>
-          <button type="button" id="btn-conflicts-refresh" class="qc-btn">↻ Refresh</button>
+          <button type="button" id="btn-conflicts-refresh" class="qc-btn">â†» Refresh</button>
         </div>
         <div class="glass-panel p-6 w-full">
           <div class="overflow-x-auto">
@@ -4321,7 +4321,7 @@
                 </tr>
               </thead>
               <tbody id="conflicts-tbody">
-                <tr><td colspan="7" class="text-center text-slate-500 py-6">Loading…</td></tr>
+                <tr><td colspan="7" class="text-center text-slate-500 py-6">Loadingâ€¦</td></tr>
               </tbody>
             </table>
           </div>
@@ -4334,7 +4334,7 @@
         <div>
           <span class="sys-tag">[COMMISSIONS]</span>
           <h2 class="section-title mt-1">Agent <span class="accent">Commissions</span></h2>
-          <p class="section-desc">Commission = chosen % × (rent collected − deposit − garbage fee − water bill), per house per month. Set each house's rate, then review what is owed to you and what goes to the landlord.</p>
+          <p class="section-desc">Commission = chosen % Ã— (rent collected âˆ’ deposit âˆ’ garbage fee âˆ’ water bill), per house per month. Set each house's rate, then review what is owed to you and what goes to the landlord.</p>
         </div>
         <div class="flex flex-wrap items-end gap-3">
           <div>
@@ -4360,9 +4360,9 @@
                 <tr>
                   <th>House</th>
                   <th class="text-right">Collected</th>
-                  <th class="text-right">− Deposit</th>
-                  <th class="text-right">− Garbage</th>
-                  <th class="text-right">− Water</th>
+                  <th class="text-right">âˆ’ Deposit</th>
+                  <th class="text-right">âˆ’ Garbage</th>
+                  <th class="text-right">âˆ’ Water</th>
                   <th class="text-right">= Rent base</th>
                   <th class="text-right">Rate %</th>
                   <th class="text-right">Commission</th>
@@ -4456,7 +4456,7 @@
       </div>
       <div class="mb-4">
         <p class="text-xs text-slate-500 font-mono mb-1">VACANT HOUSE NUMBERS</p>
-        <p id="house-vacants-list" class="text-sm text-slate-300 font-mono">—</p>
+        <p id="house-vacants-list" class="text-sm text-slate-300 font-mono">â€”</p>
       </div>
       <div class="glass-panel overflow-x-auto">
         <table class="data-grid w-full min-w-[900px]">
@@ -4533,7 +4533,7 @@
           </div>
           <div>
             <label class="form-label">Standard Monthly Rent (KES)</label>
-            <input name="standard_monthly_rent" type="number" min="0" class="cyber-input" title="Master recurring rent — used for all future billing cycles after the first month" />
+            <input name="standard_monthly_rent" type="number" min="0" class="cyber-input" title="Master recurring rent â€” used for all future billing cycles after the first month" />
             <p class="text-xs text-slate-500 mt-1">Leave blank to use Rent as the recurring amount</p>
           </div>
           <div>
@@ -4583,7 +4583,7 @@
           </div>
           <div id="opening-advance-field">
             <label class="form-label">Opening Advance Rent (KES)</label>
-            <input name="opening_advance_rent" type="number" min="0" value="0" class="cyber-input" title="Advance/prepayment not captured in the system (e.g. from before adoption). Reduces the current month's rent. Can be added to existing clients once — after it is recorded it becomes read-only to prevent double-application." />
+            <input name="opening_advance_rent" type="number" min="0" value="0" class="cyber-input" title="Advance/prepayment not captured in the system (e.g. from before adoption). Reduces the current month's rent. Can be added to existing clients once â€” after it is recorded it becomes read-only to prevent double-application." />
             <p id="opening-advance-hint" class="hidden text-xs text-slate-400 mt-1">Opening Advance Rent recorded for this tenancy. This balance is preserved as an opening financial credit and will be automatically consumed against eligible future billing periods during each billing rollover until fully utilized.</p>
           </div>
           <div class="col-span-2 mt-2 border-t border-slate-700 pt-3">
@@ -4764,8 +4764,8 @@
       <input type="hidden" id="statement-tenant-id" />
       <p id="statement-status" class="hidden text-sm font-mono mb-3"></p>
       <div class="flex flex-col gap-2">
-        <button type="button" id="btn-statement-download" class="qc-btn flex-1">⬇ Download PDF</button>
-        <button type="button" id="btn-statement-send" class="qc-btn qc-btn-primary flex-1">📲 Send via WhatsApp</button>
+        <button type="button" id="btn-statement-download" class="qc-btn flex-1">â¬‡ Download PDF</button>
+        <button type="button" id="btn-statement-send" class="qc-btn qc-btn-primary flex-1">ðŸ“² Send via WhatsApp</button>
         <button type="button" id="btn-statement-both" class="qc-btn qc-btn-secondary flex-1">Both: Download + Send</button>
         <button type="button" id="btn-statement-close" class="qc-btn flex-1 mt-1">Close</button>
       </div>
@@ -4779,10 +4779,10 @@
         <h3 class="font-orbitron text-xl text-white">Exit Invoice</h3>
         <div class="flex items-center gap-2">
           <span id="ei-status-badge" class="sys-tag text-[10px]"></span>
-          <span id="ei-number" class="font-mono text-purple-300 text-sm">—</span>
+          <span id="ei-number" class="font-mono text-purple-300 text-sm">â€”</span>
         </div>
       </div>
-      <p id="ei-tenant-line" class="text-slate-400 text-sm mb-4">—</p>
+      <p id="ei-tenant-line" class="text-slate-400 text-sm mb-4">â€”</p>
       <input type="hidden" id="ei-id" />
       <input type="hidden" id="ei-tenant-code" />
       <div id="ei-status-msg" class="hidden text-sm font-mono text-amber-400 mb-3"></div>
@@ -4963,41 +4963,84 @@
         <span class="sys-tag">[DEPOSIT_REFUND]</span>
         <div class="mt-2 space-y-1 font-mono text-sm">
           <div class="flex justify-between"><span class="text-slate-400">Refundable Amount</span><span id="ei-dr-amount" class="text-green-400 font-bold">KES 0</span></div>
-          <div class="flex justify-between"><span class="text-slate-400">Due Date</span><span id="ei-dr-due" class="text-amber-400">—</span></div>
-          <div class="flex justify-between"><span class="text-slate-400">Status</span><span id="ei-dr-status">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Due Date</span><span id="ei-dr-due" class="text-amber-400">â€”</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Status</span><span id="ei-dr-status">â€”</span></div>
         </div>
         <button type="button" id="btn-ei-view-refund" class="qc-btn qc-btn-primary text-sm mt-3 w-full">View Deposit Refund</button>
       </div>
 
       <div id="ei-actions-draft" class="flex flex-wrap gap-2 mb-2">
-        <button type="button" id="btn-ei-save-draft" class="qc-btn flex-1">💾 Save Draft</button>
-        <button type="button" id="btn-ei-finalize" class="qc-btn qc-btn-primary flex-1">🔒 Finalize Invoice</button>
+        <button type="button" id="btn-ei-save-draft" class="qc-btn flex-1">ðŸ’¾ Save Draft</button>
+        <button type="button" id="btn-ei-finalize" class="qc-btn qc-btn-primary flex-1">ðŸ”’ Finalize Invoice</button>
         <button type="button" id="btn-ei-cancel" class="qc-btn flex-1">Close</button>
       </div>
       <div id="ei-actions-final" class="hidden flex flex-col gap-2">
         <div class="bg-emerald-950/40 border border-emerald-700 rounded p-3 text-xs text-emerald-200 leading-relaxed">
-          <strong>Finalized — permanent record.</strong> Tenant details and every figure on a finalized exit invoice stay unchanged forever. Download or send the PDF for your records.
+          <strong>Finalized â€” permanent record.</strong> Tenant details and every figure on a finalized exit invoice stay unchanged forever. Download or send the PDF for your records.
         </div>
         <div class="flex flex-wrap gap-2">
-          <button type="button" id="btn-ei-download" class="qc-btn flex-1">⬇ Download PDF</button>
-          <button type="button" id="btn-ei-send" class="qc-btn qc-btn-primary flex-1">📲 Send via WhatsApp</button>
+          <button type="button" id="btn-ei-download" class="qc-btn flex-1">â¬‡ Download PDF</button>
+          <button type="button" id="btn-ei-send" class="qc-btn qc-btn-primary flex-1">ðŸ“² Send via WhatsApp</button>
           <button type="button" id="btn-ei-both" class="qc-btn qc-btn-secondary flex-1">Both</button>
         </div>
         <div id="ei-mark-vacant-panel" class="hidden bg-slate-900 border border-emerald-700 rounded p-4">
           <p class="text-sm text-white font-semibold mb-2">Exit Invoice completed successfully. Would you like to mark this unit as VACANT?</p>
           <p class="text-xs text-slate-400 mb-3">The tenancy will be closed and permanently archived.</p>
           <div class="flex gap-2">
-            <button type="button" id="btn-ei-mark-vacant-yes" class="qc-btn qc-btn-primary flex-1">YES — Mark Vacant</button>
-            <button type="button" id="btn-ei-mark-vacant-no" class="qc-btn flex-1">NO — Keep Occupied</button>
+            <button type="button" id="btn-ei-mark-vacant-yes" class="qc-btn qc-btn-primary flex-1">YES â€” Mark Vacant</button>
+            <button type="button" id="btn-ei-mark-vacant-no" class="qc-btn flex-1">NO â€” Keep Occupied</button>
           </div>
         </div>
         <button type="button" id="btn-ei-close-final" class="qc-btn flex-1">Close</button>
       </div>
       <div id="ei-actions-editing" class="hidden flex flex-col gap-2">
         <div class="flex flex-wrap gap-2">
-          <button type="button" id="btn-ei-save-finalized" class="qc-btn qc-btn-primary flex-1">💾 Save Changes</button>
+          <button type="button" id="btn-ei-save-finalized" class="qc-btn qc-btn-primary flex-1">ðŸ’¾ Save Changes</button>
           <button type="button" id="btn-ei-cancel-edit" class="qc-btn flex-1">Cancel</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tenancy Payment History (complete financial record of ONE archived tenancy) -->
+  <div id="tenancy-history-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+    <div class="glass-panel p-6 w-full max-w-6xl max-h-[94vh] overflow-y-auto">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <div>
+          <h3 id="th-title" class="font-orbitron text-xl text-white">Tenancy Payment History</h3>
+          <p id="th-sub" class="text-slate-400 text-sm">â€”</p>
+        </div>
+        <div class="flex gap-2">
+          <button type="button" id="btn-th-exit-invoice" class="qc-btn qc-btn-primary text-sm">View Exit Invoice â†’</button>
+          <button type="button" id="btn-th-close" class="qc-btn text-sm">âœ• Close</button>
+        </div>
+      </div>
+
+      <!-- 1. Tenant & tenancy information -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4" id="th-info"></div>
+
+      <!-- 4. Complete financial summary -->
+      <div class="mt-4">
+        <p class="sys-tag inline-block mb-2">[FINANCIAL SUMMARY â€” THIS TENANCY]</p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="th-summary"></div>
+      </div>
+
+      <!-- 2+3. Complete payment history with allocations and running balances -->
+      <div class="mt-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <p class="sys-tag inline-block">[PAYMENT HISTORY â€” MOVE-IN TO EXIT]</p>
+          <span id="th-count" class="text-xs text-slate-500 font-mono"></span>
+        </div>
+        <div class="overflow-x-auto" id="th-payments-wrap"></div>
+        <p id="th-note" class="text-xs text-slate-500 font-mono mt-2"></p>
+      </div>
+
+      <!-- Charge postings (audit trail behind the balances) -->
+      <div class="mt-4">
+        <details id="th-charges-details">
+          <summary class="cursor-pointer text-sm text-slate-300 select-none">Charge postings during this tenancy (rent, garbage, water, penalties)</summary>
+          <div class="overflow-x-auto mt-2" id="th-charges-wrap"></div>
+        </details>
       </div>
     </div>
   </div>
@@ -5007,9 +5050,9 @@
     <div class="glass-panel p-6 w-full max-w-3xl max-h-[92vh] overflow-y-auto">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
         <h3 id="archive-detail-title" class="font-orbitron text-xl text-white">Archived Tenancy</h3>
-        <button type="button" id="btn-archive-detail-close" class="qc-btn text-sm">✕ Close</button>
+        <button type="button" id="btn-archive-detail-close" class="qc-btn text-sm">âœ• Close</button>
       </div>
-      <p id="archive-detail-sub" class="text-slate-400 text-sm mb-4">—</p>
+      <p id="archive-detail-sub" class="text-slate-400 text-sm mb-4">â€”</p>
       <div id="archive-detail-body" class="space-y-4"></div>
     </div>
   </div>
@@ -5021,7 +5064,7 @@
         <h3 class="font-orbitron text-xl text-white">Deposit Refund</h3>
         <div class="flex items-center gap-2">
           <span id="dr-detail-status" class="status-badge"></span>
-          <button type="button" id="btn-dr-detail-close" class="qc-btn text-sm">✕ Close</button>
+          <button type="button" id="btn-dr-detail-close" class="qc-btn text-sm">âœ• Close</button>
         </div>
       </div>
 
@@ -5030,19 +5073,19 @@
         <div class="glass-panel p-4">
           <span class="sys-tag">[TENANT]</span>
           <div class="mt-2 space-y-1 font-mono text-sm">
-            <div class="flex justify-between"><span class="text-slate-400">Name</span><span id="dr-detail-tenant" class="text-white font-semibold">—</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">Phone</span><span id="dr-detail-phone" class="text-slate-300">—</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">Property</span><span id="dr-detail-property" class="text-slate-300">—</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">Unit</span><span id="dr-detail-unit" class="text-purple-300">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Name</span><span id="dr-detail-tenant" class="text-white font-semibold">â€”</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Phone</span><span id="dr-detail-phone" class="text-slate-300">â€”</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Property</span><span id="dr-detail-property" class="text-slate-300">â€”</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Unit</span><span id="dr-detail-unit" class="text-purple-300">â€”</span></div>
           </div>
         </div>
         <div class="glass-panel p-4">
           <span class="sys-tag">[EXIT_INVOICE]</span>
           <div class="mt-2 space-y-1 font-mono text-sm">
-            <div class="flex justify-between"><span class="text-slate-400">Exit Invoice</span><span id="dr-detail-exit-number" class="text-cyan-400">—</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">Exit Date</span><span id="dr-detail-exit-date" class="text-slate-300">—</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">Due Date</span><span id="dr-detail-due-date" class="text-amber-400 font-bold">—</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">Countdown</span><span id="dr-detail-countdown" class="font-bold">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Exit Invoice</span><span id="dr-detail-exit-number" class="text-cyan-400">â€”</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Exit Date</span><span id="dr-detail-exit-date" class="text-slate-300">â€”</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Due Date</span><span id="dr-detail-due-date" class="text-amber-400 font-bold">â€”</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Countdown</span><span id="dr-detail-countdown" class="font-bold">â€”</span></div>
           </div>
         </div>
       </div>
@@ -5080,18 +5123,18 @@
         <div class="mt-2 space-y-1 font-mono text-sm">
           <div class="flex justify-between"><span class="text-slate-400">Amount Refunded</span><span id="dr-detail-amount-refunded" class="text-green-400 font-bold">KES 0</span></div>
           <div class="flex justify-between"><span class="text-slate-400">Remaining</span><span id="dr-detail-remaining" class="text-amber-400">KES 0</span></div>
-          <div class="flex justify-between"><span class="text-slate-400">Refund Date</span><span id="dr-detail-refund-date" class="text-slate-300">—</span></div>
-          <div class="flex justify-between"><span class="text-slate-400">Payment Method</span><span id="dr-detail-method" class="text-slate-300">—</span></div>
-          <div class="flex justify-between"><span class="text-slate-400">Transaction Ref</span><span id="dr-detail-ref" class="text-cyan-400">—</span></div>
-          <div class="flex justify-between"><span class="text-slate-400">Recorded By</span><span id="dr-detail-refunded-by" class="text-slate-300">—</span></div>
-          <div class="flex justify-between"><span class="text-slate-400">Remarks</span><span id="dr-detail-remarks" class="text-slate-300">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Refund Date</span><span id="dr-detail-refund-date" class="text-slate-300">â€”</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Payment Method</span><span id="dr-detail-method" class="text-slate-300">â€”</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Transaction Ref</span><span id="dr-detail-ref" class="text-cyan-400">â€”</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Recorded By</span><span id="dr-detail-refunded-by" class="text-slate-300">â€”</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Remarks</span><span id="dr-detail-remarks" class="text-slate-300">â€”</span></div>
         </div>
       </div>
 
       <!-- Actions -->
       <div id="dr-detail-actions" class="flex flex-wrap gap-2">
-        <button type="button" id="btn-dr-view-exit-invoice" class="qc-btn flex-1">📄 View Exit Invoice</button>
-        <button type="button" id="btn-dr-record-refund" class="qc-btn qc-btn-primary flex-1">💰 Record Refund</button>
+        <button type="button" id="btn-dr-view-exit-invoice" class="qc-btn flex-1">ðŸ“„ View Exit Invoice</button>
+        <button type="button" id="btn-dr-record-refund" class="qc-btn qc-btn-primary flex-1">ðŸ’° Record Refund</button>
       </div>
     </div>
   </div>
@@ -5101,7 +5144,7 @@
     <div class="glass-panel p-6 w-full max-w-md max-h-[92vh] overflow-y-auto">
       <h3 class="font-orbitron text-xl text-white mb-4">Record Refund</h3>
       <div id="dr-record-info" class="font-mono text-sm text-slate-400 mb-4 space-y-1">
-        <div class="flex justify-between"><span>Tenant</span><span id="dr-record-tenant" class="text-white">—</span></div>
+        <div class="flex justify-between"><span>Tenant</span><span id="dr-record-tenant" class="text-white">â€”</span></div>
         <div class="flex justify-between"><span>Outstanding</span><span id="dr-record-outstanding" class="text-cyan-400 font-bold">KES 0</span></div>
       </div>
       <form id="dr-record-form" class="space-y-4">
@@ -5146,14 +5189,14 @@
     </div>
   </div>
 
-  <!-- DASHBOARD DRILLDOWN — records behind a dashboard card -->
+  <!-- DASHBOARD DRILLDOWN â€” records behind a dashboard card -->
   <div id="dash-drill-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
     <div class="glass-panel p-6 w-full max-w-5xl max-h-[92vh] overflow-y-auto">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
         <h3 id="dash-drill-title" class="font-orbitron text-xl text-white">Details</h3>
-        <button type="button" id="dash-drill-close" class="qc-btn text-sm">✕ Close</button>
+        <button type="button" id="dash-drill-close" class="qc-btn text-sm">âœ• Close</button>
       </div>
-      <p id="dash-drill-sub" class="text-slate-400 text-sm mb-4">—</p>
+      <p id="dash-drill-sub" class="text-slate-400 text-sm mb-4">â€”</p>
       <div id="dash-drill-body" class="space-y-4"></div>
     </div>
   </div>
@@ -5189,14 +5232,14 @@
       <h3 class="font-orbitron text-xl text-white mb-2">Use Tenant Deposit for Rent?</h3>
       <p class="text-sm text-slate-400 mb-4">The tenant has an outstanding rent balance. You are about to authorize the use of the tenant's security deposit to cover rent.</p>
       <div class="space-y-2 text-sm font-mono mb-4">
-        <div class="flex justify-between"><span class="text-slate-400">Tenant:</span><span class="text-white" id="dr-tenant-name">—</span></div>
-        <div class="flex justify-between"><span class="text-slate-400">Unit:</span><span class="text-white" id="dr-unit">—</span></div>
-        <div class="flex justify-between"><span class="text-slate-400">Billing Period:</span><span class="text-white" id="dr-period">—</span></div>
-        <div class="flex justify-between"><span class="text-slate-400">Rent Due:</span><span class="text-cyan-400" id="dr-rent-due">—</span></div>
-        <div class="flex justify-between"><span class="text-slate-400">Already Paid:</span><span class="text-green-400" id="dr-already-paid">—</span></div>
-        <div class="flex justify-between"><span class="text-slate-400">Outstanding Rent:</span><span class="text-rose-400" id="dr-outstanding">—</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Tenant:</span><span class="text-white" id="dr-tenant-name">â€”</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Unit:</span><span class="text-white" id="dr-unit">â€”</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Billing Period:</span><span class="text-white" id="dr-period">â€”</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Rent Due:</span><span class="text-cyan-400" id="dr-rent-due">â€”</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Already Paid:</span><span class="text-green-400" id="dr-already-paid">â€”</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Outstanding Rent:</span><span class="text-rose-400" id="dr-outstanding">â€”</span></div>
         <hr class="border-slate-700">
-        <div class="flex justify-between"><span class="text-slate-400">Available Deposit:</span><span class="text-cyan-400" id="dr-deposit-avail">—</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Available Deposit:</span><span class="text-cyan-400" id="dr-deposit-avail">â€”</span></div>
         <div class="flex justify-between items-center">
           <span class="text-slate-400">Amount to Apply:</span>
           <input type="number" id="dr-amount" class="cyber-input w-32 text-right" min="0" />
@@ -5236,7 +5279,7 @@
         <button id="btn-overpayment-credit" class="qc-btn qc-btn-secondary">Credit Balance</button>
         <button id="btn-overpayment-skip" class="qc-btn">Skip / Resolve Later</button>
       </div>
-      <p class="text-xs text-slate-500 mt-3">Skipping keeps the excess as a Pending Overpayment Allocation until you resolve it — it is never ignored.</p>
+      <p class="text-xs text-slate-500 mt-3">Skipping keeps the excess as a Pending Overpayment Allocation until you resolve it â€” it is never ignored.</p>
     </div>
   </div>
 
@@ -5351,10 +5394,10 @@
         <h3 class="text-lg font-semibold text-white">Diagnostics Report</h3>
         <button type="button" class="text-slate-400 hover:text-white text-xl" id="btn-diagnostics-close">&times;</button>
       </div>
-      <p class="text-xs text-slate-400 mb-3">If a menu shows blank, open this and send the report to support — it shows exactly what your device sees.</p>
-      <pre id="diagnostics-report" class="text-xs font-mono text-slate-200 bg-black/40 rounded p-3 whitespace-pre-wrap max-h-[50vh] overflow-y-auto">Collecting…</pre>
+      <p class="text-xs text-slate-400 mb-3">If a menu shows blank, open this and send the report to support â€” it shows exactly what your device sees.</p>
+      <pre id="diagnostics-report" class="text-xs font-mono text-slate-200 bg-black/40 rounded p-3 whitespace-pre-wrap max-h-[50vh] overflow-y-auto">Collectingâ€¦</pre>
       <div class="flex justify-end gap-2 mt-4">
-        <button type="button" id="btn-navtest" class="qc-btn">▶ Test menu switching</button>
+        <button type="button" id="btn-navtest" class="qc-btn">â–¶ Test menu switching</button>
         <button type="button" id="btn-diagnostics-ok" class="qc-btn">Close</button>
         <button type="button" id="btn-diagnostics-copy" class="qc-btn qc-btn-primary">Copy Report</button>
       </div>
@@ -5365,7 +5408,7 @@
   <div id="inspection-modal" class="fixed inset-0 bg-black/60 z-50 hidden items-center justify-center p-4">
     <div class="glass-panel p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" style="background:#0f172a">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-lg font-semibold text-white">Property Inspection <span id="insp-offline-tag" class="hidden text-xs font-mono text-amber-400 ml-2">📴 OFFLINE — will sync</span></h3>
+        <h3 class="text-lg font-semibold text-white">Property Inspection <span id="insp-offline-tag" class="hidden text-xs font-mono text-amber-400 ml-2">ðŸ“´ OFFLINE â€” will sync</span></h3>
         <button type="button" class="text-slate-400 hover:text-white text-xl" id="btn-inspection-close">&times;</button>
       </div>
       <input type="hidden" id="insp-client-txn" />
@@ -5380,7 +5423,7 @@
         </div>
         <div>
           <label class="form-label text-xs">Tenant (optional)</label>
-          <select id="insp-tenant" class="cyber-input w-full"><option value="">—</option></select>
+          <select id="insp-tenant" class="cyber-input w-full"><option value="">â€”</option></select>
         </div>
         <div>
           <label class="form-label text-xs">Inspection Date</label>
@@ -5396,7 +5439,7 @@
       </div>
       <div class="mb-4">
         <label class="form-label text-xs">Notes</label>
-        <textarea id="insp-notes" class="cyber-input w-full" rows="3" placeholder="General condition, issues found…"></textarea>
+        <textarea id="insp-notes" class="cyber-input w-full" rows="3" placeholder="General condition, issues foundâ€¦"></textarea>
       </div>
       <div class="mb-4">
         <label class="form-label text-xs">Status</label>
@@ -5413,12 +5456,12 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=63"></script>
+  <script type="module" src="/js/app.js?v=64"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=63').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=64').catch(() => {});
     }
-    // Safety: never trap the user behind the splash — if the app module
+    // Safety: never trap the user behind the splash â€” if the app module
     // hasn't revealed itself within 25s (hung request, slow device),
     // reveal anyway; in-flight work resolves on its own.
     setTimeout(() => { document.body.classList.add('boot-done'); }, 25000);

@@ -222,6 +222,9 @@ export const api = {
   archive(id) {
     return request(`/archive/${id}`);
   },
+  archiveHistory(id) {
+    return request(`/archive/${id}/history`);
+  },
   deleteArchive(id) {
     return request(`/archive/${id}`, { method: 'DELETE' });
   },

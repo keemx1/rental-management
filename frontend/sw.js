@@ -1,15 +1,15 @@
 /**
- * GEHPM service worker — offline-first app shell (Phase 1).
+ * GEHPM service worker â€” offline-first app shell (Phase 1).
  *
  * Strategy:
  * - On install: precache the full app shell so the app boots with NO internet.
  * - Navigations + HTML: network-first, falling back to cached shell offline.
  * - JS/CSS: network-first (code updates apply immediately), cache fallback offline.
- * - API (`/api/`): never cached — handled by the sync engine/outbox instead.
+ * - API (`/api/`): never cached â€” handled by the sync engine/outbox instead.
  * - Same-origin assets are cached on http AND https (field devices often use
  *   plain http over the local network; the old SW only cached on https).
  */
-const CACHE_NAME = 'gutenberg-v64-irmanage';
+const CACHE_NAME = 'gutenberg-v65-irmanage';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -72,7 +72,7 @@ self.addEventListener('fetch', (event) => {
   // Skip non-http(s) requests (chrome-extension, etc.)
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
 
-  // Never cache API or auth requests — the sync engine owns offline API.
+  // Never cache API or auth requests â€” the sync engine owns offline API.
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(fetch(event.request));
     return;

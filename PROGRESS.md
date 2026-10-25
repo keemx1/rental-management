@@ -3,7 +3,7 @@
 Living record of every update applied to this repository
 (`origin → https://github.com/keemx1/rental-management`, branch `main`).
 
-**Last updated:** 2026-10-25 · app version `v63` · SW cache `gutenberg-v64-irmanage`
+**Last updated:** 2026-10-25 · app version `v64` · SW cache `gutenberg-v65-irmanage`
 
 ---
 
@@ -26,6 +26,7 @@ Run from the repo root (server must be up on port `3003`):
 | Report formatting | `node tests/test_report_formatting.js` | 148 assertions — Excel layout (widths, wrapping, frozen headers, print titles, number formats, totals reconcile), PDF orientation, in-app report styles |
 | Tenancy permanence | `node tests/test_tenancy_history.js` | 50 assertions — two tenants re-letting one unit: previous tenancy's records never deleted/merged/relinked, finalized exit invoice immutable, archive shows complete per-tenancy payment history |
 | Financial integrity | `node tests/test_financial_integrity.js` | 27 assertions — payments rejected against incomplete/non-existent/vacant tenancies at app AND database level, re-linking blocked, delete archives instead of destroying, RESTRICT constraints, origin + audit trail |
+| Archive payment history | `node tests/test_archive_history.js` | 41 assertions — per-tenancy chronological payments with allocations and exact balance-before/after, complete financial summary, exit-invoice link, no bleed from later tenants of the same unit |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -220,6 +221,44 @@ constraints so it cannot recur.
   tenant, amount, reference and tenancy id — every financial record now has a
   database-enforced, traceable origin.
 
+### 10. Tenancy Archive → complete per-tenancy payment history (app `v64`)
+The Archive table's **tenant name is now clickable** and opens the complete
+financial history of that ONE tenancy (move-in → exit-invoice finalization).
+The existing View/Delete actions and the archive detail modal (exit invoice
++ deductions) are unchanged.
+
+- **New endpoint** `GET /api/archive/:id/history`
+  (`store.getTenancyPaymentHistory`) reconstructs the tenancy's ledger from
+  immutable records ONLY — charge postings (rent/garbage/water months of the
+  tenancy, penalty invoices, maintenance charges, opening arrears taken from
+  the first payment's own snapshot) + every payment's recorded
+  `allocation_breakdown`. Historical balances are computed forward from the
+  tenancy's own events and never touch the tenant's current balance.
+- **Per-payment view:** date, reference (receipt + M-Pesa), amount, method,
+  type, billing period, each allocation amount (rent/arrears/garbage/penalty/
+  maintenance/other/agreement/water/deposit/advance — legacy payments flagged
+  "(legacy)" instead of inventing splits), **balance before** and **balance
+  after** each payment. Deposits/advance/water are shown but never distort
+  the outstanding balance (matching the system's exit semantics).
+- **Tenancy information:** name, unit, property, move-in/out, monthly rent,
+  deposit paid, water deposit (— ; no such concept in this system), status,
+  exit date/reason, archived stamp.
+- **Complete financial summary:** rent charged/paid, water charges/paid,
+  garbage charged/paid, penalties charged/paid, other charges, deposit paid /
+  deductions / refundable / refunded, final outstanding (exit-invoice
+  authoritative), final Exit Invoice amount, total payments, balance after
+  the last payment.
+- **Exit Invoice button** opens the SAME existing exit-invoice viewer with
+  this tenancy's specific invoice id (`openExitInvoiceModal(code, invoiceId,
+  displayOverride)` — never another tenancy's invoice on re-let units).
+- **Charge postings** are listed in a collapsible audit section behind the
+  balances; archived financial snapshots now also preserve agreement and
+  first-billing state for future archives.
+- Relationship enforced end-to-end: Property → Unit → Tenant → Specific
+  Tenancy (archive id) → Payments → Allocations → Charges → Deposit → Exit
+  Invoice → Deposit Refund — a later tenant of the same unit can never bleed
+  into the history (asserted by test).
+
 ---
 
 ## Open items / next
@@ -250,3 +289,4 @@ constraints so it cannot recur.
 | 7 | Repo housekeeping: tracked test suites, gitignore, pending-work commit | v62 |
 | 8 | Tenancy-scoped financial history: permanent per-occupancy records | v63 |
 | 9 | Ghost-record elimination + DB-level validation, RESTRICT FKs, origin audit | v63 |
+| 10 | Archive: clickable tenant name → complete per-tenancy payment history | v64 |

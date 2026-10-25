@@ -6653,6 +6653,13 @@ async function archiveTenancy(tenantCode, options = {}) {
     advance_rent_until: tenant.advance_rent_until || null,
     advance_rent_balance: Number(tenant.advance_rent_balance || 0),
     opening_advance_rent: Number(tenant.opening_advance_rent || 0),
+    // Agreement + first-billing state preserved with the tenancy so archived
+    // records stay complete for later audits.
+    agreement_charge: Number(tenant.agreement_charge || 0),
+    agreement_paid: Number(tenant.agreement_paid || 0),
+    agreement_outstanding: Number(tenant.agreement_outstanding || 0),
+    first_billing_method: tenant.first_billing_method || null,
+    first_billing_charge: tenant.first_billing_charge != null ? Number(tenant.first_billing_charge) : null,
     rent_history: rentHistory,
   };
 
@@ -6781,6 +6788,381 @@ async function getTenancyArchive(id) {
     deposit_refund: Number(r.deposit_refund || 0),
     opening_balance: Number(r.opening_balance || 0),
     final_balance: Number(r.final_balance || 0),
+  };
+}
+
+// ── Tenancy payment history (per-tenancy ledger reconstruction) ───────────────
+// Rebuilds the COMPLETE financial history of ONE archived tenancy from
+// immutable records only (charges posted during the tenancy + each payment's
+// own allocation breakdown). Historical balances are computed forward from
+// the tenancy's own events — never from the tenant's current balance — so
+// every "balance after payment" reflects the account at that moment.
+function tenancyMonthList(startIso, endIso) {
+  if (!startIso) return [];
+  const s = String(startIso).slice(0, 7);
+  const e = String(endIso || startIso).slice(0, 7);
+  const out = [];
+  let [y, m] = s.split('-').map(Number);
+  const [ey, em] = e.split('-').map(Number);
+  while ((y < ey || (y === ey && m <= em)) && out.length < 240) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
+}
+
+function tenancyDaysInMonth(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+
+function tenancyOverlapDays(startIso, endIso, monthKey) {
+  const start = String(startIso).slice(0, 10);
+  const end = String(endIso || startIso).slice(0, 10);
+  const mStart = `${monthKey}-01`;
+  const mEnd = `${monthKey}-${String(tenancyDaysInMonth(monthKey)).padStart(2, '0')}`;
+  const from = start > mStart ? start : mStart;
+  const to = end < mEnd ? end : mEnd;
+  if (to < from) return 0;
+  return Math.round((new Date(to + 'T12:00:00Z') - new Date(from + 'T12:00:00Z')) / 86400000) + 1;
+}
+
+async function getTenancyPaymentHistory(archiveId) {
+  const a = await getTenancyArchive(archiveId);
+  if (!a) return null;
+
+  const exitInv = a.exit_invoice
+    ? (typeof a.exit_invoice === 'string' ? JSON.parse(a.exit_invoice) : a.exit_invoice)
+    : null;
+  const snap = a.financial_snapshot
+    ? (typeof a.financial_snapshot === 'string' ? JSON.parse(a.financial_snapshot) : a.financial_snapshot)
+    : {};
+  const rentAmount = Number(a.rent_amount || snap.rent_amount || 0);
+  const garbageMonthly = Number(snap.garbage_fee_amount || 0);
+  const waterMonthly = Number(snap.water_charge_amount || 0);
+  const depositPaid = Number(a.deposit_paid || snap.deposit_paid || 0);
+
+  const moveIn = String(a.move_in_date || '').slice(0, 10);
+  const moveOut = String(a.move_out_date || (exitInv && exitInv.move_out_date) || String(a.archived_at || '').slice(0, 10)).slice(0, 10);
+  const months = tenancyMonthList(moveIn, moveOut);
+  const firstMonth = months[0] || null;
+  const lastMonth = months[months.length - 1] || null;
+
+  // Rent charged for one month of this tenancy. The FINAL month follows the
+  // exit invoice's rent treatment (full / pro-rated / waived) — that is the
+  // system's own decision of record; the FIRST month is pro-rated when the
+  // tenancy started mid-month (no other first-billing data survives archive).
+  const rentForMonth = (m) => {
+    const isLast = m === lastMonth;
+    const isFirst = m === firstMonth;
+    if (isLast && exitInv) {
+      const t = exitInv.rent_treatment || 'full_month';
+      if (t === 'waived') return 0;
+      if (t === 'pro_rated') return Math.round(Number(exitInv.rent_charged_amount || 0));
+      return rentAmount;
+    }
+    if (isFirst && isFirst !== isLast && moveIn && Number(moveIn.slice(8, 10)) > 1) {
+      const dim = tenancyDaysInMonth(m);
+      return Math.round((rentAmount * (dim - Number(moveIn.slice(8, 10)) + 1)) / dim);
+    }
+    if (isFirst && isLast && !exitInv && moveIn && moveOut) {
+      const overlap = tenancyOverlapDays(moveIn, moveOut, m);
+      return Math.round((rentAmount * overlap) / tenancyDaysInMonth(m));
+    }
+    return rentAmount;
+  };
+
+  const charges = []; // { date, type, label, amount, month }
+  for (const m of months) {
+    const dayAnchor = (m === firstMonth && moveIn)
+      ? `${m}-${String(Math.min(Number(moveIn.slice(8, 10)) || 1, tenancyDaysInMonth(m))).padStart(2, '0')}`
+      : `${m}-${String(Math.min(Number((moveOut || '01').slice(8, 10)) || 1, tenancyDaysInMonth(m))).padStart(2, '0')}`;
+    const r = rentForMonth(m);
+    if (r > 0) charges.push({ date: dayAnchor, type: 'rent', label: `Monthly rent — ${m}`, amount: r, month: m });
+    if (garbageMonthly > 0) {
+      let g = garbageMonthly;
+      if (m === firstMonth && m !== lastMonth && moveIn && Number(moveIn.slice(8, 10)) > 1) {
+        const dim = tenancyDaysInMonth(m);
+        g = Math.round((garbageMonthly * (dim - Number(moveIn.slice(8, 10)) + 1)) / dim);
+      }
+      if (g > 0) charges.push({ date: dayAnchor, type: 'garbage', label: `Garbage — ${m}`, amount: g, month: m });
+    }
+    if (waterMonthly > 0) {
+      let w = waterMonthly;
+      if (m === firstMonth && m !== lastMonth && moveIn && Number(moveIn.slice(8, 10)) > 1) {
+        const dim = tenancyDaysInMonth(m);
+        w = Math.round((waterMonthly * (dim - Number(moveIn.slice(8, 10)) + 1)) / dim);
+      }
+      if (w > 0) charges.push({ date: dayAnchor, type: 'water', label: `Water charge — ${m}`, amount: w, month: m });
+    }
+  }
+
+  // Metered water bills (exact, when the tenancy had invoices)
+  const waterInv = await query(
+    `SELECT billing_month, total_amount, created_at::text AS created_at
+       FROM water_invoices WHERE tenancy_id = $1 ORDER BY billing_month, id`,
+    [archiveId]
+  );
+  const hasMeteredWater = waterInv.rows.length > 0;
+  for (const w of waterInv.rows) {
+    charges.push({
+      date: String(w.created_at || '').slice(0, 10) || `${w.billing_month}-01`,
+      type: 'water',
+      label: `Water bill — ${w.billing_month}`,
+      amount: Number(w.total_amount || 0),
+      month: w.billing_month,
+    });
+  }
+
+  // Penalties invoiced during the tenancy (snapshot rows)
+  const penalties = Array.isArray(a.penalties) ? a.penalties : [];
+  for (const p of penalties) {
+    const amt = Number(p.amount || 0);
+    if (amt > 0) {
+      charges.push({
+        date: String(p.invoice_date || '').slice(0, 10) || moveIn,
+        type: 'penalty',
+        label: p.description || 'Penalty',
+        amount: amt,
+        month: null,
+      });
+    }
+  }
+
+  // Maintenance / other recorded charges bound to this tenancy
+  try {
+    const mc = await query(
+      `SELECT created_at::text AS created_at, amount, description
+         FROM maintenance_charges WHERE tenancy_id = $1 ORDER BY created_at`,
+      [archiveId]
+    );
+    for (const m of mc.rows) {
+      charges.push({
+        date: String(m.created_at || '').slice(0, 10) || moveIn,
+        type: 'other',
+        label: m.description || 'Other charge',
+        amount: Number(m.amount || 0),
+        month: null,
+      });
+    }
+  } catch (_) { /* table without rows */ }
+
+  // Opening arrears B/F — taken from the first allocated payment's own
+  // `arrearsBefore` snapshot (the system's record of the balance at that time).
+  const payList = (Array.isArray(a.payments) ? a.payments : []).slice().sort((x, y) => {
+    const dx = String(x.payment_date || ''); const dy = String(y.payment_date || '');
+    return dx === dy ? Number(x.id || 0) - Number(y.id || 0) : (dx < dy ? -1 : 1);
+  });
+  let openingArrears = 0;
+  for (const p of payList) {
+    let bd = p.allocation_breakdown;
+    try { if (typeof bd === 'string') bd = JSON.parse(bd); } catch (_) { bd = null; }
+    if (bd && Number(bd.arrearsBefore || 0) > 0) { openingArrears = Number(bd.arrearsBefore); break; }
+  }
+  if (openingArrears > 0 && moveIn) {
+    charges.push({ date: moveIn, type: 'arrears', label: 'Arrears brought forward (B/F)', amount: openingArrears, month: null });
+  }
+
+  // ── Build the chronological event stream ──────────────────────────────────
+  const parseAlloc = (p) => {
+    let bd = p.allocation_breakdown;
+    try { if (typeof bd === 'string') bd = JSON.parse(bd); } catch (_) { bd = null; }
+    if (bd && typeof bd === 'object') {
+      return {
+        recorded: true,
+        rent: Number(bd.rentSettled || 0),
+        arrears: Number(bd.arrearsSettled || 0),
+        garbage: Number(bd.garbageFeeSettled || 0),
+        penalty: Number(bd.penaltySettled || 0),
+        maintenance: Number(bd.maintenanceSettled || 0),
+        other: Number(bd.otherSettled || 0),
+        agreement: Number(bd.agreementSettled || 0),
+        water: Number(bd.waterSettled || 0),
+        deposit: Number(bd.depositSettled || 0),
+        advance: Number(bd.overpayment || 0),
+      };
+    }
+    // Legacy payment (approved before allocation snapshots existed): map by
+    // payment type and flag it — never invent split details.
+    const amt = Number(p.amount || 0);
+    const t = String(p.payment_type || 'rent');
+    const map = { rent: 'rent', deposit: 'deposit', water: 'water', advance_rent: 'advance', garbage: 'garbage', other: 'other', maintenance: 'maintenance' };
+    const bucket = map[t] || 'rent';
+    return {
+      recorded: false,
+      rent: bucket === 'rent' ? amt : 0,
+      arrears: 0,
+      garbage: bucket === 'garbage' ? amt : 0,
+      penalty: 0,
+      maintenance: bucket === 'maintenance' ? amt : 0,
+      other: bucket === 'other' ? amt : 0,
+      agreement: 0,
+      water: bucket === 'water' ? amt : 0,
+      deposit: bucket === 'deposit' ? amt : 0,
+      advance: bucket === 'advance' ? amt : 0,
+    };
+  };
+
+  const events = [];
+  for (const c of charges) events.push({ kind: 'charge', date: c.date, charge: c });
+  payList.forEach((p, i) => events.push({ kind: 'payment', date: String(p.payment_date || '').slice(0, 10), pay: p, idx: i }));
+  events.sort((x, y) => {
+    if (x.date !== y.date) return x.date < y.date ? -1 : 1;
+    if (x.kind !== y.kind) return x.kind === 'charge' ? -1 : 1; // charges post before same-day payments
+    return Number((x.pay && x.pay.id) || x.idx) - Number((y.pay && y.pay.id) || y.idx);
+  });
+
+  // ── Running balances ──────────────────────────────────────────────────────
+  // balance = rent + arrears + garbage + penalties + other charges owed
+  // (water follows the system's exit semantics: charged/paid, refundable —
+  //  never part of the outstanding balance; deposit and advance are held
+  //  money, not debt).
+  let balance = 0;
+  let waterCharged = 0;
+  let waterPaid = 0;
+  let depositHeld = 0;
+  let advanceHeld = 0;
+
+  const paymentsOut = [];
+  const chargesOut = [];
+  const totals = {
+    rent_charged: 0, rent_paid: 0,
+    garbage_charged: 0, garbage_paid: 0,
+    water_charged: 0, water_paid: 0,
+    penalties_charged: 0, penalties_paid: 0,
+    other_charged: 0, other_paid: 0,
+    deposit_held: 0, advance_held: 0,
+    total_payments: 0,
+  };
+
+  for (const ev of events) {
+    if (ev.kind === 'charge') {
+      const c = ev.charge;
+      chargesOut.push(c);
+      if (c.type === 'water') waterCharged += c.amount;
+      else balance += c.amount;
+      if (c.type === 'rent') totals.rent_charged += c.amount;
+      if (c.type === 'garbage') totals.garbage_charged += c.amount;
+      if (c.type === 'water') totals.water_charged += c.amount;
+      if (c.type === 'penalty') totals.penalties_charged += c.amount;
+      if (c.type === 'other') totals.other_charged += c.amount;
+      continue;
+    }
+
+    const p = ev.pay;
+    const alloc = parseAlloc(p);
+    const amount = Number(p.amount || 0);
+    const balanceBefore = balance;
+    balance -= (alloc.rent + alloc.arrears + alloc.garbage + alloc.penalty + alloc.maintenance + alloc.other + alloc.agreement);
+    waterPaid += alloc.water;
+    depositHeld += alloc.deposit;
+    advanceHeld += alloc.advance;
+    totals.rent_paid += alloc.rent;
+    totals.garbage_paid += alloc.garbage;
+    totals.water_paid += alloc.water;
+    totals.penalties_paid += alloc.penalty;
+    totals.other_paid += (alloc.maintenance + alloc.other + alloc.agreement);
+    totals.deposit_held += alloc.deposit;
+    totals.advance_held += alloc.advance;
+    totals.total_payments += amount;
+
+    paymentsOut.push({
+      id: p.id,
+      payment_date: String(p.payment_date || '').slice(0, 10),
+      reference: p.receipt_number || p.mpesa_reference || null,
+      receipt_number: p.receipt_number || null,
+      mpesa_reference: p.mpesa_reference || null,
+      amount,
+      payment_mode: p.payment_mode || null,
+      payment_type: p.payment_type || 'rent',
+      billing_period: p.billing_period || null,
+      status: p.status || null,
+      allocation_recorded: alloc.recorded,
+      allocations: {
+        rent: alloc.rent,
+        arrears: alloc.arrears,
+        garbage: alloc.garbage,
+        penalty: alloc.penalty,
+        maintenance: alloc.maintenance,
+        other: alloc.other,
+        agreement: alloc.agreement,
+        water: alloc.water,
+        deposit: alloc.deposit,
+        advance: alloc.advance,
+      },
+      balance_before: balanceBefore,
+      balance_after: balance,
+    });
+  }
+
+  const refundRow = a.deposit_refund_row || null;
+  const depositRefundable = refundRow
+    ? Number(refundRow.refundable_amount || 0)
+    : (exitInv ? Number(exitInv.deposit_refund || 0) : 0);
+  const depositRefunded = refundRow
+    ? Number(refundRow.amount_refunded || 0)
+    : 0;
+  const depositDeductions = exitInv ? Number(exitInv.deductions_total || 0) : 0;
+
+  return {
+    tenancy: {
+      id: a.id,
+      tenant_code: a.tenant_code,
+      tenant_name: a.tenant_name,
+      phone_number: a.phone_number,
+      national_id: a.national_id,
+      property_name: a.property_name,
+      unit: a.unit_label || a.tenant_code,
+      move_in_date: a.move_in_date,
+      move_out_date: a.move_out_date,
+      rent_amount: rentAmount,
+      deposit_paid: depositPaid,
+      deposit_amount: Number(a.deposit_amount || snap.deposit_amount || 0),
+      water_deposit: null, // no separate water deposit concept in this system
+      status: 'Archived — tenancy closed',
+      exit_date: a.move_out_date,
+      exit_reason: a.exit_reason,
+      archived_at: a.archived_at,
+      archived_by: a.archived_by,
+    },
+    payments: paymentsOut,
+    charges: chargesOut,
+    summary: {
+      total_rent_charged: Math.round(totals.rent_charged),
+      total_rent_paid: Math.round(totals.rent_paid),
+      total_water_charges: Math.round(waterCharged),
+      total_water_paid: Math.round(waterPaid),
+      total_garbage_charged: Math.round(totals.garbage_charged),
+      total_garbage_paid: Math.round(totals.garbage_paid),
+      total_penalties: Math.round(totals.penalties_charged),
+      total_penalties_paid: Math.round(totals.penalties_paid),
+      total_other_charged: Math.round(totals.other_charged),
+      total_other_paid: Math.round(totals.other_paid),
+      deposit_paid: depositPaid,
+      deposit_deductions: depositDeductions,
+      deposit_refundable: depositRefundable,
+      deposit_refunded: depositRefunded,
+      final_outstanding: exitInv ? Number(exitInv.outstanding_balance || 0) : Math.max(0, Math.round(balance)),
+      exit_invoice_amount: exitInv ? Number(exitInv.final_settlement || 0) : null,
+      total_payments: Math.round(totals.total_payments),
+      balance_after_last_payment: Math.max(0, Math.round(balance)),
+      advance_held: Math.round(advanceHeld),
+    },
+    exit_invoice: exitInv ? {
+      id: exitInv.id,
+      exit_number: exitInv.exit_number,
+      status: exitInv.status,
+      move_out_date: exitInv.move_out_date,
+      rent_treatment: exitInv.rent_treatment,
+      deductions_total: Number(exitInv.deductions_total || 0),
+      outstanding_balance: Number(exitInv.outstanding_balance || 0),
+      deposit_refund: Number(exitInv.deposit_refund || 0),
+      final_settlement: Number(exitInv.final_settlement || 0),
+      finalized_at: exitInv.finalized_at || null,
+    } : null,
+    deposit_refund: refundRow,
+    note: 'Balances are reconstructed from this tenancy\u2019s own charge postings and each payment\u2019s recorded allocation — never from the tenant\u2019s current balance.',
   };
 }
 
@@ -8199,6 +8581,7 @@ module.exports = {
   deleteExitInvoice,
   archiveTenancy,
   getTenancyArchive,
+  getTenancyPaymentHistory,
   searchArchive,
   deleteArchive,
   getOccupancyHistory,
