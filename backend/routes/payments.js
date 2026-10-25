@@ -1148,18 +1148,19 @@ router.post('/send-report', async (req, res) => {
       return streamWorkbook(res, workbook, 'Payment_Report', 'Payment_Report', docName);
     }
 
-    const tempFilePath = path.join(os.tmpdir(), `Payment_Report_${Date.now()}.xlsx`);
-    await workbook.xlsx.writeFile(tempFilePath);
-    const deliveryPath = renameForDelivery(tempFilePath, docName);
-
-    const waResult = await whatsapp.sendDocumentSmart(phone_number, deliveryPath, 'Here is the requested Excel payment report.');
-    fs.unlinkSync(deliveryPath);
-    if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the report');
+    // Same generation + delivery pipeline as every other report send.
+    await sendExcelReport(phone_number, workbook, docName, 'Here is the requested Excel payment report.');
 
     res.json({ success: true });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to generate and send report' });
+    if (err && err.reportStage === 'send') {
+      return res.status(502).json({
+        stage: 'send',
+        error: 'Report was generated successfully, but WhatsApp delivery failed: ' + err.message,
+      });
+    }
+    res.status(500).json({ stage: 'generate', error: 'Failed to generate and send report' });
   }
 });
 
@@ -1347,7 +1348,13 @@ router.all('/collection-report', async (req, res) => {
     res.json({ success: true, summary: data.summary });
   } catch (err) {
     console.error('[Reports] collection-report:', err);
-    res.status(500).json({ error: 'Failed to generate collection report: ' + err.message });
+    if (err && err.reportStage === 'send') {
+      return res.status(502).json({
+        stage: 'send',
+        error: 'Report was generated successfully, but WhatsApp delivery failed: ' + err.message,
+      });
+    }
+    res.status(500).json({ stage: 'generate', error: 'Failed to generate collection report: ' + err.message });
   }
 });
 

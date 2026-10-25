@@ -6,7 +6,7 @@ const ExcelJS = require('exceljs');
 const whatsapp = require('../config/whatsapp');
 const { requireAuthActive } = require('../middleware/auth');
 const store = require('../storage/store');
-const { streamWorkbook } = require('../services/excelStream');
+const { streamWorkbook, sendExcelReport } = require('../services/excelStream');
 const { resolveLogoPath, getLogoExtension } = require('../services/logo');
 const { reportDocumentName, renameForDelivery } = require('../services/docNames');
 const { formatWorksheet } = require('../services/excelFormat');
@@ -320,18 +320,19 @@ router.post('/send-vacant-report', async (req, res) => {
       return streamWorkbook(res, workbook, 'Vacancy_Report', 'Vacancy_Report', docName);
     }
 
-    const tempFilePath = path.join(os.tmpdir(), `Vacancy_Report_${Date.now()}.xlsx`);
-    await workbook.xlsx.writeFile(tempFilePath);
-    const deliveryPath = renameForDelivery(tempFilePath, docName);
-
-    const waResult = await whatsapp.sendDocumentSmart(phone_number, deliveryPath, 'Here is the requested Excel vacancy report.');
-    fs.unlinkSync(deliveryPath);
-    if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the report');
+    // Same generation + delivery pipeline as every other report send.
+    await sendExcelReport(phone_number, workbook, docName, 'Here is the requested Excel vacancy report.');
 
     res.json({ success: true });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to generate and send vacancy report' });
+    if (err && err.reportStage === 'send') {
+      return res.status(502).json({
+        stage: 'send',
+        error: 'Report was generated successfully, but WhatsApp delivery failed: ' + err.message,
+      });
+    }
+    res.status(500).json({ stage: 'generate', error: 'Failed to generate and send vacancy report' });
   }
 });
 

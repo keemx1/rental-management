@@ -81,6 +81,31 @@ async function sendTextMessage(phoneNumber, body) {
   }
 }
 
+// Correct WhatsApp MIME type per file extension. WhatsApp's message metadata
+// drives the recipient's open/preview behaviour: labelling an .xlsx as
+// application/pdf (the old fallback) made every spreadsheet attachment
+// undownloadable ("We can't open this file").
+const DOCUMENT_MIMETYPES = {
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xls': 'application/vnd.ms-excel',
+  '.csv': 'text/csv',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.txt': 'text/plain',
+  '.zip': 'application/zip',
+};
+
+function mimetypeForFile(filePath) {
+  const ext = path.extname(String(filePath || '')).toLowerCase();
+  return DOCUMENT_MIMETYPES[ext] || 'application/octet-stream';
+}
+
 async function sendMediaMessage(phoneNumber, filePath, caption = '') {
   let chatId = null;
   try {
@@ -94,9 +119,7 @@ async function sendMediaMessage(phoneNumber, filePath, caption = '') {
   try {
     const fs = require('fs');
     const buf = fs.readFileSync(filePath);
-    const ext = String(filePath || '').toLowerCase();
-    const mimetype = ext.endsWith('.png') ? 'image/png'
-      : /\.jpe?g$/.test(ext) ? 'image/jpeg' : 'application/pdf';
+    const mimetype = mimetypeForFile(filePath);
     const sent = await sessionManager().sendDocument(chatId, buf, mimetype, path.basename(filePath) || 'document.pdf');
     return { messageId: (sent && sent.id) || null, ack: 1, status: 'Sent', chatId, channel: 'baileys', mediaDelivered: true };
   } catch (err) {
@@ -233,6 +256,7 @@ module.exports = {
   normalizePhoneToChatId,
   sendTextMessage,
   sendMediaMessage,
+  mimetypeForFile,
   sendDocumentSmart,
   sendSequentialMessages,
   getTemplateName,

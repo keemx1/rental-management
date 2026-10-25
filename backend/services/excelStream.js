@@ -14,13 +14,50 @@ async function writeWorkbookTemp(workbook, baseName) {
  * Deliver a generated workbook to a phone number via WhatsApp.
  * Shared by every Excel report route (reports, payments, houses...).
  */
+/**
+ * Generate + deliver a workbook via WhatsApp using the SAME ExcelJS
+ * serialisation as the Download button (writeWorkbookTemp), with honest,
+ * stage-tagged errors and cleanup that can never fail a successful send:
+ *   err.reportStage = 'generate' -> the workbook could not be produced
+ *   err.reportStage = 'send'     -> workbook produced, WhatsApp delivery failed
+ */
 async function sendExcelReport(phone_number, workbook, filename, caption) {
-  const tempFilePath = path.join(os.tmpdir(), `report_${Date.now()}.xlsx`);
-  await workbook.xlsx.writeFile(tempFilePath);
-  const deliveryPath = renameForDelivery(tempFilePath, filename);
-  const waResult = await whatsapp.sendDocumentSmart(phone_number, deliveryPath, caption);
-  if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the report');
-  fs.unlinkSync(deliveryPath);
+  let tempFilePath = null;
+  try {
+    tempFilePath = await writeWorkbookTemp(workbook, 'report');
+  } catch (e) {
+    const err = new Error(`Excel generation failed: ${e.message}`);
+    err.reportStage = 'generate';
+    throw err;
+  }
+
+  let deliveryPath = null;
+  try {
+    deliveryPath = renameForDelivery(tempFilePath, filename);
+  } catch (e) {
+    const err = new Error(`Excel generation failed: could not prepare file (${e.message})`);
+    err.reportStage = 'generate';
+    try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch (_) {}
+    throw err;
+  }
+
+  let waResult = null;
+  try {
+    waResult = await whatsapp.sendDocumentSmart(phone_number, deliveryPath, caption);
+  } catch (e) {
+    waResult = { status: 'Failed', failureReason: e.message };
+  }
+
+  // Cleanup AFTER delivery — and never let it mask a successful send.
+  try { if (deliveryPath && fs.existsSync(deliveryPath)) fs.unlinkSync(deliveryPath); } catch (_) {}
+  try { if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch (_) {}
+
+  if (!waResult || waResult.status !== 'Sent') {
+    const err = new Error((waResult && waResult.failureReason) || 'WhatsApp session not connected');
+    err.reportStage = 'send';
+    throw err;
+  }
+  return waResult;
 }
 
 function streamWorkbook(res, workbook, baseName, displayName, filename) {

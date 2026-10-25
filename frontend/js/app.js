@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v64';
+const GEHM_VERSION = 'v65';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -8865,12 +8865,14 @@ async function runReportAction(mode) {
         await api.sendPaymentReport(phone, houseId);
       }
       if (resEl) {
-        resEl.textContent = 'Report sent successfully via WhatsApp!';
+        resEl.textContent = `Report generated and sent to ${phone} via WhatsApp!`;
         resEl.className = 'text-sm font-mono text-green-400 text-center mt-2';
       }
     }
   } catch (err) {
     if (resEl) {
+      // Server distinguishes generation failures (stage: generate) from
+      // WhatsApp delivery failures (stage: send) — surface its exact message.
       resEl.textContent = 'Error: ' + err.message;
       resEl.className = 'text-sm font-mono text-rose-400 text-center mt-2';
     }

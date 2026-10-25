@@ -134,7 +134,13 @@ router.post('/outstanding-balances', async (req, res) => {
     res.json({ success: true, count: rows.length });
   } catch (err) {
     console.error('[Reports] outstanding-balances:', err);
-    res.status(500).json({ error: 'Failed to generate outstanding balances report' });
+    if (err && err.reportStage === 'send') {
+      return res.status(502).json({
+        stage: 'send',
+        error: 'Report was generated successfully, but WhatsApp delivery failed: ' + err.message,
+      });
+    }
+    res.status(500).json({ stage: 'generate', error: 'Failed to generate outstanding balances report' });
   }
 });
 
@@ -190,7 +196,13 @@ router.post('/unpaid-units', async (req, res) => {
     res.json({ success: true, count: rows.length });
   } catch (err) {
     console.error('[Reports] unpaid-units:', err);
-    res.status(500).json({ error: 'Failed to generate unpaid units report' });
+    if (err && err.reportStage === 'send') {
+      return res.status(502).json({
+        stage: 'send',
+        error: 'Report was generated successfully, but WhatsApp delivery failed: ' + err.message,
+      });
+    }
+    res.status(500).json({ stage: 'generate', error: 'Failed to generate unpaid units report' });
   }
 });
 
@@ -291,7 +303,13 @@ router.post('/deposits-new-tenants', async (req, res) => {
     res.json({ success: true, deposits: data.deposits.length, newTenants: data.newTenants.length });
   } catch (err) {
     console.error('[Reports] deposits-new-tenants:', err);
-    res.status(500).json({ error: 'Failed to generate deposits and new tenants report' });
+    if (err && err.reportStage === 'send') {
+      return res.status(502).json({
+        stage: 'send',
+        error: 'Report was generated successfully, but WhatsApp delivery failed: ' + err.message,
+      });
+    }
+    res.status(500).json({ stage: 'generate', error: 'Failed to generate deposits and new tenants report' });
   }
 });
 

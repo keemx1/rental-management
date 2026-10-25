@@ -3,7 +3,7 @@
 Living record of every update applied to this repository
 (`origin → https://github.com/keemx1/rental-management`, branch `main`).
 
-**Last updated:** 2026-10-25 · app version `v64` · SW cache `gutenberg-v65-irmanage`
+**Last updated:** 2026-10-25 · app version `v65` · SW cache `gutenberg-v66-irmanage`
 
 ---
 
@@ -27,6 +27,7 @@ Run from the repo root (server must be up on port `3003`):
 | Tenancy permanence | `node tests/test_tenancy_history.js` | 50 assertions — two tenants re-letting one unit: previous tenancy's records never deleted/merged/relinked, finalized exit invoice immutable, archive shows complete per-tenancy payment history |
 | Financial integrity | `node tests/test_financial_integrity.js` | 27 assertions — payments rejected against incomplete/non-existent/vacant tenancies at app AND database level, re-linking blocked, delete archives instead of destroying, RESTRICT constraints, origin + audit trail |
 | Archive payment history | `node tests/test_archive_history.js` | 41 assertions — per-tenancy chronological payments with allocations and exact balance-before/after, complete financial summary, exit-invoice link, no bleed from later tenants of the same unit |
+| WhatsApp report send | `node tests/test_report_whatsapp.js` | 26 assertions — sent attachment is the same valid .xlsx as Download with the correct spreadsheet mimetype, delivery vs generation failures reported separately (502/500), cleanup never surfaces as an error |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -259,6 +260,36 @@ The existing View/Delete actions and the archive detail modal (exit invoice
   Invoice → Deposit Refund — a later tenant of the same unit can never bleed
   into the history (asserted by test).
 
+### 11. WhatsApp "Generate & Send" report delivery fixed (app `v65`)
+Download worked; **Send via WhatsApp** delivered an attachment the recipient
+could not open ("We can't open this file") while the system reported
+"Failed to generate report" even when the file had been sent.
+
+**Actual failure point** (`config/whatsapp.js` → `sendMediaMessage`): the
+mimetype map only knew `.png`/`.jpg` and defaulted EVERYTHING ELSE —
+including `.xlsx` — to **`application/pdf`**. WhatsApp therefore labelled the
+spreadsheet attachment as a PDF; the recipient's client tried to render a
+"PDF" that was really XML bytes → open error. Generation was never the
+problem (the send path serialises the identical ExcelJS workbook as the
+Download button).
+
+**Fixes:**
+- `mimetypeForFile()` with the full mapping (`.xlsx` → OOXML spreadsheet
+  MIME, `.xls`, `.csv`, `.docx`, `.pdf`, images, `.zip`; unknown →
+  `application/octet-stream`, never a fake pdf) — applied to every media send.
+- `sendExcelReport` (shared by all six report-send routes) rebuilt:
+  same `writeWorkbookTemp` serialisation as Download, stage-tagged errors
+  (`reportStage: 'generate' | 'send'`), and cleanup that runs AFTER delivery
+  and can never fail a successful send (the old `unlinkSync` could throw
+  after a sent report and surface as "Failed to generate").
+- Every send route now reports honestly: **502 `{stage:'send'}`** =
+  "Report was generated successfully, but WhatsApp delivery failed: …";
+  **500 `{stage:'generate'}`** = generation failure. Vacancy + payments
+  report routes were converted from duplicated inline WhatsApp code to the
+  same shared helper; frontend shows the server's exact stage message and
+  confirms "generated and sent to <number>".
+- Download flow untouched (baseline asserted by the new suite).
+
 ---
 
 ## Open items / next
@@ -290,3 +321,4 @@ The existing View/Delete actions and the archive detail modal (exit invoice
 | 8 | Tenancy-scoped financial history: permanent per-occupancy records | v63 |
 | 9 | Ghost-record elimination + DB-level validation, RESTRICT FKs, origin audit | v63 |
 | 10 | Archive: clickable tenant name → complete per-tenancy payment history | v64 |
+| 11 | WhatsApp report send: correct .xlsx mimetype + honest stage-based errors | v65 |
