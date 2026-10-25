@@ -34,7 +34,8 @@ router.post('/generate', async (req, res) => {
     }
 
     try {
-      await whatsapp.sendMediaMessage(tenant.phone_number, doc.file_path, caption);
+      const waResult = await whatsapp.sendDocumentSmart(tenant.phone_number, doc.file_path, caption);
+      if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the document');
       await store.logMessage({
         tenantId: tenant.tenant_code,
         messageType: 'Statement',

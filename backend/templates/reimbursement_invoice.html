@@ -16,11 +16,13 @@
     .inv-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .inv-title { font-size: 16px; font-weight: 700; color: #1a4b8c; }
     .inv-date { font-weight: 700; font-size: 12px; }
-    .inv-no-bar { display: inline-block; background: #1a4b8c; color: white; font-weight: 700; font-size: 12px; padding: 5px 12px; border-radius: 4px; margin-bottom: 10px; }
+    .inv-no-bar { display: inline-block; background: #fdecec; border: 1px solid #f3c0c0; color: #7f1d1d; font-weight: 700; font-size: 12px; padding: 5px 12px; border-radius: 4px; margin-bottom: 10px; }
     .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; font-size: 11px; }
     .info-box { border: 1px solid #dee2e6; border-radius: 6px; padding: 8px 10px; }
     .info-box .label { font-weight: 700; font-size: 9px; color: #666; text-transform: uppercase; margin-bottom: 2px; }
     .info-box .value { font-size: 12px; font-weight: 500; }
+    .info-box .value.total-hl span { color: #cc0000 !important; }
+    .info-box .value.paid-keep span { color: #059669 !important; }
     table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
     th { background: #1a4b8c; color: white; text-align: left; padding: 5px; font-size: 11px; }
     td { padding: 5px; border: 1px solid #dee2e6; font-size: 11px; }
@@ -76,11 +78,11 @@
     </div>
     <div class="info-box">
       <div class="label">AMOUNT REIMBURSED</div>
-      <div class="value" style="color: #059669;">KES {{total_paid}}</div>
+      <div class="value paid-keep" style="color: #059669;">KES {{total_paid}}</div>
     </div>
     <div class="info-box">
       <div class="label">REMAINING BALANCE</div>
-      <div class="value" style="color: #dc2626; font-weight: 700;">KES {{outstanding}}</div>
+      <div class="value total-hl" style="color: #dc2626; font-weight: 700;">KES {{outstanding}}</div>
     </div>
     <div class="info-box">
       <div class="label">PAYMENT STATUS</div>
@@ -88,10 +90,18 @@
     </div>
   </div>
 
+  {{plot_expenses_table}}
+
   {{payments_section}}
 
   <div class="note-box">
     This is a staff reimbursement invoice. Payment status is updated as reimbursement payments are recorded.
+  </div>
+
+  <div style="margin:6px 0;line-height:1.5;">
+    <div>For: GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</div>
+    <div>{{GEHM_STAMP_LINE}}</div>
+    <div>Date: {{date}}</div>
   </div>
 
   <div class="footer-bar"></div>

@@ -72,6 +72,34 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// Correct a register entry's amount. Balance recomputes from linked payments
+// and the linked document amount follows. Payments, counters, receipts,
+// allocations and unrelated history are never touched.
+router.put('/:id', async (req, res) => {
+  try {
+    const { amount } = req.body || {};
+    if (amount == null) return res.status(400).json({ error: 'amount required' });
+    const result = await store.updateInvoiceRegister(req.params.id, { amount }, req.user?.username);
+    if (!result) return res.status(404).json({ error: 'Invoice register entry not found' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Failed to update invoice register entry' });
+  }
+});
+
+// Delete a register entry and everything created solely for it: its payment
+// links, its linked document row and PDF file. Payments, counters, receipts
+// and unrelated history are never touched.
+router.delete('/:id', async (req, res) => {
+  try {
+    const result = await store.deleteInvoiceRegister(req.params.id, req.user?.username);
+    if (!result) return res.status(404).json({ error: 'Invoice register entry not found' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete invoice register entry: ' + err.message });
+  }
+});
+
 router.get('/:id/document', async (req, res) => {
   try {
     const register = await store.getInvoiceRegister(req.params.id);
@@ -117,9 +145,12 @@ router.post('/:id/send', async (req, res) => {
     const unitText = doc.unit_label ? ` for unit ${doc.unit_label}` : '';
     const caption = `Hello ${tenantName}, please find attached your invoice ${register.invoice_number}${unitText}.`;
 
-    const result = await whatsapp.sendMediaMessage(phone, doc.file_path, caption);
+    const result = await whatsapp.sendDocumentSmart(phone, doc.file_path, caption);
+    if (result.status !== 'Sent') {
+      return res.status(502).json({ error: 'WhatsApp delivery failed: ' + (result.failureReason || 'could not deliver the invoice') });
+    }
     await store.markInvoiceRegister({ id: register.id, action: 'send' });
-    res.json({ success: true, whatsapp: result, phone });
+    res.json({ success: true, whatsapp: { status: result.status, messageId: result.messageId || null }, phone });
   } catch (err) {
     res.status(500).json({ error: 'WhatsApp resend failed: ' + err.message });
   }

@@ -1387,3 +1387,106 @@ CREATE TABLE IF NOT EXISTS house_charges (
 );
 
 CREATE INDEX IF NOT EXISTS idx_house_charges_house ON house_charges(house_paybill);
+
+-- =====================================================================
+-- PAYMENT ARRANGEMENTS (management-only approved payment dates)
+-- Strictly internal controls: never exposed to tenant-facing outputs.
+-- Three independent dates: original due (tenants.rent_due_date, untouched),
+-- management-approved date (here), actual payment date (payments rows).
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS payment_arrangements (
+  id SERIAL PRIMARY KEY,
+  tenant_code VARCHAR(32) NOT NULL,
+  billing_period VARCHAR(7) NOT NULL,
+  requested_date DATE NULL,
+  approved_date DATE NULL,
+  reason TEXT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'Pending',
+  approved_by VARCHAR(128) NULL,
+  approved_at TIMESTAMPTZ NULL,
+  created_by VARCHAR(128) NULL,
+  fulfilled_at TIMESTAMPTZ NULL,
+  closed_at TIMESTAMPTZ NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_arrangements_tenant ON payment_arrangements (tenant_code);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_arr_active_per_period ON payment_arrangements (tenant_code, billing_period) WHERE status IN ('Pending', 'Approved');
+
+CREATE TABLE IF NOT EXISTS payment_arrangement_events (
+  id SERIAL PRIMARY KEY,
+  arrangement_id INTEGER NOT NULL REFERENCES payment_arrangements(id) ON DELETE CASCADE,
+  actor VARCHAR(128) NULL,
+  action VARCHAR(64) NOT NULL,
+  prev_status VARCHAR(32) NULL,
+  new_status VARCHAR(32) NULL,
+  prev_approved_date DATE NULL,
+  new_approved_date DATE NULL,
+  reason TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_arr_events_arr ON payment_arrangement_events (arrangement_id);
+
+-- Permanent payment <-> receipt-PDF link (View/Download from payment history).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'documents' AND column_name = 'payment_id'
+  ) THEN
+    ALTER TABLE documents ADD COLUMN payment_id INTEGER NULL REFERENCES payments(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_documents_payment ON documents (payment_id);
+
+-- Guardian / emergency contact on archived tenancies.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tenancy_archive' AND column_name = 'guardian_name') THEN
+    ALTER TABLE tenancy_archive ADD COLUMN guardian_name VARCHAR(128) NULL;
+  END IF;
+END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tenancy_archive' AND column_name = 'guardian_id') THEN
+    ALTER TABLE tenancy_archive ADD COLUMN guardian_id VARCHAR(64) NULL;
+  END IF;
+END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tenancy_archive' AND column_name = 'guardian_phone') THEN
+    ALTER TABLE tenancy_archive ADD COLUMN guardian_phone VARCHAR(20) NULL;
+  END IF;
+END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tenancy_archive' AND column_name = 'guardian_relationship') THEN
+    ALTER TABLE tenancy_archive ADD COLUMN guardian_relationship VARCHAR(64) NULL;
+  END IF;
+END $$;
+
+-- Invoice register: lifecycle flags (void on tenancy change; voided rows leave
+-- payment/allocation queries but stay visible for audit).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'invoice_register' AND column_name = 'voided') THEN
+    ALTER TABLE invoice_register ADD COLUMN voided BOOLEAN NOT NULL DEFAULT FALSE;
+  END IF;
+END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'invoice_register' AND column_name = 'voided_at') THEN
+    ALTER TABLE invoice_register ADD COLUMN voided_at TIMESTAMPTZ NULL;
+  END IF;
+END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'invoice_register' AND column_name = 'voided_reason') THEN
+    ALTER TABLE invoice_register ADD COLUMN voided_reason TEXT NULL;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_invoice_register_voided ON invoice_register (voided);

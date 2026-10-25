@@ -35,7 +35,7 @@ class SessionManager extends EventEmitter {
   }
 
   getProviderType() {
-    return (process.env.WHATSAPP_LINKED_PROVIDER || 'mock').toLowerCase();
+    return 'baileys';
   }
 
   getState() {
@@ -80,20 +80,24 @@ class SessionManager extends EventEmitter {
   // ─── Provider Factory ────────────────────────────────────────────────────
 
   _createProvider() {
-    const type = this.getProviderType();
-    if (type === 'baileys') {
-      const { BaileysWhatsAppProvider } = require('./baileys-provider');
-      return new BaileysWhatsAppProvider();
-    }
-    const { MockWhatsAppProvider } = require('./mock-provider');
-    return new MockWhatsAppProvider();
+    const { BaileysWhatsAppProvider } = require('./baileys-provider');
+    return new BaileysWhatsAppProvider();
   }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────
 
-  async connect() {
-    if (this._state === STATES.CONNECTING || this._state === STATES.CONNECTED) {
+  async connect(force = false) {
+    if (!force && (this._state === STATES.CONNECTING || this._state === STATES.CONNECTED)) {
       return;
+    }
+
+    // If forcing reconnection, disconnect existing provider first
+    if (force && this._provider) {
+      try {
+        this._intentionalClose = false;
+        await this._provider.disconnect();
+      } catch (_) { /* ignore */ }
+      this._provider = null;
     }
 
     this._setState(STATES.CONNECTING);
@@ -133,11 +137,82 @@ class SessionManager extends EventEmitter {
         this.emit('message', msg);
       });
 
+      this._provider.on('receipt', (receipt) => {
+        this.emit('receipt', receipt);
+        this._applyReceipt(receipt).catch((err) => {
+          console.error('[WhatsApp] Receipt update failed:', err.message);
+        });
+      });
+
       await this._provider.initialize();
     } catch (err) {
       this._setState(STATES.ERROR, { _error: err.message });
       this.emit('error', err);
       throw err;
+    }
+  }
+
+  // ─── Delivery Receipts ──────────────────────────────────────────────────
+
+  /**
+   * Apply a WhatsApp delivery receipt to every log that stores the provider
+   * message id. Statuses only ever move forward (never downgrade a read
+   * message back to delivered, or a delivered message back to failed).
+   * @param {{id: string, status: 'delivered'|'read'|'failed'}} receipt
+   */
+  async _applyReceipt({ id, status }) {
+    if (!id || !status) return;
+    const { pool } = require('../config/database');
+    if (!pool || typeof pool.query !== 'function') return;
+
+    if (status === 'delivered') {
+      await pool.query(
+        `UPDATE message_logs SET status = 'Delivered'
+         WHERE whatsapp_message_id = $1 AND status NOT IN ('Delivered', 'Read')`,
+        [id]
+      );
+      await pool.query(
+        `UPDATE whatsapp_message_log SET status = 'delivered'
+         WHERE provider_message_id = $1 AND status NOT IN ('delivered', 'read')`,
+        [id]
+      );
+      await pool.query(
+        `UPDATE whatsapp_message_queue SET status = 'delivered', updated_at = NOW()
+         WHERE provider_message_id = $1 AND status = 'sent'`,
+        [id]
+      );
+    } else if (status === 'read') {
+      await pool.query(
+        `UPDATE message_logs SET status = 'Read'
+         WHERE whatsapp_message_id = $1 AND status <> 'Read'`,
+        [id]
+      );
+      await pool.query(
+        `UPDATE whatsapp_message_log SET status = 'read'
+         WHERE provider_message_id = $1 AND status <> 'read'`,
+        [id]
+      );
+      await pool.query(
+        `UPDATE whatsapp_message_queue SET status = 'delivered', updated_at = NOW()
+         WHERE provider_message_id = $1 AND status IN ('sent', 'delivered')`,
+        [id]
+      );
+    } else if (status === 'failed') {
+      await pool.query(
+        `UPDATE message_logs SET status = 'Failed', failure_reason = 'WhatsApp delivery failed'
+         WHERE whatsapp_message_id = $1 AND status NOT IN ('Failed', 'Delivered', 'Read')`,
+        [id]
+      );
+      await pool.query(
+        `UPDATE whatsapp_message_log SET status = 'failed'
+         WHERE provider_message_id = $1 AND status NOT IN ('failed', 'delivered', 'read')`,
+        [id]
+      );
+      await pool.query(
+        `UPDATE whatsapp_message_queue SET status = 'failed', updated_at = NOW()
+         WHERE provider_message_id = $1 AND status = 'sent'`,
+        [id]
+      );
     }
   }
 

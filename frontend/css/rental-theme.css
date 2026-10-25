@@ -397,6 +397,39 @@ body {
   100% { transform: translateX(100%); }
 }
 
+/* Clickable dashboard cards (open the records behind the figure) */
+.metric-card[data-drill],
+#collection-progress-panel[data-drill] {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.metric-card[data-drill]:hover,
+#collection-progress-panel[data-drill]:hover {
+  border-color: var(--qc-purple);
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.15);
+}
+.metric-card[data-drill]:focus-visible,
+#collection-progress-panel[data-drill]:focus-visible {
+  outline: 2px solid var(--qc-purple);
+  outline-offset: 2px;
+}
+
+/* Collection progress bar */
+.progress-track {
+  height: 10px;
+  background: rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--qc-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--qc-green), #4ade80);
+  border-radius: 999px;
+  transition: width 0.6s ease;
+}
+
 /* Status badges */
 .status-badge {
   display: inline-flex;
@@ -592,6 +625,58 @@ body {
   background: rgba(124, 58, 237, 0.02);
 }
 
+/* ── In-app report tables ────────────────────────────────────────────────
+   `.cyber-table` is applied to every report view (Monthly, Enhanced,
+   Water Bills, Management Expenses, Commissions, Occupancy, Registers...).
+   It guarantees professional, readable tables from the first view:
+   consistent header styling, wrapping for long tenant/apartment names,
+   zebra rows for tracking across wide grids, and a minimum width so the
+   scroll wrapper kicks in instead of crushing columns on phones. */
+.cyber-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  line-height: 1.4;
+}
+.cyber-table thead th {
+  font-family: var(--qc-font-mono, monospace);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #1e3a5f;
+  background: #eef2ff;
+  border-bottom: 2px solid rgba(124, 58, 237, 0.35);
+  border-right: 1px solid rgba(100, 116, 139, 0.15);
+  padding: 0.6rem 0.7rem;
+  text-align: left;
+  vertical-align: middle;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cyber-table tbody td {
+  border-bottom: 1px solid rgba(100, 116, 139, 0.18);
+  border-right: 1px solid rgba(100, 116, 139, 0.1);
+  padding: 0.55rem 0.7rem;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+/* Zebra rows make wide rows easy to follow without misreading columns. */
+.cyber-table tbody tr:nth-child(even) td {
+  background: rgba(124, 58, 237, 0.035);
+}
+.cyber-table tbody tr:hover td {
+  background: rgba(124, 58, 237, 0.08);
+}
+.cyber-table th:last-child,
+.cyber-table td:last-child {
+  border-right: none;
+}
+.cyber-table tfoot td {
+  font-weight: 700;
+  border-top: 2px solid rgba(124, 58, 237, 0.35);
+}
+
 .action-btn {
   font-family: var(--qc-font-mono);
   font-size: 0.65rem;
@@ -754,14 +839,21 @@ div[id$="modal"] label {
   box-shadow: 0 4px 12px rgba(225, 29, 72, 0.25);
 }
 
-/* View transitions */
+/* View transitions — transform ONLY. Never animate opacity on full views:
+   if the fade sticks at its first frame (seen on some GPUs/tab states),
+   the whole view computes opacity:0 and paints invisibly blank. */
 [data-view] {
-  animation: fadeIn 0.4s ease;
+  animation: viewSlideIn 0.4s ease;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes viewSlideIn {
+  from { transform: translateY(8px); }
+  to { transform: translateY(0); }
+}
+
+/* Hard guarantee: a shown view is always fully opaque. */
+[data-view]:not(.hidden) {
+  opacity: 1 !important;
 }
 
 /* Inline Editing */
@@ -1209,4 +1301,118 @@ div[id$="modal"] label {
 
 #sidebar.collapsed .sidebar-link:hover::after {
   opacity: 1;
+}
+
+/* ─── Tenancy agreements + tenant dashboard: small screens ─── */
+@media (max-width: 640px) {
+  #td-agreement-panel.glass-panel {
+    padding: 12px;
+  }
+  #td-agreement-panel .data-grid {
+    font-size: 12px;
+  }
+  #td-agreement-panel .data-grid th,
+  #td-agreement-panel .data-grid td {
+    padding: 8px;
+    white-space: nowrap;
+  }
+  #td-agreement-panel .action-btn {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  #btn-td-agreement-upload,
+  #btn-td-scan-doc {
+    flex: 1 1 auto;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    font-size: 13px;
+  }
+  #td-agreement-modal .glass-panel {
+    margin: 0;
+    max-height: 94vh;
+    padding: 12px;
+  }
+  #td-agreement-frame {
+    height: 70vh;
+  }
+  section[data-view="tenant-dashboard"] .section-head .qc-btn {
+    flex: 1 1 46%;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    font-size: 13px;
+  }
+  section[data-view="tenant-dashboard"] .metric-card {
+    padding: 12px;
+  }
+}
+
+/* ============================================================
+   PRINT / PDF SHARING — browser print() renders one report page
+   cleanly: app chrome hidden, only the report (marked .print-active)
+   prints, wide tables land on A4 landscape with visible borders.
+   ============================================================ */
+@page {
+  size: A4 landscape;
+  margin: 10mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  /* Hide everything, then reveal only the report being printed. */
+  body * {
+    visibility: hidden !important;
+  }
+  .print-active,
+  .print-active * {
+    visibility: visible !important;
+  }
+  .print-active {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 0 !important;
+  }
+
+  /* Chrome inside the report never prints. */
+  .print-active button,
+  .print-active .qc-btn,
+  .print-active .action-btn,
+  .print-active .sys-tag {
+    display: none !important;
+  }
+
+  /* Full table width on paper — no clipped columns. */
+  .print-active .overflow-x-auto {
+    overflow: visible !important;
+  }
+  .print-active .cyber-table {
+    min-width: 0 !important;
+    font-size: 10pt !important;
+  }
+  .print-active .cyber-table thead {
+    display: table-header-group;
+  }
+  .print-active .cyber-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .print-active .cyber-table th,
+  .print-active .cyber-table td {
+    border-color: #94a3b8 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Decorative background layers never print. */
+  .quantum-bg,
+  .quantum-grid {
+    display: none !important;
+  }
 }

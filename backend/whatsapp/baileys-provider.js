@@ -14,6 +14,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  WAMessageStatus,
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const QRCode = require('qrcode');
@@ -55,6 +56,12 @@ class BaileysWhatsAppProvider extends WhatsAppProvider {
 
     /** @type {boolean} True if disconnect() or logout() was called intentionally */
     this._intentionalClose = false;
+
+    /** @type {boolean} True while a fresh-pairing refresh is in flight */
+    this._refreshing = false;
+
+    /** @type {number} How many times credentials were wiped for fresh pairing */
+    this._pairingRefreshCount = 0;
 
     /** @type {Object|null} Latest Baileys version info */
     this._version = null;
@@ -282,6 +289,8 @@ class BaileysWhatsAppProvider extends WhatsAppProvider {
         this._setState('connected');
         this.qrCode = null;
         this._clearReconnectTimer();
+        this._pairingRefreshCount = 0;
+        console.log('[BaileysWhatsApp] connection OPEN');
         this.emit('connected');
         return;
       }
@@ -294,13 +303,45 @@ class BaileysWhatsAppProvider extends WhatsAppProvider {
       if (connection === 'close') {
         const statusCode =
           lastDisconnect?.error?.output?.statusCode;
+        const errMessage =
+          lastDisconnect?.error?.message || lastDisconnect?.error?.output?.payload?.message || '';
+        console.log(
+          `[BaileysWhatsApp] connection close: statusCode=${statusCode} (${DisconnectReason[statusCode] || 'unknown'}) intentional=${this._intentionalClose} msg=${String(errMessage).substring(0, 200)}`
+        );
 
-        // Logged-out or forbidden – do not reconnect
+        // Logged-out or forbidden – stored credentials are permanently invalid.
+        // WhatsApp will never emit a QR while these are on disk, so wipe them
+        // and restart with a fresh auth state to trigger a new pairing QR.
         if (
           statusCode === DisconnectReason.loggedOut ||
           statusCode === DisconnectReason.forbidden
         ) {
           this._intentionalClose = true;
+          this._clearReconnectTimer();
+
+          if (!this._refreshing && this._pairingRefreshCount < 2) {
+            this._refreshing = true;
+            this._pairingRefreshCount += 1;
+            console.log(
+              `[BaileysWhatsApp] Stored session rejected (statusCode=${statusCode}) — clearing credentials and starting fresh pairing (attempt ${this._pairingRefreshCount}/2)`
+            );
+            this.qrCode = null;
+            this.authState = null;
+            this.saveCreds = null;
+            this._clearSessionFiles();
+            // Stay CONNECTING (no 'disconnected' emit) so the UI keeps
+            // polling and picks up the fresh QR as soon as it arrives.
+            this.initialize()
+              .then(() => { this._refreshing = false; })
+              .catch((err) => {
+                this._refreshing = false;
+                console.error('[BaileysWhatsApp] Fresh pairing init failed:', err.message);
+                this._setState('disconnected');
+                this.emit('disconnected');
+              });
+            return;
+          }
+
           this._setState('disconnected');
           this.emit('disconnected');
           return;
@@ -352,6 +393,22 @@ class BaileysWhatsAppProvider extends WhatsAppProvider {
         });
       }
     });
+
+    // ── Delivery receipts for our own messages ───────────────────────────
+    sock.ev.on('messages.update', (updates) => {
+      for (const update of updates || []) {
+        if (!update?.key?.fromMe || !update.update || update.update.status == null) continue;
+        const status = update.update.status;
+        let mapped = null;
+        if (status === WAMessageStatus.DELIVERY_ACK) mapped = 'delivered';
+        else if (status === WAMessageStatus.READ || status === WAMessageStatus.PLAYED) mapped = 'read';
+        else if (status === WAMessageStatus.ERROR) mapped = 'failed';
+        else continue; // PENDING / SERVER_ACK carry no delivery information
+
+        console.log(`[BaileysWhatsApp] receipt: ${mapped} id=${update.key.id}`);
+        this.emit('receipt', { id: update.key.id, status: mapped });
+      }
+    });
   }
 
   /**
@@ -364,6 +421,7 @@ class BaileysWhatsAppProvider extends WhatsAppProvider {
       const dataUrl = await QRCode.toDataURL(qr, { width: 300, margin: 2 });
       this.qrCode = dataUrl;
       this._setState('qr_required');
+      console.log('[BaileysWhatsApp] QR code generated');
       this.emit('qr', dataUrl);
     } catch (err) {
       console.error('[BaileysWhatsApp] QR code conversion failed:', err.message);

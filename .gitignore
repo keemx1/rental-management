@@ -31,3 +31,10 @@ rewrite_store_4.js
 test.js
 test_invoices.js
 _watchdog.ps1
+
+# Runtime artifacts — generated documents & WhatsApp session keys (never commit)
+backend/storage/documents/
+backend/whatsapp/sessions/
+backend/whatsapp/sessions-*/
+backend/check_tenant.js
+tests/report_samples/

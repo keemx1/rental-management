@@ -359,9 +359,14 @@ async function markUnitVacant(tenantCode) {
   await query('DELETE FROM payments WHERE tenant_code = $1', [tenantCode]);
   await query('DELETE FROM penalties WHERE tenant_code = $1', [tenantCode]);
 
+  // Vacancy reset: auto-close live payment arrangements for this unit.
+  // History rows stay under the old tenant_code for audit; a new tenant
+  // (new code) always starts with none.
+  try { await closeArrangementsForVacancy(tenantCode, 'system'); } catch (_) {}
+
   const res = await query(
     `UPDATE tenants SET
-       name = '', phone_number = '', status = 'Vacant',
+        name = '', phone_number = '', status = 'Vacant',
        arrears = 0, deposit_paid = 0, garbage_fee_paid = 0, rent_paid_this_month = 0,
        credit_balance = 0, advance_rent_until = NULL, advance_rent_balance = 0,
        opening_advance_rent = 0, agreement_charge = 0, agreement_paid = 0, agreement_outstanding = 0,
@@ -422,11 +427,191 @@ async function findPaymentById(id) {
   return res.rows[0] || null;
 }
 
+async function findPaymentByClientTxnId(clientTxnId) {
+  if (!clientTxnId) return null;
+  const res = await query(
+    `SELECT p.*, p.tenant_code AS tenant_id, p.payment_date::text AS payment_date,
+            t.name AS tenant_name, t.tenant_code, t.property_name, t.unit_label
+     FROM payments p
+     LEFT JOIN tenants t ON p.tenant_code = t.tenant_code
+     WHERE p.client_txn_id = $1
+     LIMIT 1`,
+    [String(clientTxnId)]
+  );
+  return res.rows[0] || null;
+}
+
+// ─── Offline-first idempotency (Phase 2) ────────────────────────────────────
+// Generic replay lookup for offline-created records. Table names are
+// whitelisted — never interpolate raw caller input into SQL.
+const OFFLINE_IDEMPOTENT_TABLES = new Set([
+  'work_orders', 'maintenance_invoices', 'water_invoices', 'exit_invoices',
+  'inspections', 'media_attachments',
+]);
+
+async function findRecordByClientTxnId(table, clientTxnId) {
+  if (!clientTxnId || !OFFLINE_IDEMPOTENT_TABLES.has(table)) return null;
+  const res = await query(
+    `SELECT * FROM ${table} WHERE client_txn_id = $1 LIMIT 1`,
+    [String(clientTxnId)]
+  );
+  return res.rows[0] || null;
+}
+
+// ─── Property inspections (offline-first) ───────────────────────────────────
+
+async function createInspection(data) {
+  if (data.client_txn_id) {
+    const existing = await findRecordByClientTxnId('inspections', data.client_txn_id);
+    if (existing) return { ...existing, _idempotentReplay: true };
+  }
+  const res = await query(
+    `INSERT INTO inspections
+       (client_txn_id, tenant_code, property_name, house_paybill_number, unit_label,
+        inspection_date, checklist, photos_count, notes, status, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     RETURNING *, inspection_date::text AS inspection_date`,
+    [
+      data.client_txn_id || null,
+      data.tenant_code || null,
+      data.property_name || '',
+      data.house_paybill_number || null,
+      data.unit_label || null,
+      data.inspection_date || new Date().toISOString().slice(0, 10),
+      JSON.stringify(data.checklist || {}),
+      Number(data.photos_count || 0),
+      data.notes || null,
+      data.status || 'Draft',
+      data.created_by || null,
+    ]
+  );
+  return res.rows[0];
+}
+
+async function listInspections({ limit = 100, offset = 0 } = {}) {
+  const res = await query(
+    `SELECT *, inspection_date::text AS inspection_date FROM inspections
+     ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+    [Number(limit), Number(offset)]
+  );
+  return res.rows;
+}
+
+// ─── Media attachments (offline photos) ─────────────────────────────────────
+
+async function createMediaAttachment(data) {
+  if (data.client_txn_id) {
+    const existing = await findRecordByClientTxnId('media_attachments', data.client_txn_id);
+    if (existing) return { ...existing, _idempotentReplay: true };
+  }
+  const res = await query(
+    `INSERT INTO media_attachments
+       (client_txn_id, linked_type, linked_client_txn_id, linked_id,
+        filename, mimetype, size_bytes, storage_path, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     RETURNING *`,
+    [
+      data.client_txn_id || null,
+      data.linked_type || 'general',
+      data.linked_client_txn_id || null,
+      data.linked_id != null ? Number(data.linked_id) : null,
+      data.filename || '',
+      data.mimetype || 'image/jpeg',
+      Number(data.size_bytes || 0),
+      data.storage_path || '',
+      data.created_by || null,
+    ]
+  );
+  return res.rows[0];
+}
+
+async function listMediaAttachments(linkedType, linkedId) {
+  const res = await query(
+    `SELECT id, linked_type, linked_client_txn_id, linked_id, filename, mimetype,
+            size_bytes, storage_path, created_by, created_at
+     FROM media_attachments WHERE linked_type = $1 AND linked_id = $2 ORDER BY created_at`,
+    [linkedType, Number(linkedId)]
+  );
+  return res.rows;
+}
+
+// ─── Sync conflicts (manager review queue, Phase 3) ─────────────────────────
+// When the server rejects an offline upload (duplicate, occupied unit,
+// invalid reading), the rejection is recorded here instead of vanishing.
+// Managers resolve centrally; devices pull resolutions on the next sync.
+
+async function recordSyncConflict({ clientTxnId, opType, tenantCode, summary, reason, existingRef }) {
+  const res = await query(
+    `INSERT INTO sync_conflicts (client_txn_id, op_type, tenant_code, summary, reason, existing_ref, status)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending')
+     ON CONFLICT (client_txn_id) DO UPDATE SET
+       reason = EXCLUDED.reason,
+       existing_ref = EXCLUDED.existing_ref,
+       summary = EXCLUDED.summary,
+       status = 'pending',
+       resolution = NULL, resolved_by = NULL, resolved_at = NULL
+     RETURNING *`,
+    [
+      clientTxnId || null,
+      opType || '',
+      tenantCode || null,
+      JSON.stringify(summary || {}),
+      reason || '',
+      existingRef ? JSON.stringify(existingRef) : null,
+    ]
+  );
+  return res.rows[0];
+}
+
+async function listSyncConflicts(status) {
+  const where = status ? ' WHERE status = $1' : '';
+  const params = status ? [status] : [];
+  const res = await query(
+    `SELECT * FROM sync_conflicts${where} ORDER BY created_at DESC LIMIT 500`,
+    params
+  );
+  return res.rows;
+}
+
+async function resolveSyncConflict(id, { resolution, by }) {
+  if (!['dismissed', 'retry'].includes(resolution)) {
+    throw new Error(`resolution must be 'dismissed' or 'retry'`);
+  }
+  const res = await query(
+    `UPDATE sync_conflicts SET status = 'resolved', resolution = $2, resolved_by = $3, resolved_at = NOW()
+     WHERE id = $1 RETURNING *`,
+    [Number(id), resolution, by || null]
+  );
+  return res.rows[0] || null;
+}
+
+async function getConflictResolutions(clientTxnIds) {
+  const ids = (Array.isArray(clientTxnIds) ? clientTxnIds : []).map(String).filter(Boolean).slice(0, 200);
+  if (!ids.length) return {};
+  const res = await query(
+    `SELECT client_txn_id, status, resolution FROM sync_conflicts WHERE client_txn_id = ANY($1)`,
+    [ids]
+  );
+  const out = {};
+  for (const r of res.rows) {
+    if (r.client_txn_id) out[r.client_txn_id] = { status: r.status, resolution: r.resolution };
+  }
+  return out;
+}
+
 async function createPayment(data) {
+  // Idempotency: an offline device may upload the same payment twice
+  // (retry after timeout, double sync). The client_txn_id UUID identifies
+  // the device-side transaction — return the existing row instead of
+  // creating a duplicate.
+  if (data.client_txn_id) {
+    const existing = await findPaymentByClientTxnId(data.client_txn_id);
+    if (existing) return { ...existing, amount: Number(existing.amount), _idempotentReplay: true };
+  }
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const res = await query(
-    `INSERT INTO payments (tenant_code, amount, mpesa_reference, status, payment_date, notes, payment_type, payment_mode, sender_account, receiver_account, cheque_number, payment_datetime)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    `INSERT INTO payments (tenant_code, amount, mpesa_reference, status, payment_date, notes, payment_type, payment_mode, sender_account, receiver_account, cheque_number, payment_datetime, client_txn_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING *, tenant_code AS tenant_id, payment_date::text AS payment_date`,
     [
       String(data.tenant_id),
@@ -440,7 +625,8 @@ async function createPayment(data) {
       data.sender_account || null,
       data.receiver_account || null,
       data.cheque_number || null,
-      data.payment_datetime || null
+      data.payment_datetime || null,
+      data.client_txn_id || null
     ]
   );
   return { ...res.rows[0], amount: Number(res.rows[0].amount) };
@@ -501,20 +687,31 @@ async function approvePaymentOnce(id) {
 
     const receiptNumber = await generateReceiptNumber(run);
 
-    // Compute billing_period from tenant's ledger position, not just payment date.
-    // Rule: payment date ≠ billing period. Allocate to the current billing cycle
-    // at time of approval. The allocation chain (arrears → penalties → rent)
-    // handles where the money actually goes. The billing_period is metadata
-    // indicating which cycle this payment is for.
-    const preRes = await run(`SELECT payment_type, payment_date::text AS payment_date, amount, tenant_code FROM payments WHERE id = $1`, [id]);
+    // Compute billing_period from the tenant's rent cycle (rent_due_date), NOT from
+    // payment date or current calendar date. Payment date = when the tenant paid.
+    // Billing period = which rent cycle/month the payment covers.
+    const preRes = await run(
+      `SELECT p.payment_type, p.payment_date::text AS payment_date, p.amount, p.tenant_code,
+              t.rent_due_date::text AS rent_due_date
+       FROM payments p JOIN tenants t ON t.tenant_code = p.tenant_code
+       WHERE p.id = $1`, [id]);
     const prePay = preRes.rows[0];
+
+    // Derive billing_period from the tenant's rent_due_date.
+    // rent_due_date always points to the NEXT due date (updated by rollover).
+    // The billing period is always the month of rent_due_date — the payment date
+    // only determines whether it's early or late, not which month it covers.
+    // advance_rent payments (checked below) are the exception — they go to next month.
     let billingPeriod = currentMonth;
+    if (prePay && prePay.rent_due_date) {
+      billingPeriod = prePay.rent_due_date.slice(0, 7);
+    }
 
     if (prePay && prePay.payment_type === 'advance_rent') {
       // Explicit advance rent → next billing cycle
-      billingPeriod = nextMonthKey(currentMonth);
+      billingPeriod = nextMonthKey(billingPeriod);
     }
-    // For regular rent and deposit: billingPeriod stays as currentMonth (set above)
+    // For regular rent and deposit: billingPeriod is based on tenant's rent cycle
 
     const res = await run(
       `UPDATE payments SET status = 'Approved', approved_at = NOW(), receipt_number = $2, sync_status = 'pending_sync', billing_period = $3 WHERE id = $1 AND status = 'Pending' RETURNING *, tenant_code AS tenant_id, payment_date::text AS payment_date`,
@@ -681,16 +878,16 @@ async function approvePaymentOnce(id) {
         remaining -= settle;
       }
 
-      // 8) Deposit — new tenancy only (settled before any overpayment)
-      if (onboarding && depositShortfall > 0 && remaining > 0) {
+      // 8) Deposit — last resort before overpayment. A deposit shortfall is
+      // an applicable outstanding charge like any other: leftover money
+      // settles it instead of spilling to overpayment. (Onboarding merely
+      // determines messaging/first-payment flags, never eligibility.)
+      if (depositShortfall > 0 && remaining > 0) {
         const settle = Math.min(depositShortfall, remaining);
         depositPaid += settle;
         depositSettled = settle;
         remaining -= settle;
       }
-
-      // Deposit is only settled during onboarding; for regular payments it is
-      // only ever settled by a payment explicitly intended for deposit.
 
       const newRentPaidThisMonth = rentPaidThisMonth + rentSettled;
 
@@ -763,7 +960,7 @@ async function approvePaymentOnce(id) {
 
     const updatedTenant = await getTenant(payment.tenant_id, run);
     const overpayment = allocation ? Math.max(0, Number(allocation.overpayment || 0)) : 0;
-    await run(`UPDATE payments SET overpayment_amount = $2 WHERE id = $1`, [id, overpayment]);
+    await run(`UPDATE payments SET overpayment_amount = $2, allocation_breakdown = $3 WHERE id = $1`, [id, overpayment, allocation ? JSON.stringify(allocation) : null]);
 
     // CRITICAL FIX: If there is an overpayment, automatically convert it to
     // advance rent on the tenant so it covers future billing cycles.
@@ -794,6 +991,15 @@ async function approvePaymentOnce(id) {
       [id]
     );
 
+    // Mirror settled buckets onto outstanding Invoice Center rows (Paid /
+    // Partially Paid tracking only). Allocation itself is untouched, and a
+    // linking failure must never break the approval — log and continue.
+    try {
+      await applyPaymentToInvoices({ ...payment, tenant_code: payment.tenant_id }, allocation, updatedTenant, run);
+    } catch (linkErr) {
+      console.error(`[InvoiceLink] Linking failed for payment ${id} (approval unaffected):`, linkErr.message);
+    }
+
     const finalRes = await run(`SELECT * FROM payments WHERE id = $1`, [id]);
     const paymentRow = finalRes.rows[0];
     await client.query('COMMIT');
@@ -821,6 +1027,28 @@ async function approvePaymentOnce(id) {
 
 function approxEqual(a, b) {
   return Math.abs(Number(a || 0) - Number(b || 0)) < 0.005;
+}
+
+// Rent-directed portion of one approved payment: the allocation snapshot's
+// rent share when present, else the full amount (legacy rows predate
+// allocation snapshots — preserved as-is).
+function rentDirectedAmount(p) {
+  const amt = Number((p && p.amount) || 0);
+  let bd = p ? p.allocation_breakdown : null;
+  try { if (typeof bd === 'string') bd = JSON.parse(bd); } catch (_) { bd = null; }
+  if (bd && bd.rentSettled !== undefined && bd.rentSettled !== null) return Number(bd.rentSettled) || 0;
+  return amt;
+}
+
+// Billing month a payment belongs to: the approval-time billing_period when
+// present (derived from the tenant's rent cycle), else the payment date.
+function billingMonthOfPayment(p) {
+  if (p && p.billing_period && /^\d{4}-\d{2}$/.test(String(p.billing_period))) return String(p.billing_period);
+  const pd = p ? p.payment_date : null;
+  if (pd instanceof Date && !Number.isNaN(pd.getTime())) {
+    return `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, '0')}`;
+  }
+  return String(pd || '').slice(0, 7);
 }
 
 function validatePaymentSync(tenant, expected, allocation) {
@@ -877,11 +1105,18 @@ async function syncHistoricalPayments() {
   );
   syncedPayments = batchRes.rowCount || 0;
 
-  // Re-run recalculateAll only for tenants that have approved payments.
+  // Re-run recalculateAll only for tenants that have approved payments,
+  // then reconcile so status/arrears/advance-covered positions (which the
+  // replay deliberately cannot reconstruct) are re-derived too.
   for (const t of tenants) {
     if (!t.tenant_code || t.approved_count === 0) continue;
     try {
       await recalculateAll(t.tenant_code);
+      try {
+        await reconcileTenant(t.tenant_code);
+      } catch (recErr) {
+        failed.push({ tenant_code: t.tenant_code, tenant_name: t.name || null, error: 'reconcile: ' + recErr.message });
+      }
       tenantsRepaired++;
     } catch (err) {
       failed.push({ tenant_code: t.tenant_code, tenant_name: t.name || null, error: err.message });
@@ -945,18 +1180,23 @@ async function reconcileTenant(tenantCode) {
   // All approved payments for this tenant
   const payRes = await query(
     `SELECT id, amount, payment_date::text AS payment_date, payment_type, billing_period,
-            overpayment_amount, mpesa_reference, receipt_number
+            overpayment_amount, mpesa_reference, receipt_number, allocation_breakdown
      FROM payments WHERE tenant_code = $1 AND status = 'Approved' ORDER BY payment_date ASC, id ASC`,
     [tenantCode]
   );
   const allPayments = payRes.rows;
 
-  // Determine billing periods: current month and next month.
-  // Past months are already settled by the rollover process — their arrears
-  // are carried forward on the tenant record. Reconciling the future ensures
-  // advance payments are properly applied without creating phantom arrears
-  // for months that were already closed.
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  // Billing periods: the tenant's CURRENT RENT CYCLE (month of rent_due_date)
+  // plus the following cycle. Billing always follows rent_due_date — the same
+  // convention approvePayment (billing_period), recalculateAll (cycleMonth) and
+  // rollover use — so payment snapshots land in the same period here. Using the
+  // calendar month instead clobbered rent_paid_this_month for paid-up tenants
+  // whose cycle had already rolled forward (payments looked "forgotten").
+  // Past cycles are settled by rollover — their arrears are carried forward.
+  const calendarMonth = new Date().toISOString().slice(0, 7);
+  const currentMonth = tenant.rent_due_date
+    ? String(tenant.rent_due_date).slice(0, 7)
+    : calendarMonth;
   const nextMonth = nextMonthKey(currentMonth);
   const billingPeriods = [currentMonth, nextMonth];
 
@@ -977,8 +1217,11 @@ async function reconcileTenant(tenantCode) {
     paymentsByPeriod[bp].push(p);
   }
 
-  // Seed the running advance balance from the tenant's current advance_rent_balance
-  // (set by previous reconciliations and the rollover process).
+  // Advance/credit pools are owned by the approval, rollover and resolution
+  // flows (they spend them when months actually close). Reconciliation only
+  // projects with a working copy — it must persist the pools UNCHANGED,
+  // otherwise a mere status recompute would evaporate real advance money
+  // (and destroy the until-marker rollover relies on).
   let runningAdvance = Number(tenant.advance_rent_balance || 0);
 
   // Auto-seed: if opening_advance_rent exists but advance was never seeded
@@ -1070,11 +1313,14 @@ async function reconcileTenant(tenantCode) {
     const advanceApplied = advanceCoversRent ? 0 : Math.min(runningAdvance, charges);
     const afterAdvance = charges - advanceApplied;
 
-    // Payments allocated to this billing period
+    // Payments allocated to this billing period — rent-directed portions only.
+    // Counting full payment amounts here overstates rent-paid whenever one
+    // payment also settled arrears/penalties/deposit (the uncounted shortfall
+    // would then vanish instead of persisting as debt).
     const periodPayments = (paymentsByPeriod[bp] || []);
     let paymentsApplied = 0;
     for (const p of periodPayments) {
-      paymentsApplied += Number(p.amount || 0);
+      paymentsApplied += rentDirectedAmount(p);
     }
 
     // Deposit applied to this billing period
@@ -1137,14 +1383,16 @@ async function reconcileTenant(tenantCode) {
   // previous rollover (before the advance was recognized) should be cleared.
   // This handles the MD10 case: July payment was advance for August, rollover
   // created arrears thinking July was unpaid, but August is actually PAID.
+  // Manual arrears (rent_due_manually_set) are operator truth — rollover
+  // preserves them, so this heuristic must never wipe them either.
   const isCurrentPaid = currentStatus.startsWith('Paid');
-  if (isCurrentPaid && existingArrears > 0) {
+  if (isCurrentPaid && existingArrears > 0 && !tenant.arrears_manually_set) {
     // Check if the arrears correspond to a period that is now covered
     // by advance payments. If the payment for the arrears period was
     // actually an advance for the current month, the arrears are stale.
     const arrearsPayments = allPayments.filter(p => {
       const pMonth = monthKey(p.payment_date);
-      return pMonth < currentMonth && Number(p.amount || 0) > 0;
+      return pMonth < calendarMonth && Number(p.amount || 0) > 0;
     });
     const arrearsPaid = arrearsPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
     if (arrearsPaid >= existingArrears) {
@@ -1172,12 +1420,12 @@ async function reconcileTenant(tenantCode) {
   const garbagePaid = Number(tenant.garbage_fee_paid || 0);
   const waterPaid = Number(tenant.water_charge_paid || 0);
 
-  // Update tenant with reconciled values
+  // Update tenant with reconciled values. Advance/credit pools persist
+  // UNCHANGED here (see above) — only status, arrears and the current
+  // month's rent-paid display are recomputed.
   await updateTenant(tenantCode, {
     arrears: Math.max(0, existingArrears),
     rent_paid_this_month: Math.min(currentMonthPaid, rentAmount),
-    advance_rent_balance: runningAdvance,
-    advance_rent_until: runningAdvance > 0 ? `${currentMonth}-28` : null,
     status: tenantStatus,
   });
 
@@ -1187,7 +1435,7 @@ async function reconcileTenant(tenantCode) {
     arrears: Math.max(0, existingArrears),
     rent_paid_this_month: Math.min(currentMonthPaid, rentAmount),
     current_month_outstanding: currentOutstanding,
-    advance_balance: runningAdvance,
+    advance_balance: Number(tenant.advance_rent_balance || 0),
     periods: periodResults,
   };
 }
@@ -1376,108 +1624,352 @@ async function getDepositApplications(tenantCode) {
   return res.rows;
 }
 
-async function deletePayment(id) {
+async function deletePayment(id, actor) {
   const target = await query('SELECT * FROM payments WHERE id = $1', [id]);
   const deleted = target.rows[0];
-  if (!deleted) return false;
+  if (!deleted) return { deleted: false };
+  const auditBase = {
+    payment_id: deleted.id,
+    amount: Number(deleted.amount || 0),
+    tenant_code: deleted.tenant_code,
+    payment_type: deleted.payment_type,
+    payment_date: deleted.payment_date,
+    mpesa_reference: deleted.mpesa_reference,
+    receipt_number: deleted.receipt_number,
+    status_before: deleted.status,
+  };
 
-  await query('DELETE FROM payments WHERE id = $1', [id]);
+  // Approved payments carrying their approval allocation are reversed
+  // surgically (exact deltas). Anything else falls back to the legacy path.
+  if (deleted.status === 'Approved' && deleted.tenant_code && deleted.allocation_breakdown) {
+    const out = await reversePaymentAllocation(deleted);
+    try {
+      await logAudit({
+        actor: actor ?? null, action: 'payment_deleted', entityType: 'payment', entityId: String(deleted.id),
+        details: { ...auditBase, reversed_allocations_only: true, warnings: out.warnings || [] },
+      });
+    } catch (_) {}
+    return out;
+  }
 
   if (deleted.status === 'Approved' && deleted.tenant_code) {
-    await recalculateAll(deleted.tenant_code);
+    // Rebuild BEFORE deleting: if the rebuild throws, the payment row and
+    // all counters stay exactly as they were (nothing is lost halfway).
+    const rec = await recalculateAll(deleted.tenant_code, deleted.id);
+    await query('DELETE FROM payments WHERE id = $1', [id]);
+
     // Reconcile after deletion to update status across all modules
     try {
       await reconcileTenant(deleted.tenant_code);
     } catch (err) {
       console.error(`[Reconcile] Post-deletion reconciliation failed for ${deleted.tenant_code}:`, err.message);
     }
+    try {
+      await logAudit({
+        actor: actor ?? null, action: 'payment_deleted', entityType: 'payment', entityId: String(deleted.id),
+        details: { ...auditBase, fallback_rebuild: true, warnings: (rec && rec.warnings) || [] },
+      });
+    } catch (_) {}
+    const warnings = [...((rec && rec.warnings) || [])];
+    if (!deleted.allocation_breakdown) {
+      warnings.push('Deleted payment predates allocation snapshots — counters rebuilt from survivors; verify B/F arrears and pools.');
+    }
+    return { deleted: true, reversed: false, fallback: !deleted.allocation_breakdown && deleted.status === 'Approved', warnings };
   }
 
-  return true;
+  await query('DELETE FROM payments WHERE id = $1', [id]);
+  try {
+    await logAudit({
+      actor: actor ?? null, action: 'payment_deleted', entityType: 'payment', entityId: String(deleted.id),
+      details: { ...auditBase, unapproved_no_reversal: true },
+    });
+  } catch (_) {}
+  return { deleted: true, reversed: false, fallback: !deleted.allocation_breakdown && deleted.status === 'Approved' };
 }
 
-async function recalculateAll(tenantCode) {
-  const tenant = await getTenant(tenantCode);
-  if (!tenant) return;
+// Full rollback of one approved payment using the allocation snapshot taken
+// at approval time (payments.allocation_breakdown). Every counter the
+// approval moved is moved back by exactly that delta:
+//   deposit_paid, garbage_fee_paid, water_charge_paid, arrears,
+//   rent_paid_this_month, agreement_paid/outstanding, advance pool,
+//   credit pool, penalty rows (LIFO per category), pending-overpayment rows.
+// Receipt PDFs, invoice-register entries and message logs are history and
+// are intentionally kept. rent_due_date is untouched by approval, so the
+// rent period needs no correction beyond rent_paid_this_month.
+async function reversePaymentAllocation(payment) {
+  const num = (v) => Number(v || 0);
+  let alloc = null;
+  try {
+    alloc = typeof payment.allocation_breakdown === 'string'
+      ? JSON.parse(payment.allocation_breakdown)
+      : payment.allocation_breakdown;
+  } catch (_) { alloc = null; }
+  if (!alloc) {
+    const rec = await recalculateAll(payment.tenant_code, payment.id);
+    await query('DELETE FROM payments WHERE id = $1', [payment.id]);
+    try { await reconcileTenant(payment.tenant_code); } catch (_) {}
+    const warnings = [...((rec && rec.warnings) || [])];
+    warnings.push('Deleted payment predates allocation snapshots — counters rebuilt from survivors; verify B/F arrears and pools.');
+    return { deleted: true, reversed: false, fallback: true, warnings };
+  }
 
-  // Unpay all penalties for this tenant
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const run = (sql, params) => client.query(sql, params);
+    const tenantCode = payment.tenant_code;
+    const warnings = [];
+
+    const tRes = await run(`SELECT * FROM tenants WHERE tenant_code = $1`, [tenantCode]);
+    const tenant = tRes.rows[0] || null;
+
+    // Overpayment resolutions tied to this payment (rows vanish via CASCADE
+    // on delete — read them first to unwind their effects).
+    const poRes = await run(`SELECT * FROM pending_overpayments WHERE payment_id = $1`, [payment.id]);
+    const resolved = poRes.rows.find((r) => String(r.status || '').toLowerCase() === 'resolved' || r.resolution_type);
+    const resolutionChoice = resolved ? String(resolved.resolution_type || '').toLowerCase() : null;
+    // Advance vs credit wording varies ('advance_rent' / 'credit_balance').
+    const isCreditResolution = resolved && /credit/.test(resolutionChoice || '');
+    const overpayment = Math.max(0, num(payment.overpayment_amount || alloc.overpayment));
+
+    if (tenant) {
+      const dep = num(alloc.depositSettled);
+      const gar = num(alloc.garbageFeeSettled);
+      const wat = num(alloc.waterSettled);
+      const arr = num(alloc.arrearsSettled);
+      const rent = num(alloc.rentSettled);
+      const agr = num(alloc.agreementSettled);
+      const pen = num(alloc.penaltySettled);
+      const mnt = num(alloc.maintenanceSettled);
+      const oth = num(alloc.otherSettled);
+
+      const next = {
+        deposit_paid: Math.min(Math.max(0, num(tenant.deposit_paid) - dep), num(tenant.deposit_amount)),
+        garbage_fee_paid: Math.min(Math.max(0, num(tenant.garbage_fee_paid) - gar), num(tenant.garbage_fee_amount)),
+        water_charge_paid: Math.min(Math.max(0, num(tenant.water_charge_paid) - wat), num(tenant.water_charge_amount)),
+        arrears: num(tenant.arrears) + arr,
+        rent_paid_this_month: Math.max(0, num(tenant.rent_paid_this_month) - rent),
+        agreement_paid: Math.max(0, num(tenant.agreement_paid) - agr),
+        agreement_outstanding: num(tenant.agreement_outstanding) + agr,
+      };
+
+      if (!resolved) {
+        // Approval auto-converted the overpayment into the advance pool.
+        next.advance_rent_balance = Math.max(0, num(tenant.advance_rent_balance) - overpayment);
+        if (next.advance_rent_balance === 0) next.advance_rent_until = null;
+      } else if (isCreditResolution) {
+        // Resolution had moved the overpayment advance -> credit pool.
+        next.credit_balance = Math.max(0, num(tenant.credit_balance) - overpayment);
+      } else {
+        // Months/advance resolution reshaped advance + rent top-up in ways
+        // without snapshots — approximate the rent top-up, leave the pool.
+        next.rent_paid_this_month = Math.max(0, next.rent_paid_this_month - overpayment);
+        warnings.push('A months/advance resolution had reshaped this payment; rent top-up reversed approximately — verify advance balance and rent status.');
+      }
+
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      for (const [k, v] of Object.entries(next)) {
+        fields.push(`${k} = $${idx++}`);
+        values.push(v);
+      }
+      values.push(tenantCode);
+      await run(`UPDATE tenants SET ${fields.join(', ')}, updated_at = NOW() WHERE tenant_code = $${idx}`, values);
+
+      // Penalties: approval flips oldest-Pending rows to Paid per category
+      // (exact category match — NULL categories are never touched by it).
+      // Reverse newest-first up to each settled sum. Rows paid later by other
+      // payments are flagged so states can be verified.
+      const approvalDay = payment.approved_at || payment.payment_date || payment.recorded_at || null;
+      for (const [cat, settled] of [['penalty', pen], ['maintenance', mnt], ['other', oth]]) {
+        let need = num(settled);
+        if (!(need > 0)) continue;
+        const rows = await run(
+          `SELECT id, amount, paid_date::text AS paid_date FROM penalties
+           WHERE tenant_code = $1 AND category = $2 AND status = 'Paid'
+           ORDER BY paid_date DESC NULLS LAST, id DESC`,
+          [tenantCode, cat]
+        );
+        for (const row of rows.rows) {
+          if (!(need > 0)) break;
+          await run(`UPDATE penalties SET status = 'Pending', paid_date = NULL, updated_at = NOW() WHERE id = $1`, [row.id]);
+          need = Math.max(0, need - num(row.amount));
+          // Revert the linked maintenance-charge recovery this flip caused.
+          await run(
+            `UPDATE maintenance_charges SET recovery_status = 'Pending', amount_recovered = 0, updated_at = NOW()
+             WHERE penalty_id = $1 AND recovery_status = 'Paid'`,
+            [row.id]
+          ).catch(() => {});
+          if (approvalDay && row.paid_date && row.paid_date > String(approvalDay).slice(0, 10)) {
+            warnings.push(`A ${cat} penalty paid after this payment was re-opened — verify penalty states.`);
+          }
+        }
+        if (need > 0) {
+          warnings.push(`Could not fully reverse ${cat} penalties (KES ${need.toFixed(2)} unmatched) — verify penalty states.`);
+        }
+      }
+    }
+
+    // Reverse Invoice Center links made by this payment (exact per-link
+    // amounts), restoring each invoice's paid/balance state.
+    try {
+      await reverseInvoiceLinks(payment.id, run);
+    } catch (linkErr) {
+      warnings.push('Invoice links could not be fully reversed — verify invoice balances.');
+      console.error(`[InvoiceLink] Reversal failed for payment ${payment.id}:`, linkErr.message);
+    }
+
+    await run(`DELETE FROM payments WHERE id = $1`, [payment.id]);
+    await client.query('COMMIT');
+
+    try {
+      await reconcileTenant(tenantCode);
+    } catch (err) {
+      console.error(`[Reconcile] Post-reversal reconciliation failed for ${tenantCode}:`, err.message);
+    }
+    return { deleted: true, reversed: true, warnings };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function recalculateAll(tenantCode, excludeId = null) {
+  const tenant = await getTenant(tenantCode);
+  if (!tenant) return { warnings: [] };
+  const warnings = [];
+
+  // Unpay all penalties for this tenant (rebuilt below from survivors)
   await query(
     `UPDATE penalties SET status = 'Pending', paid_date = NULL, updated_at = NOW() WHERE tenant_code = $1 AND status = 'Paid'`,
     [tenantCode]
   );
 
-  // Fetch all remaining approved payments in chronological order
+  // Remaining approved payments, oldest first, WITH their snapshots.
+  // excludeId (fallback-before-delete) keeps the doomed payment out of the
+  // replay so counters are rebuilt before its row disappears.
   const payRes = await query(
-    `SELECT * FROM payments WHERE tenant_code = $1 AND status = 'Approved' ORDER BY payment_date ASC, recorded_at ASC`,
-    [tenantCode]
+    `SELECT * FROM payments WHERE tenant_code = $1 AND status = 'Approved'${excludeId ? ' AND id <> $2' : ''} ORDER BY payment_date ASC, recorded_at ASC`,
+    excludeId ? [tenantCode, excludeId] : [tenantCode]
   );
 
   const rentAmount = Number(tenant.rent_amount);
   const depositAmount = Number(tenant.deposit_amount || 0);
   const garbageFeeAmount = Number(tenant.garbage_fee_amount || 0);
+  const waterChargeAmount = Number(tenant.water_charge_amount || 0);
+  const agreementCharge = Number(tenant.agreement_charge || 0);
+  // Current rent cycle (approval convention: billing follows rent_due_date)
+  const cycleMonth = tenant.rent_due_date ? String(tenant.rent_due_date).slice(0, 7) : new Date().toISOString().slice(0, 7);
 
-  let depositPaid = 0;
-  let arrears = 0;
-  let garbageFeePaid = 0;
-  let rentPaidThisMonth = 0;
+  // Exact replay from each survivor's OWN allocation snapshot (sums commute,
+  // caps mirror approval). B/F arrears and advance/credit pools are rollover
+  // and resolution state no payment history can reconstruct — preserved
+  // as-is, never zeroed.
+  let depositPaid = 0, garbageFeePaid = 0, waterChargePaid = 0, agreementPaid = 0, rentPaidCycle = 0;
+  let legacyCount = 0;
+  // Chronological rent-type tracking mirrors hasApprovedRentPaymentFor
+  // (approval-time onboarding excludes the payment itself and later rows).
+  let seenRent = false;
 
   for (const row of payRes.rows) {
-    const amount = Number(row.amount);
-    let remaining = amount;
-
-    // 0) Deposit
-    const depositShortfall = Math.max(0, depositAmount - depositPaid);
-    if (depositShortfall > 0 && remaining > 0) {
-      const settle = Math.min(depositShortfall, remaining);
-      depositPaid += settle;
-      remaining -= settle;
+    const bd = allocationOf(row);
+    const amount = Number(row.amount || 0);
+    const num = (v) => Number(v || 0);
+    if (!bd) {
+      // Legacy row without a snapshot: simulate approval order against live
+      // counters. Arrears are deliberately NOT replayed — B/F belongs to
+      // rollover history, not to this rebuild.
+      legacyCount++;
+      let remaining = amount;
+      const ptype = row.payment_type || 'rent';
+      if (ptype === 'deposit') {
+        const settle = Math.min(Math.max(0, depositAmount - depositPaid), remaining);
+        depositPaid += settle;
+        remaining -= settle;
+      } else {
+        for (const cat of ['penalty', 'maintenance', 'other']) {
+          if (!(remaining > 0)) break;
+          const res = await payPenaltiesFromPayment(tenantCode, remaining, cat);
+          remaining = res.remaining;
+        }
+        if (Math.max(0, garbageFeeAmount - garbageFeePaid) > 0 && remaining > 0) {
+          const settle = Math.min(Math.max(0, garbageFeeAmount - garbageFeePaid), remaining);
+          garbageFeePaid += settle;
+          remaining -= settle;
+        }
+        if (Math.max(0, waterChargeAmount - waterChargePaid) > 0 && remaining > 0) {
+          const settle = Math.min(Math.max(0, waterChargeAmount - waterChargePaid), remaining);
+          waterChargePaid += settle;
+          remaining -= settle;
+        }
+        if (rentPaidCycle < rentAmount && remaining > 0) {
+          const settle = Math.min(rentAmount - rentPaidCycle, remaining);
+          rentPaidCycle += settle;
+          remaining -= settle;
+        }
+        // Deposit shortfall absorbs leftovers (mirrors approval step 8).
+        if (Math.max(0, depositAmount - depositPaid) > 0 && remaining > 0) {
+          const settle = Math.min(Math.max(0, depositAmount - depositPaid), remaining);
+          depositPaid += settle;
+          remaining -= settle;
+        }
+      }
+      if (ptype === 'rent') seenRent = true;
+      continue;
     }
-
-    // 1) Arrears
-    if (arrears > 0 && remaining > 0) {
-      const settle = Math.min(arrears, remaining);
-      arrears -= settle;
-      remaining -= settle;
+    depositPaid = Math.min(depositAmount, depositPaid + num(bd.depositSettled));
+    garbageFeePaid = Math.min(garbageFeeAmount, garbageFeePaid + num(bd.garbageFeeSettled));
+    waterChargePaid = Math.min(waterChargeAmount, waterChargePaid + num(bd.waterSettled));
+    agreementPaid = agreementPaid + num(bd.agreementSettled);
+    if (billingMonthOfPayment(row) === cycleMonth) {
+      rentPaidCycle = Math.min(rentAmount, rentPaidCycle + num(bd.rentSettled));
     }
-
-    // 2) Garbage fee
-    const garbageShortfall = Math.max(0, garbageFeeAmount - garbageFeePaid);
-    if (garbageShortfall > 0 && remaining > 0) {
-      const settle = Math.min(garbageShortfall, remaining);
-      garbageFeePaid += settle;
-      remaining -= settle;
+    for (const [cat, key] of [['penalty', 'penaltySettled'], ['maintenance', 'maintenanceSettled'], ['other', 'otherSettled']]) {
+      const total = num(bd[key]);
+      if (total > 0) await payPenaltiesFromPayment(tenantCode, total, cat);
     }
-
-    // 3) Rent
-    const remainingRent = Math.max(0, rentAmount - rentPaidThisMonth);
-    if (remainingRent > 0 && remaining > 0) {
-      const settle = Math.min(remainingRent, remaining);
-      rentPaidThisMonth += settle;
-      remaining -= settle;
-    }
-
-    // 4) Penalties (oldest first) — follow the same priority order as
-    // approvePaymentOnce: penalty → maintenance → other
-    if (remaining > 0) {
-      const result = await payPenaltiesFromPayment(tenantCode, remaining, 'penalty');
-      remaining = result.remaining;
-    }
-    if (remaining > 0) {
-      const result = await payPenaltiesFromPayment(tenantCode, remaining, 'maintenance');
-      remaining = result.remaining;
-    }
-    if (remaining > 0) {
-      const result = await payPenaltiesFromPayment(tenantCode, remaining, 'other');
-      remaining = result.remaining;
-    }
+    if ((row.payment_type || 'rent') === 'rent') seenRent = true;
   }
 
+  if (legacyCount > 0) {
+    warnings.push(`${legacyCount} payment(s) predate allocation snapshots — replayed approximately; verify arrears and pools.`);
+  }
+  if (Number(tenant.arrears || 0) > 0 || Number(tenant.advance_rent_balance || 0) > 0 || Number(tenant.credit_balance || 0) > 0) {
+    warnings.push('B/F arrears and advance/credit pools preserved as-is (not recomputable from payments alone) — verify.');
+  }
+
+  // Recorded money that history cannot reconstruct is a FLOOR, never a wipe:
+  // deposits/agreements are seeded at creation/activation and cash can be
+  // recorded on the tenant row without a payment row (288+ such deposits).
+  // The replay may RAISE these counters from history; it must not lower them
+  // below what is already recorded. Deletion replays (excludeId set) skip the
+  // floor so removing a payment can still lower its own counters.
+  const keep = (replayed, stored) => (excludeId ? replayed : Math.max(Number(replayed || 0), Number(stored || 0)));
+
+  const depositPaidFinal = keep(Math.min(depositPaid, depositAmount), tenant.deposit_paid);
+  const garbagePaidFinal = keep(Math.min(garbageFeePaid, garbageFeeAmount), tenant.garbage_fee_paid);
+  const waterPaidFinal = keep(Math.min(waterChargePaid, waterChargeAmount), tenant.water_charge_paid);
+  const agreementPaidFinal = keep(agreementPaid, tenant.agreement_paid);
+  const rentPaidFinal = keep(Math.min(rentPaidCycle, rentAmount), tenant.rent_paid_this_month);
+
   await updateTenant(tenantCode, {
-    deposit_paid: Math.min(depositPaid, depositAmount),
-    garbage_fee_paid: Math.min(garbageFeePaid, garbageFeeAmount),
-    arrears: Math.max(0, arrears),
-    rent_paid_this_month: rentPaidThisMonth,
+    deposit_paid: depositPaidFinal,
+    garbage_fee_paid: garbagePaidFinal,
+    water_charge_paid: waterPaidFinal,
+    agreement_paid: agreementPaidFinal,
+    agreement_outstanding: Math.max(0, agreementCharge - agreementPaidFinal),
+    rent_paid_this_month: rentPaidFinal,
   });
+  return { warnings };
+}
+
+function allocationOf(row) {
+  let bd = row ? row.allocation_breakdown : null;
+  try { if (typeof bd === 'string') bd = JSON.parse(bd); } catch (_) { bd = null; }
+  return bd || null;
 }
 
 function addMonths(dateStr, months) {
@@ -1624,6 +2116,7 @@ async function setReceiptMode(mode) {
 }
 
 async function generateReceiptNumber(run) {
+
   const prefix = 'GEHPM-RCT';
   const datePart = `-${new Date().toISOString().slice(0, 7).replace('-', '')}`;
 
@@ -1635,6 +2128,28 @@ async function generateReceiptNumber(run) {
   let num;
   if (res.rows.length === 0) {
     await runOrQuery(run, `INSERT INTO receipt_counters (prefix, next_number) VALUES ($1, 2) ON CONFLICT (prefix) DO UPDATE SET next_number = next_number + 1 RETURNING 1 AS num`, [prefix]);
+    num = 1;
+  } else {
+    num = res.rows[0].num;
+  }
+
+  return `${prefix}${datePart}-${String(num).padStart(6, '0')}`;
+}
+
+async function generateLetterNumber() {
+  // Own series (GEHPM-DOC) on the shared counters table — existing receipt
+  // and invoice series are untouched.
+  const prefix = 'GEHPM-DOC';
+  const datePart = `-${new Date().toISOString().slice(0, 7).replace('-', '')}`;
+
+  const res = await query(
+    `UPDATE receipt_counters SET next_number = next_number + 1 WHERE prefix = $1 RETURNING next_number - 1 AS num`,
+    [prefix]
+  );
+
+  let num;
+  if (res.rows.length === 0) {
+    await query(`INSERT INTO receipt_counters (prefix, next_number) VALUES ($1, 2) ON CONFLICT (prefix) DO UPDATE SET next_number = receipt_counters.next_number + 1 RETURNING 1 AS num`, [prefix]);
     num = 1;
   } else {
     num = res.rows[0].num;
@@ -1721,12 +2236,28 @@ async function createDocument({
   unit_label = null,
   amount = null,
   doc_date = null,
+  template_key = null,
+  status = 'Finalized',
+  body_text = null,
+  resolved_recipient = null,
+  payment_id = null,
+  reuse_invoice_doc = false,
 }) {
+  // Opt-in dedupe for regenerated invoice PDFs: same (type, number) reuses
+  // its document row (file overwritten in place) instead of triplicating.
+  if (reuse_invoice_doc && doc_type && doc_number) {
+    try {
+      const reused = await reuseInvoiceDocument({
+        doc_type, doc_number, file_path, filename, amount,
+      });
+      if (reused) return reused;
+    } catch (_) {}
+  }
   const res = await query(
     `INSERT INTO documents
-       (doc_type, doc_number, title, filename, file_path, tenant_code, house_paybill_number, property_name, unit_label, amount, doc_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-     RETURNING *`,
+       (doc_type, doc_number, title, filename, file_path, tenant_code, house_paybill_number, property_name, unit_label, amount, doc_date, template_key, status, body_text, resolved_recipient, payment_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      RETURNING *`,
     [
       doc_type,
       doc_number || null,
@@ -1739,6 +2270,11 @@ async function createDocument({
       unit_label || null,
       amount != null ? Number(amount) : null,
       doc_date || null,
+      template_key || null,
+      status || 'Finalized',
+      body_text || null,
+      resolved_recipient || null,
+      payment_id != null ? Number(payment_id) : null,
     ]
   );
   return res.rows[0] || null;
@@ -1752,6 +2288,84 @@ async function getDocument(id) {
      LEFT JOIN houses h ON h.paybill_number = d.house_paybill_number
      WHERE d.id = $1`,
     [id]
+  );
+  return res.rows[0] || null;
+}
+
+// Permanent payment <-> receipt-PDF link. Prefers the payment_id recorded at
+// generation time; falls back to receipt-number matching for older receipts.
+async function findReceiptDocument(paymentId) {  const pay = await query(`SELECT id, receipt_number, tenant_code FROM payments WHERE id = $1`, [paymentId]);
+  const p = pay.rows[0];
+  if (!p) return null;
+  const byPay = await query(
+    `SELECT * FROM documents WHERE payment_id = $1 AND doc_type = 'receipt' ORDER BY id DESC LIMIT 1`,
+    [paymentId]
+  );
+  if (byPay.rows[0]) return byPay.rows[0];
+  if (p.receipt_number) {
+    const byNo = await query(
+      `SELECT * FROM documents WHERE doc_type = 'receipt' AND doc_number = $1 AND (tenant_code = $2 OR tenant_code IS NULL) ORDER BY id DESC LIMIT 1`,
+      [p.receipt_number, p.tenant_code]
+    );
+    if (byNo.rows[0]) return byNo.rows[0];
+  }
+  return null;
+}
+
+// Invoice PDF regeneration reuses the existing document row for the same
+// (type, number) instead of triplicating it — invoice numbers are globally
+// unique per sequence. The PDF file is overwritten in place; the row keeps
+// its identity so all existing references stay valid.
+async function reuseInvoiceDocument({ doc_type, doc_number, file_path, filename, amount }) {
+  if (!doc_type || !doc_number) return null;
+  const found = await query(
+    `SELECT * FROM documents WHERE doc_type = $1 AND doc_number = $2 ORDER BY id DESC LIMIT 1`,
+    [doc_type, doc_number]
+  );
+  if (!found.rows[0]) return null;
+  const res = await query(
+    `UPDATE documents SET file_path = $2, filename = COALESCE($3, filename),
+       amount = COALESCE($4, amount), updated_at = NOW()
+     WHERE id = $1 RETURNING *`,
+    [found.rows[0].id, file_path, filename || null, amount != null ? Number(amount) : null]
+  );
+  return res.rows[0] || null;
+}
+
+// A payment always has exactly ONE receipt row. When an overpayment
+// resolution regenerates the receipt (advance rent / credit balance), the
+// existing row is updated in place — same payment link, same receipt number —
+// so the documents hub never accumulates duplicate receipts per payment.
+async function updateReceiptDocument(id, { file_path, filename, amount }) {
+  const res = await query(
+    `UPDATE documents SET file_path = $2, filename = COALESCE($3, filename),
+       amount = COALESCE($4, amount), updated_at = NOW()
+     WHERE id = $1 AND doc_type = 'receipt' RETURNING *`,
+    [id, file_path, filename || null, amount != null ? Number(amount) : null]
+  );
+  return res.rows[0] || null;
+}
+
+// Letters: drafts are editable; finalized rows are immutable (a new version
+// means a new document row — history is never silently overwritten).
+async function updateLetterDraft(id, { title, body_text, resolved_recipient }) {
+  const res = await query(
+    `UPDATE documents SET title = COALESCE($2, title), body_text = COALESCE($3, body_text),
+       resolved_recipient = COALESCE($4, resolved_recipient), updated_at = NOW()
+     WHERE id = $1 AND doc_type = 'letter' AND status = 'Draft'
+     RETURNING *`,
+    [id, title || null, body_text != null ? body_text : null, resolved_recipient != null ? resolved_recipient : null]
+  );
+  return res.rows[0] || null;
+}
+
+async function finalizeLetterDocument(id, { doc_number, filename, file_path }) {
+  const res = await query(
+    `UPDATE documents SET doc_number = $2, filename = $3, file_path = $4,
+       status = 'Finalized', updated_at = NOW()
+     WHERE id = $1 AND doc_type = 'letter' AND status = 'Draft'
+     RETURNING *`,
+    [id, doc_number, filename, file_path]
   );
   return res.rows[0] || null;
 }
@@ -1824,23 +2438,77 @@ async function deleteDocument(id) {
   return res.rows[0] || null;
 }
 
+// Delivery tracking for letters only (Draft / Finalized / Sent / Downloaded).
+// Other document types keep whatever status they already carry.
+async function markLetterDelivery(id, status) {
+  if (!['Sent', 'Downloaded'].includes(status)) return null;
+  const res = await query(
+    `UPDATE documents SET status = $2, updated_at = NOW()
+     WHERE id = $1 AND doc_type = 'letter' AND status IN ('Finalized', 'Sent', 'Downloaded')
+     RETURNING *`,
+    [id, status]
+  );
+  return res.rows[0] || null;
+}
+
 // ---- Permanent Invoice Register -----------------------------------------
 // Every invoice generated by the system is recorded here immediately and
 // never deleted. Download / WhatsApp-send events update the delivery status.
 
 function mapInvoiceRegisterRow(r) {
   if (!r) return null;
+  const amount = r.amount != null ? Number(r.amount) : null;
+  const paid = Number(r.amount_paid || 0);
+  const balance = r.balance_due != null ? Number(r.balance_due) : (amount != null ? amount - paid : null);
+  let payment_state = null;
+  if (amount != null && amount > 0) {
+    payment_state = paid <= 0 ? 'Unpaid' : (balance > 0 ? 'Partially Paid' : 'Paid');
+  }
   return {
     ...r,
-    amount: r.amount != null ? Number(r.amount) : null,
+    amount,
     deposit_paid: r.deposit_paid != null ? Number(r.deposit_paid) : null,
     deposit_refund: r.deposit_refund != null ? Number(r.deposit_refund) : null,
     deductions_total: r.deductions_total != null ? Number(r.deductions_total) : null,
     final_refund: r.final_refund != null ? Number(r.final_refund) : null,
+    amount_paid: paid,
+    balance_due: balance,
+    last_payment_id: r.last_payment_id != null ? Number(r.last_payment_id) : null,
+    payment_state,
   };
 }
 
 async function createInvoiceRegister(data = {}) {
+  // Dedupe: regenerating the same invoice (view/download/send of one water,
+  // exit or maintenance invoice) reuses its open register row instead of
+  // triplicating it. Fresh numbers always insert.
+  if (data.invoice_number && data.tenant_code) {
+    const dup = await query(
+      `SELECT * FROM invoice_register
+       WHERE invoice_number = $1 AND tenant_code = $2 AND COALESCE(voided, false) = false
+       ORDER BY id DESC LIMIT 1`,
+      [data.invoice_number, data.tenant_code]
+    );
+    if (dup.rows[0]) {
+      const r = await query(
+        `UPDATE invoice_register SET
+           document_id = COALESCE($2, document_id),
+           tenant_name = COALESCE($3, tenant_name),
+           property_name = COALESCE($4, property_name),
+           house_paybill_number = COALESCE($5, house_paybill_number),
+           unit_label = COALESCE($6, unit_label),
+           amount = COALESCE($7, amount),
+           balance_due = GREATEST(0, COALESCE($7, amount) - COALESCE(amount_paid, 0)),
+           updated_at = NOW()
+         WHERE id = $1
+         RETURNING *, generated_at, move_out_date::text AS move_out_date`,
+        [dup.rows[0].id, data.document_id || null, data.tenant_name || null,
+         data.property_name || null, data.house_paybill_number || null, data.unit_label || null,
+         data.amount != null ? Number(data.amount) : null]
+      );
+      return mapInvoiceRegisterRow(r.rows[0]);
+    }
+  }
   const res = await query(
     `INSERT INTO invoice_register
        (document_id, invoice_number, invoice_type, generated_at, generated_by,
@@ -1892,6 +2560,93 @@ async function getInvoiceRegisterByNumber(invoiceNumber) {
     [invoiceNumber]
   );
   return mapInvoiceRegisterRow(res.rows[0]);
+}
+
+// Void every open register row for a tenant code (tenancy change). Rows stay
+// for audit but leave all payment/allocation queries. Closed by vacancy or
+// new occupancy — the code is reused by the next tenancy.
+async function voidTenantInvoices(tenantCode, actor, reason) {
+  const res = await query(
+    `UPDATE invoice_register SET voided = true, voided_at = NOW(), voided_reason = $2, updated_at = NOW()
+     WHERE tenant_code = $1 AND COALESCE(voided, false) = false
+     RETURNING id`,
+    [tenantCode, reason || (actor ? `Voided by ${actor}` : 'Tenancy changed')]
+  );
+  return res.rows.map((r) => r.id);
+}
+
+// Correct a register entry's amount. Balance recomputes from linked payments
+// (never below zero); linked document amount follows. Payments, counters,
+// receipts and allocations are untouched.
+async function updateInvoiceRegister(id, patch = {}, actor) {
+  const existing = await getInvoiceRegister(id);
+  if (!existing) return null;
+  if (patch.amount == null) throw new Error('amount required');
+  const amount = Number(patch.amount);
+  if (!Number.isFinite(amount) || amount < 0) throw new Error('amount must be a non-negative number');
+  const paid = Number(existing.amount_paid || 0);
+  const res = await query(
+    `UPDATE invoice_register SET amount = $2,
+       balance_due = GREATEST(0, $2 - COALESCE(amount_paid, 0)),
+       updated_at = NOW()
+     WHERE id = $1
+     RETURNING *, generated_at, move_out_date::text AS move_out_date`,
+    [id, amount]
+  );
+  const row = mapInvoiceRegisterRow(res.rows[0]);
+  let documentUpdated = false;
+  if (row && row.document_id) {
+    const dres = await query(
+      `UPDATE documents SET amount = $2, updated_at = NOW() WHERE id = $1 RETURNING id`,
+      [row.document_id, amount]
+    );
+    documentUpdated = (dres.rowCount || 0) > 0;
+  }
+  try {
+    await logAudit({
+      actor: actor ?? null, action: 'invoice_register_updated', entityType: 'invoice_register', entityId: String(id),
+      details: { invoice_number: existing.invoice_number, amount_before: existing.amount, amount_after: amount, document_updated: documentUpdated },
+    });
+  } catch (_) {}
+  return { register: row, document_updated: documentUpdated, clamped: paid > amount };
+}
+
+// Delete a register entry and everything created solely for it: its payment
+// links, its linked document row + PDF file. Payments, counters, receipts,
+// allocations and unrelated history are never touched.
+async function deleteInvoiceRegister(id, actor) {
+  const existing = await getInvoiceRegister(id);
+  if (!existing) return null;
+  const links = await query(`SELECT id, payment_id, amount FROM invoice_payment_links WHERE invoice_id = $1`, [id]);
+  await query(`DELETE FROM invoice_payment_links WHERE invoice_id = $1`, [id]);
+  let documentRemoved = false;
+  let fileRemoved = false;
+  if (existing.document_id) {
+    const dres = await query(`SELECT id, file_path, filename FROM documents WHERE id = $1`, [existing.document_id]);
+    const doc = dres.rows[0] || null;
+    await query(`DELETE FROM documents WHERE id = $1`, [existing.document_id]);
+    if (doc) {
+      documentRemoved = true;
+      try {
+        const fs = require('fs');
+        if (doc.file_path && fs.existsSync(doc.file_path)) { fs.unlinkSync(doc.file_path); fileRemoved = true; }
+      } catch (_) {}
+    }
+  }
+  await query(`DELETE FROM invoice_register WHERE id = $1`, [id]);
+  try {
+    await logAudit({
+      actor: actor ?? null, action: 'invoice_register_deleted', entityType: 'invoice_register', entityId: String(id),
+      details: { invoice_number: existing.invoice_number, tenant_code: existing.tenant_code, links_removed: links.rows.length, document_removed: documentRemoved, file_removed: fileRemoved },
+    });
+  } catch (_) {}
+  return {
+    deleted: true, id,
+    invoice_number: existing.invoice_number,
+    links_removed: links.rows.length,
+    document_removed: documentRemoved,
+    file_removed: fileRemoved,
+  };
 }
 
 async function listInvoiceRegister(filters = {}) {
@@ -2022,6 +2777,136 @@ async function markInvoiceRegister({ id, document_id, action } = {}) {
     [row.id, status, downloaded, sent]
   );
   return mapInvoiceRegisterRow(res.rows[0]);
+}
+
+// ─── Invoice Center payment linking (read outstanding, apply, reverse) ─────
+// Allocation rules are NEVER changed here: this only mirrors each settled
+// bucket onto matching outstanding register rows (oldest first) so invoices
+// show Paid / Partially Paid. Tenant counters remain the system of record.
+
+// Bucket -> register types. Dedicated types first; rent invoices bundle
+// rent+arrears+garbage(+water fallback), per getRentInvoiceData.
+const INVOICE_BUCKET_TYPES = {
+  water: [['water'], ['rent']],
+  maintenance: [['maintenance']],
+  other: [['other']],
+  rentFamily: [['rent']],
+};
+
+async function listOutstandingRegisterInvoices(tenantCode, run) {
+  const q = runOrQuery(run,
+    `SELECT ir.*, ir.generated_at
+     FROM invoice_register ir
+     WHERE ir.tenant_code = $1
+       AND ir.invoice_type <> 'exit'
+       AND COALESCE(ir.voided, false) = false
+       AND COALESCE(ir.balance_due, ir.amount, 0) > 0
+     ORDER BY ir.generated_at ASC NULLS LAST, ir.id ASC`,
+    [tenantCode]
+  );
+  const res = await q;
+  return res.rows.map(mapInvoiceRegisterRow);
+}
+
+function splitAllocForLinking(allocation, paymentType) {
+  const num = (v) => Number(v || 0);
+  const get = (k) => (allocation ? num(allocation[k]) : 0);
+  if (paymentType === 'deposit') {
+    return [{ bucket: 'deposit', amount: get('depositSettled') }];
+  }
+  return [
+    { bucket: 'water', amount: get('waterSettled') },
+    { bucket: 'maintenance', amount: get('maintenanceSettled') },
+    { bucket: 'other', amount: get('otherSettled') },
+    {
+      bucket: 'rentFamily',
+      amount: get('arrearsSettled') + get('rentSettled') + get('garbageFeeSettled'),
+    },
+  ];
+}
+
+async function applyPaymentToInvoices(payment, allocation, tenant, run) {
+  const tenantCode = payment.tenant_code || payment.tenant_id;
+  if (!tenantCode || !allocation) return [];
+  const applied = [];
+  const outstanding = await listOutstandingRegisterInvoices(tenantCode, run);
+  if (!outstanding.length) return applied;
+  const byType = {};
+  for (const inv of outstanding) {
+    const t = String(inv.invoice_type || 'other');
+    (byType[t] = byType[t] || []).push(inv);
+  }
+  const buckets = splitAllocForLinking(allocation, payment.payment_type);
+  for (const { bucket, amount } of buckets) {
+    let remaining = Number(amount || 0);
+    if (!(remaining > 0)) continue;
+    const typeGroups = INVOICE_BUCKET_TYPES[bucket] || [];
+    for (const types of typeGroups) {
+      if (!(remaining > 0)) break;
+      for (const t of types) {
+        if (!(remaining > 0)) break;
+        for (const inv of (byType[t] || [])) {
+          if (!(remaining > 0)) break;
+          if (inv._consumed) continue;
+          // Voided water invoices never absorb payments.
+          if (t === 'water' && inv._voidChecked !== true) {
+            inv._voidChecked = true;
+            try {
+              const chk = await runOrQuery(run,
+                `SELECT status FROM water_invoices WHERE wtr_number = $1 LIMIT 1`,
+                [inv.invoice_number]
+              );
+              if (chk.rows[0] && String(chk.rows[0].status || '') === 'Void') continue;
+            } catch (_) {}
+          }
+          const balance = Number(inv.balance_due ?? inv.amount ?? 0) - Number(inv._applied || 0);
+          if (!(balance > 0)) continue;
+          const apply = Math.min(balance, remaining);
+          inv._applied = Number(inv._applied || 0) + apply;
+          remaining = Math.max(0, remaining - apply);
+          applied.push({ invoice_id: inv.id, amount: apply });
+        }
+      }
+    }
+  }
+  for (const a of applied) {
+    await runOrQuery(run,
+      `UPDATE invoice_register
+       SET amount_paid = COALESCE(amount_paid, 0) + $2,
+           balance_due = COALESCE(amount, 0) - (COALESCE(amount_paid, 0) + $2),
+           last_payment_id = $3, updated_at = NOW()
+       WHERE id = $1`,
+      [a.invoice_id, a.amount, payment.id]
+    );
+    await runOrQuery(run,
+      `INSERT INTO invoice_payment_links (invoice_id, payment_id, amount)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (invoice_id, payment_id) DO UPDATE SET amount = invoice_payment_links.amount + EXCLUDED.amount`,
+      [a.invoice_id, payment.id, a.amount]
+    );
+  }
+  return applied;
+}
+
+// Exact reversal of the above (called from payment deletion, same tx).
+async function reverseInvoiceLinks(paymentId, run) {
+  const res = await runOrQuery(run, `SELECT * FROM invoice_payment_links WHERE payment_id = $1`, [paymentId]);
+  for (const link of res.rows) {
+    await runOrQuery(run, `DELETE FROM invoice_payment_links WHERE id = $1`, [link.id]);
+    await runOrQuery(run,
+      `UPDATE invoice_register SET
+         amount_paid = GREATEST(0, COALESCE(amount_paid, 0) - $2),
+         last_payment_id = (SELECT payment_id FROM invoice_payment_links WHERE invoice_id = $1 ORDER BY id DESC LIMIT 1),
+         updated_at = NOW()
+       WHERE id = $1`,
+      [link.invoice_id, Number(link.amount || 0)]
+    );
+    await runOrQuery(run,
+      `UPDATE invoice_register SET balance_due = COALESCE(amount, 0) - COALESCE(amount_paid, 0) WHERE id = $1`,
+      [link.invoice_id]
+    );
+  }
+  return res.rows.length;
 }
 
 async function resetTestReceipts() {
@@ -2246,6 +3131,7 @@ async function logAudit({ actor, action, entityType, entityId, details }) {
 }
 
 async function listAuditLog(entityType, entityId, limit = 100) {
+
   const params = [];
   let q = `SELECT * FROM audit_log WHERE 1=1`;
   if (entityType) {
@@ -2262,29 +3148,107 @@ async function listAuditLog(entityType, entityId, limit = 100) {
   return res.rows;
 }
 
-async function getDashboardMetrics() {
-  const today = new Date().toISOString().slice(0, 10);
-  const monthStart = today.slice(0, 8) + '01';
-  
-  const addDaysISO = (days) => {
-    const d = new Date();
-    d.setDate(d.getDate() + days);
-    return d.toISOString().slice(0, 10);
-  };
-  const due7dLimit = addDaysISO(7);
+// ===========================================================================
+// DASHBOARD — single source of truth for the Rental Command Center.
+// The metric counts/amounts and the drilldown lists a card opens share the
+// exact same WHERE predicates (DASH below), so a card can never disagree with
+// its own list. Everything is derived from rent records + due dates — never
+// from the possibly-stale tenants.status column. All interpolated dates are
+// server-generated ISO strings (never user input).
+// ===========================================================================
 
-  const houseStats = await query(`SELECT COALESCE(SUM(total_units), 0) AS total_units FROM houses`);
-  const totalSystemUnits = Number(houseStats.rows[0].total_units) || 0;
-  
+const DASH_TODAY = () => new Date().toISOString().slice(0, 10);
+const DASH_ADD_DAYS = (isoDate, days) => {
+  const d = new Date(isoDate + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+const DASH_MONTH_LABEL = (ym) => {
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const [y, m] = String(ym).split('-');
+  return `${months[Number(m) - 1] || ''} ${y}`;
+};
+
+// Units under a live RESERVED booking are not vacant — same rule the
+// per-building dashboards apply (routes/houses.js).
+const DASH_NOT_RESERVED = `
+  NOT EXISTS (
+    SELECT 1 FROM future_tenancies ft
+    WHERE ft.status = 'RESERVED'
+      AND ft.house_paybill = t.house_paybill_number
+      AND LOWER(TRIM(COALESCE(ft.unit_label, ''))) <> ''
+      AND LOWER(TRIM(COALESCE(ft.unit_label, ''))) = LOWER(TRIM(COALESCE(t.unit_label, t.tenant_code, '')))
+  )`;
+
+const DASH_UNIT_DISPLAY = `COALESCE(NULLIF(TRIM(t.unit_label), ''), t.tenant_code)`;
+
+// Per-tenant balance components — mirrors the tenant-profile balance formula
+// (routes/tenants.js GET /:id/profile): arrears + unpaid current rent +
+// pending penalties + garbage/water shortfalls. Deposits, agreement fees,
+// credit balances and advance rent are deliberately EXCLUDED — allocation
+// rules keep them out of rent arrears.
+const DASH_BALANCE_COMPONENTS = `
+  t.arrears AS arrears_bf,
+  GREATEST(0, t.rent_amount - t.rent_paid_this_month) AS unpaid_rent,
+  (SELECT COALESCE(SUM(pen.amount), 0) FROM penalties pen
+    WHERE pen.tenant_code = t.tenant_code AND pen.status = 'Pending') AS penalties_pending,
+  GREATEST(0, t.garbage_fee_amount - t.garbage_fee_paid) AS garbage_due,
+  GREATEST(0, t.water_charge_amount - t.water_charge_paid) AS water_due`;
+
+const DASH = {
+  occupied: `t.status <> 'Vacant'`,
+  vacant: () => `t.status = 'Vacant' AND ${DASH_NOT_RESERVED}`,
+  // Overdue = carried B/F arrears OR current-cycle rent still unpaid after
+  // its due date. Partial payments shrink the overdue rent immediately; a
+  // fully cleared balance (and no other overdue amount) drops the unit off.
+  overdue: (today) => `t.status <> 'Vacant' AND (t.arrears > 0 OR (t.rent_paid_this_month < t.rent_amount AND t.rent_due_date < '${today}'))`,
+  // Rent falling due in the next 7 days (today through +7) that is not fully paid.
+  due7: (today, limit) => `t.status <> 'Vacant' AND t.rent_due_date >= '${today}' AND t.rent_due_date <= '${limit}' AND t.rent_paid_this_month < t.rent_amount`,
+};
+
+function dashBalanceOf(r) {
+  return Number(r.arrears_bf || 0) + Number(r.unpaid_rent || 0) + Number(r.penalties_pending || 0) +
+    Number(r.garbage_due || 0) + Number(r.water_due || 0);
+}
+
+// When did this account start being overdue? The current cycle's due date if
+// it has already passed; otherwise the arrears came from the previous closed
+// cycle (rollover advances rent_due_date one month at a time), so anchor one
+// month back. Derived entirely from rent_due_date in the database.
+function dashOverdueAnchor(dueDateIso, today) {
+  if (!dueDateIso) return null;
+  const due = String(dueDateIso).slice(0, 10);
+  if (due <= today) return due;
+  const d = new Date(due + 'T12:00:00Z');
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function dashDaysBetween(fromIso, toIso) {
+  if (!fromIso) return 0;
+  return Math.max(0, Math.round((new Date(toIso + 'T12:00:00Z') - new Date(fromIso + 'T12:00:00Z')) / 86400000));
+}
+
+async function getDashboardMetrics() {
+  const today = DASH_TODAY();
+  const monthStart = today.slice(0, 8) + '01';
+  const due7Limit = DASH_ADD_DAYS(today, 7);
+  const period = today.slice(0, 7);
+
+  // One pass over tenants: every card count uses the shared DASH predicates.
   const tenantStats = await query(`
-    SELECT 
-      COUNT(*) FILTER (WHERE status != 'Vacant') AS total,
-      COUNT(*) FILTER (WHERE status = 'Active') AS active,
-      COUNT(*) FILTER (WHERE status = 'Overdue') AS overdue,
-      COUNT(*) FILTER (WHERE status != 'Vacant' AND rent_due_date >= $1 AND rent_due_date <= $2) AS due_7d
-    FROM tenants
-  `, [today, due7dLimit]);
-  
+    SELECT
+      COUNT(*) FILTER (WHERE t.status <> 'Vacant') AS total,
+      COUNT(*) FILTER (WHERE t.status = 'Active') AS active,
+      COUNT(*) FILTER (WHERE ${DASH.vacant()}) AS vacant,
+      COUNT(*) FILTER (WHERE ${DASH.overdue(today)}) AS overdue,
+      COUNT(*) FILTER (WHERE ${DASH.due7(today, due7Limit)}) AS due_7d
+    FROM tenants t
+  `);
+
+  // Collected (MTD) / pending payments — single-table aggregates over
+  // payments rows, so no join can duplicate a row. Approved payments are
+  // counted exactly once at their recorded payment date.
   const paymentStats = await query(`
     SELECT
       COALESCE(SUM(amount) FILTER (WHERE status = 'Approved' AND payment_date >= $1), 0) AS revenue_mtd,
@@ -2293,54 +3257,300 @@ async function getDashboardMetrics() {
       COUNT(*) FILTER (WHERE status = 'Approved') AS paid_count
     FROM payments
   `, [monthStart]);
-  
+
+  // Arrears + collection progress in one pass over occupied units.
+  // Collection progress (per tenant's current billing cycle, the system's
+  // billing convention = month of rent_due_date):
+  //   expected   = SUM(rent_amount)
+  //   collected  = SUM(LEAST(rent_amount, rent_paid_this_month))
+  //   outstanding= expected - collected  (identically = SUM(GREATEST(0, ...)))
+  //   percent    = collected / expected * 100
+  const arrearsStats = await query(`
+    SELECT
+      COALESCE(SUM(t.arrears), 0) AS arrears_bf,
+      COALESCE(SUM(GREATEST(0, t.rent_amount - t.rent_paid_this_month)), 0) AS unpaid_rent,
+      COALESCE(SUM(GREATEST(0, t.garbage_fee_amount - t.garbage_fee_paid)), 0) AS garbage_shortfall,
+      COALESCE(SUM(GREATEST(0, t.water_charge_amount - t.water_charge_paid)), 0) AS water_shortfall,
+      COALESCE(SUM(t.rent_amount), 0) AS expected,
+      COALESCE(SUM(LEAST(t.rent_amount, t.rent_paid_this_month)), 0) AS collected,
+      COALESCE((SELECT SUM(pen.amount) FROM penalties pen
+                JOIN tenants tp ON tp.tenant_code = pen.tenant_code
+                WHERE pen.status = 'Pending' AND tp.status <> 'Vacant'), 0) AS penalties_pending
+    FROM tenants t
+    WHERE t.status <> 'Vacant'
+  `);
+
   const msgStats = await query(`
-    SELECT COUNT(*) AS messages_today 
-    FROM message_logs 
+    SELECT COUNT(*) AS messages_today
+    FROM message_logs
     WHERE logged_at::date = $1::date
   `, [today]);
 
-  const arrearsStats = await query(`
-    SELECT COALESCE(SUM(arrears), 0) AS total_arrears
-    FROM tenants
-    WHERE status != 'Vacant' AND arrears > 0
-  `);
-  
   const ts = tenantStats.rows[0];
   const ps = paymentStats.rows[0];
   const ms = msgStats.rows[0];
   const as = arrearsStats.rows[0];
-  
-  const occupiedUnits = parseInt(ts.total, 10) || 0;
-  const vacantUnits = Math.max(0, totalSystemUnits - occupiedUnits);
+
+  const arrearsBf = Number(as.arrears_bf);
+  const unpaidRent = Number(as.unpaid_rent);
+  const penaltiesPending = Number(as.penalties_pending);
+  const garbageShortfall = Number(as.garbage_shortfall);
+  const waterShortfall = Number(as.water_shortfall);
+  // Total outstanding = rent arrears + applicable charges (penalties,
+  // garbage, water) per the allocation rules — deposits, agreement fees,
+  // credit and advance balances never enter this figure.
+  const totalArrears = arrearsBf + unpaidRent + penaltiesPending + garbageShortfall + waterShortfall;
+
+  const expected = Number(as.expected);
+  const collected = Number(as.collected);
+  const outstanding = expected - collected;
+  const percent = expected > 0 ? Math.round((collected / expected) * 1000) / 10 : 0;
 
   return {
     tenants: {
-      total_tenants: occupiedUnits,
-      active_tenants: parseInt(ts.active, 10),
-      vacant_units: vacantUnits,
-      overdue_tenants: parseInt(ts.overdue, 10),
-      due_7d: parseInt(ts.due_7d, 10),
+      total_tenants: parseInt(ts.total, 10) || 0,
+      active_tenants: parseInt(ts.active, 10) || 0,
+      vacant_units: parseInt(ts.vacant, 10) || 0,
+      overdue_tenants: parseInt(ts.overdue, 10) || 0,
+      due_7d: parseInt(ts.due_7d, 10) || 0,
     },
     revenue: {
       revenue_mtd: Number(ps.revenue_mtd),
       pending_amount: Number(ps.pending_amount),
-      pending_count: parseInt(ps.pending_count, 10),
-      paid_count: parseInt(ps.paid_count, 10),
-      total_arrears: Number(as.total_arrears),
+      pending_count: parseInt(ps.pending_count, 10) || 0,
+      paid_count: parseInt(ps.paid_count, 10) || 0,
+      total_arrears: totalArrears,
+      arrears_breakdown: {
+        arrears_bf: arrearsBf,
+        unpaid_rent: unpaidRent,
+        penalties: penaltiesPending,
+        garbage: garbageShortfall,
+        water: waterShortfall,
+      },
     },
-    messages_today: parseInt(ms.messages_today, 10),
+    collection: {
+      period,
+      period_label: DASH_MONTH_LABEL(period),
+      expected,
+      collected,
+      outstanding,
+      percent,
+    },
+    messages_today: parseInt(ms.messages_today, 10) || 0,
   };
 }
 
-async function logMessage({ tenantId, messageType, messageBody, status, whatsappMessageId, failureReason }) {
+// The list a dashboard card opens. Same predicates as getDashboardMetrics —
+// the count on the card is always the row count (or the sum) returned here.
+async function getDashboardDrilldown(kind) {
+  const today = DASH_TODAY();
+  const monthStart = today.slice(0, 8) + '01';
+  const due7Limit = DASH_ADD_DAYS(today, 7);
+  const period = today.slice(0, 7);
+  const generatedAt = new Date().toISOString();
+
+  if (kind === 'vacant') {
+    const res = await query(`
+      SELECT t.tenant_code, t.property_name, t.unit_label, t.house_paybill_number,
+             ${DASH_UNIT_DISPLAY} AS unit_display
+      FROM tenants t
+      WHERE ${DASH.vacant()}
+      ORDER BY t.property_name NULLS LAST, unit_display`);
+    return {
+      kind, generated_at: generatedAt,
+      totals: { units: res.rows.length },
+      rows: res.rows,
+    };
+  }
+
+  if (kind === 'overdue') {
+    const res = await query(`
+      SELECT t.tenant_code, t.name, t.property_name, t.status,
+             ${DASH_UNIT_DISPLAY} AS unit_display,
+             t.rent_due_date::text AS rent_due_date,
+             t.rent_amount, t.rent_paid_this_month,
+             ${DASH_BALANCE_COMPONENTS}
+      FROM tenants t
+      WHERE ${DASH.overdue(today)}
+      ORDER BY (t.arrears + GREATEST(0, t.rent_amount - t.rent_paid_this_month)) DESC,
+               t.property_name NULLS LAST, t.name`);
+    const rows = res.rows.map((r) => {
+      const anchor = dashOverdueAnchor(r.rent_due_date, today);
+      return {
+        ...r,
+        overdue_rent: Number(r.arrears_bf || 0) + Number(r.unpaid_rent || 0),
+        outstanding_balance: dashBalanceOf(r),
+        overdue_since: anchor,
+        overdue_days: dashDaysBetween(anchor, today),
+      };
+    });
+    return {
+      kind, generated_at: generatedAt,
+      totals: {
+        units: rows.length,
+        overdue_rent: rows.reduce((s, r) => s + r.overdue_rent, 0),
+        outstanding: rows.reduce((s, r) => s + r.outstanding_balance, 0),
+      },
+      rows,
+    };
+  }
+
+  if (kind === 'due7') {
+    const res = await query(`
+      SELECT t.tenant_code, t.name, t.property_name,
+             ${DASH_UNIT_DISPLAY} AS unit_display,
+             t.rent_due_date::text AS rent_due_date,
+             t.rent_amount, t.rent_paid_this_month,
+             GREATEST(0, t.rent_amount - t.rent_paid_this_month) AS amount_due
+      FROM tenants t
+      WHERE ${DASH.due7(today, due7Limit)}
+      ORDER BY t.rent_due_date, t.property_name NULLS LAST, t.name`);
+    return {
+      kind, generated_at: generatedAt,
+      totals: {
+        units: res.rows.length,
+        amount_due: res.rows.reduce((s, r) => s + Number(r.amount_due || 0), 0),
+      },
+      rows: res.rows,
+    };
+  }
+
+  if (kind === 'pending') {
+    // Unapproved payment records (payments.status = 'Pending'). Unpaid rent
+    // obligations are NOT here — those live under Total Arrears (the system's
+    // existing definitions: a record becomes Approved on approval, leaves the
+    // list on approval or deletion).
+    const res = await query(`
+      SELECT p.id, p.amount AS paid_amount, p.payment_date::text AS payment_date,
+             p.mpesa_reference, p.payment_type, p.notes, p.recorded_at::text AS recorded_at,
+             t.tenant_code, t.name, t.property_name,
+             ${DASH_UNIT_DISPLAY} AS unit_display,
+             ${DASH_BALANCE_COMPONENTS}
+      FROM payments p
+      LEFT JOIN tenants t ON t.tenant_code = p.tenant_code
+      WHERE p.status = 'Pending'
+      ORDER BY p.recorded_at DESC NULLS LAST, p.id DESC`);
+    const rows = res.rows.map((r) => {
+      const expected = dashBalanceOf(r); // tenant obligation before approval
+      const paid = Number(r.paid_amount || 0);
+      return {
+        ...r,
+        expected_amount: expected,
+        remaining_balance: Math.max(0, expected - paid),
+      };
+    });
+    return {
+      kind, generated_at: generatedAt,
+      totals: {
+        records: rows.length,
+        pending_amount: rows.reduce((s, r) => s + Number(r.paid_amount || 0), 0),
+      },
+      rows,
+    };
+  }
+
+  if (kind === 'arrears') {
+    const res = await query(`
+      SELECT t.tenant_code, t.name, t.property_name, t.status,
+             ${DASH_UNIT_DISPLAY} AS unit_display,
+             t.rent_due_date::text AS rent_due_date,
+             t.rent_amount, t.rent_paid_this_month,
+             ${DASH_BALANCE_COMPONENTS}
+      FROM tenants t
+      WHERE ${DASH.occupied}
+      ORDER BY t.tenant_code`);
+    // Rows are filtered to outstanding > 0 and sorted in JS by the same
+    // balance formula the card totals use (sum of rows == card figure).
+    const rows = res.rows
+      .map((r) => ({ ...r, outstanding_balance: dashBalanceOf(r) }))
+      .filter((r) => r.outstanding_balance > 0)
+      .sort((a, b) => b.outstanding_balance - a.outstanding_balance);
+    return {
+      kind, generated_at: generatedAt,
+      totals: {
+        units: rows.length,
+        arrears_bf: rows.reduce((s, r) => s + Number(r.arrears_bf || 0), 0),
+        unpaid_rent: rows.reduce((s, r) => s + Number(r.unpaid_rent || 0), 0),
+        penalties: rows.reduce((s, r) => s + Number(r.penalties_pending || 0), 0),
+        garbage: rows.reduce((s, r) => s + Number(r.garbage_due || 0), 0),
+        water: rows.reduce((s, r) => s + Number(r.water_due || 0), 0),
+        outstanding: rows.reduce((s, r) => s + r.outstanding_balance, 0),
+      },
+      rows,
+    };
+  }
+
+  if (kind === 'revenue') {
+    const res = await query(`
+      SELECT p.id, p.amount, p.payment_date::text AS payment_date, p.mpesa_reference,
+             p.receipt_number, p.payment_type, p.payment_mode,
+             t.tenant_code, t.name AS tenant_name, t.property_name,
+             ${DASH_UNIT_DISPLAY} AS unit_display
+      FROM payments p
+      LEFT JOIN tenants t ON t.tenant_code = p.tenant_code
+      WHERE p.status = 'Approved' AND p.payment_date >= '${monthStart}'
+      ORDER BY p.payment_date DESC, p.id DESC`);
+    return {
+      kind, generated_at: generatedAt,
+      totals: {
+        records: res.rows.length,
+        total: res.rows.reduce((s, r) => s + Number(r.amount || 0), 0),
+      },
+      rows: res.rows,
+    };
+  }
+
+  if (kind === 'progress') {
+    const res = await query(`
+      SELECT t.tenant_code, t.name, t.property_name, t.status,
+             ${DASH_UNIT_DISPLAY} AS unit_display,
+             t.rent_due_date::text AS rent_due_date,
+             t.rent_amount AS expected,
+             LEAST(t.rent_amount, t.rent_paid_this_month) AS collected,
+             GREATEST(0, t.rent_amount - t.rent_paid_this_month) AS outstanding
+      FROM tenants t
+      WHERE ${DASH.occupied}
+      ORDER BY GREATEST(0, t.rent_amount - t.rent_paid_this_month) DESC,
+               t.property_name NULLS LAST, t.name`);
+    const expected = res.rows.reduce((s, r) => s + Number(r.expected || 0), 0);
+    const collected = res.rows.reduce((s, r) => s + Number(r.collected || 0), 0);
+    return {
+      kind, generated_at: generatedAt,
+      period,
+      period_label: DASH_MONTH_LABEL(period),
+      totals: {
+        units: res.rows.length,
+        expected,
+        collected,
+        outstanding: expected - collected,
+        percent: expected > 0 ? Math.round((collected / expected) * 1000) / 10 : 0,
+      },
+      rows: res.rows,
+    };
+  }
+
+  const err = new Error('Unknown dashboard drilldown: ' + kind);
+  err.status = 400;
+  throw err;
+}
+
+async function logMessage({ tenantId, messageType, messageBody, status, whatsappMessageId, failureReason, clientTxnId }) {
   const res = await query(
-    `INSERT INTO message_logs (tenant_code, message_type, message_body, status, whatsapp_message_id, failure_reason)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO message_logs (tenant_code, message_type, message_body, status, whatsapp_message_id, failure_reason, client_txn_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id`,
-    [tenantId ?? null, messageType, messageBody, status, whatsappMessageId ?? null, failureReason ?? null]
+    [tenantId ?? null, messageType, messageBody, status, whatsappMessageId ?? null, failureReason ?? null, clientTxnId || null]
   );
   return res.rows[0]?.id;
+}
+
+async function findMessageByClientTxnId(clientTxnId) {
+  if (!clientTxnId) return null;
+  const res = await query(
+    `SELECT * FROM message_logs WHERE client_txn_id = $1 LIMIT 1`,
+    [String(clientTxnId)]
+  );
+  return res.rows[0] || null;
 }
 
 async function updateMessageDelivery(whatsappMessageId, status, failureReason) {
@@ -2548,6 +3758,19 @@ async function getPropertyCollectionReport(houseId, billingMonth) {
   const garbageByTenant = {};
   for (const r of garbageRes.rows) garbageByTenant[r.tenant_code] = Math.max(0, Number(r.total || 0));
 
+  // Get water shortfall (same one-time charge semantics as the tenant
+  // profile / statement balance — water must appear in the ledger too)
+  const waterRes = await query(
+    `SELECT tenant_code,
+            COALESCE(SUM(water_charge_amount - water_charge_paid), 0) AS total
+     FROM tenants WHERE status != 'Vacant' AND water_charge_amount > water_charge_paid
+     ${houseId ? `AND house_paybill_number = $1` : ''}
+     GROUP BY tenant_code`,
+    houseId ? [houseId] : []
+  );
+  const waterByTenant = {};
+  for (const r of waterRes.rows) waterByTenant[r.tenant_code] = Math.max(0, Number(r.total || 0));
+
   // Build rows
   const rows = [];
   const transactions = [];
@@ -2568,11 +3791,17 @@ async function getPropertyCollectionReport(houseId, billingMonth) {
     const tc = t.tenant_code;
     const rentAmount = Number(t.rent_amount || 0);
     const arrears = Number(t.arrears || 0);
-    const otherCharges = (penaltiesByTenant[tc] || 0) + (garbageByTenant[tc] || 0);
+    const otherCharges = (penaltiesByTenant[tc] || 0) + (garbageByTenant[tc] || 0) + (waterByTenant[tc] || 0);
     const totalExpectedForTenant = arrears + rentAmount + otherCharges;
 
     const tenantPayments = paymentsByTenant[tc] || [];
-    const amountPaid = tenantPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    // Deposit-type money is reported through its own deposit columns, never
+    // against rent/charges — a deposit payment must not read as rent
+    // collected (it produced phantom OVERPAID/CREDIT statuses). The full
+    // payment list (receipts, references, transactions) is unchanged.
+    const amountPaid = tenantPayments
+      .filter(p => (p.payment_type || 'rent') !== 'deposit')
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
     const receiptNumbers = tenantPayments.map(p => p.receipt_number).filter(Boolean).join(', ') || '—';
     const mpesaReferences = tenantPayments.map(p => p.mpesa_reference).filter(Boolean).join(', ') || '—';
     const datesPaid = tenantPayments.map(p => p.payment_date).filter(Boolean).join(', ') || '—';
@@ -2659,16 +3888,26 @@ async function getPropertyCollectionReport(houseId, billingMonth) {
 }
 
 async function getOutstandingBalances(house_id) {
+  // Canonical balance (same formula as the Tenant Profile, Payment History and
+  // Statement): arrears + current-cycle rent shortfall + garbage + water +
+  // pending invoices. Deposit stays its own reported column — it is recorded
+  // in Deposit Paid and never folded into the balance.
   let q = `
     SELECT t.tenant_code, t.name, t.unit_label, t.rent_amount, t.arrears,
-           t.deposit_amount, t.deposit_paid, t.garbage_fee_amount, t.garbage_fee_paid,
+           t.rent_paid_this_month, t.deposit_amount, t.deposit_paid,
+           t.garbage_fee_amount, t.garbage_fee_paid,
+           t.water_charge_amount, t.water_charge_paid,
            COALESCE((
              SELECT SUM(p.amount) FROM penalties p
              WHERE p.tenant_code = t.tenant_code AND p.status = 'Pending'
            ), 0) AS penalties_outstanding,
+           GREATEST(0, COALESCE(t.rent_amount, 0) - COALESCE(t.rent_paid_this_month, 0)) AS rent_due,
+           GREATEST(0, COALESCE(t.garbage_fee_amount, 0) - COALESCE(t.garbage_fee_paid, 0)) AS garbage_due,
+           GREATEST(0, COALESCE(t.water_charge_amount, 0) - COALESCE(t.water_charge_paid, 0)) AS water_due,
            (COALESCE(t.arrears, 0)
-             + GREATEST(0, COALESCE(t.deposit_amount, 0) - COALESCE(t.deposit_paid, 0))
+             + GREATEST(0, COALESCE(t.rent_amount, 0) - COALESCE(t.rent_paid_this_month, 0))
              + GREATEST(0, COALESCE(t.garbage_fee_amount, 0) - COALESCE(t.garbage_fee_paid, 0))
+             + GREATEST(0, COALESCE(t.water_charge_amount, 0) - COALESCE(t.water_charge_paid, 0))
              + COALESCE((
                  SELECT SUM(p.amount) FROM penalties p
                  WHERE p.tenant_code = t.tenant_code AND p.status = 'Pending'
@@ -2679,8 +3918,10 @@ async function getOutstandingBalances(house_id) {
     LEFT JOIN houses h ON t.house_paybill_number = h.paybill_number
     WHERE t.status != 'Vacant'
       AND (COALESCE(t.arrears, 0) > 0
-           OR COALESCE(t.deposit_amount, 0) - COALESCE(t.deposit_paid, 0) > 0
+           OR COALESCE(t.rent_amount, 0) - COALESCE(t.rent_paid_this_month, 0) > 0
            OR COALESCE(t.garbage_fee_amount, 0) - COALESCE(t.garbage_fee_paid, 0) > 0
+           OR COALESCE(t.water_charge_amount, 0) - COALESCE(t.water_charge_paid, 0) > 0
+           OR COALESCE(t.deposit_amount, 0) - COALESCE(t.deposit_paid, 0) > 0
            OR EXISTS (
              SELECT 1 FROM penalties p
              WHERE p.tenant_code = t.tenant_code AND p.status = 'Pending'
@@ -2696,10 +3937,17 @@ async function getOutstandingBalances(house_id) {
   return res.rows.map(r => ({
     ...r,
     arrears: Number(r.arrears || 0),
+    rent_due: Number(r.rent_due || 0),
+    garbage_due: Number(r.garbage_due || 0),
+    water_due: Number(r.water_due || 0),
     deposit_amount: Number(r.deposit_amount || 0),
     deposit_paid: Number(r.deposit_paid || 0),
     garbage_fee_amount: Number(r.garbage_fee_amount || 0),
     garbage_fee_paid: Number(r.garbage_fee_paid || 0),
+    water_charge_amount: Number(r.water_charge_amount || 0),
+    water_charge_paid: Number(r.water_charge_paid || 0),
+    rent_amount: Number(r.rent_amount || 0),
+    rent_paid_this_month: Number(r.rent_paid_this_month || 0),
     penalties_outstanding: Number(r.penalties_outstanding || 0),
     outstanding: Number(r.outstanding || 0),
   }));
@@ -2871,7 +4119,8 @@ async function rolloverBody() {
 
   const overdue = await query(
     `SELECT tenant_code, rent_amount, arrears, rent_due_date::text AS rent_due_date, advance_rent_balance, advance_rent_until,
-            standard_monthly_rent, first_billing_method, move_in_date::text AS move_in_date, arrears_manually_set
+            standard_monthly_rent, first_billing_method, move_in_date::text AS move_in_date, arrears_manually_set,
+            garbage_fee_amount
      FROM tenants
      WHERE status != 'Vacant' AND rent_due_date < $1`,
     [firstOfThisMonth]
@@ -2882,6 +4131,8 @@ async function rolloverBody() {
     const manuallySet = t.arrears_manually_set === true;
     let arrears = Number(t.arrears || 0);
     const rentAmount = Number(t.rent_amount || 0);
+    const garbageRate = Number(t.garbage_fee_amount || 0);
+    let garbageRolled = 0;
     let dueDate = new Date(t.rent_due_date + 'T12:00:00');
     let advanceRentBalance = Number(t.advance_rent_balance || 0);
     let advanceRentUntil = t.advance_rent_until || null;
@@ -2893,29 +4144,47 @@ async function rolloverBody() {
     const isFullyCoveredMonth = (prefix) =>
       !!advancePrefix && (prefix < advancePrefix || (prefix === advancePrefix && advanceDay <= 1));
 
-    // Get approved payments for this tenant
+    // Get approved payments for this tenant (with allocation snapshots so only
+    // the rent-directed portion of each payment counts toward its month —
+    // deposit/arrears/penalty money must never close a rent month).
     const paymentsRes = await query(
-      `SELECT amount, payment_date::text AS payment_date FROM payments WHERE tenant_code = $1 AND status = 'Approved'`,
+      `SELECT amount, payment_date::text AS payment_date, billing_period, allocation_breakdown FROM payments WHERE tenant_code = $1 AND status = 'Approved'`,
       [t.tenant_code]
     );
     const approvedPayments = paymentsRes.rows;
+    // Garbage-directed portion per payment (same snapshot rule; legacy rows
+    // without snapshots contribute 0 — bounded, flagged by design).
+    const garbageDirected = (p) => {
+      let bd = p.allocation_breakdown;
+      try { if (typeof bd === 'string') bd = JSON.parse(bd); } catch (_) { bd = null; }
+      if (bd && bd.garbageFeeSettled !== undefined && bd.garbageFeeSettled !== null) return Number(bd.garbageFeeSettled) || 0;
+      return 0;
+    };
 
-    // Loop to catch up multiple missed months
+    // Loop to catch up multiple missed months. Date-only comparison: a
+    // datetime compare double-rolls when run on/after the 5th.
     let monthsRolled = 0;
+    const todayISO = today.toISOString().slice(0, 10);
 
     // If arrears were manually set, skip recalculation — just advance the due date
     if (manuallySet) {
-      while (dueDate < today) {
+      while (dueDate.toISOString().slice(0, 10) < todayISO) {
         dueDate.setMonth(dueDate.getMonth() + 1);
         dueDate.setDate(5);
         monthsRolled++;
       }
     } else {
-      while (dueDate < today) {
+      while (dueDate.toISOString().slice(0, 10) < todayISO) {
         const monthPrefix = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
         const monthPaid = approvedPayments
-          .filter(p => p.payment_date && p.payment_date.startsWith(monthPrefix))
-          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+          .filter(p => billingMonthOfPayment(p) === monthPrefix)
+          .reduce((sum, p) => sum + rentDirectedAmount(p), 0);
+        // Recurring monthly garbage: the month's garbage-directed payments
+        // against the configured rate. Unpaid garbage rolls to B/F once per
+        // closed month (never duplicated — same single-pass loop).
+        const monthGarbagePaid = approvedPayments
+          .filter(p => billingMonthOfPayment(p) === monthPrefix)
+          .reduce((sum, p) => sum + garbageDirected(p), 0);
 
         if (monthPaid < rentAmount) {
           const shortfall = rentAmount - monthPaid;
@@ -2928,6 +4197,11 @@ async function rolloverBody() {
           } else {
             arrears += shortfall;
           }
+        }
+        if (!isFullyCoveredMonth(monthPrefix) && garbageRate > 0) {
+          const gShort = Math.max(0, garbageRate - monthGarbagePaid);
+          arrears += gShort;
+          garbageRolled += gShort;
         }
 
         dueDate.setMonth(dueDate.getMonth() + 1);
@@ -2957,7 +4231,7 @@ async function rolloverBody() {
       }
 
       await query(
-        `UPDATE tenants SET arrears = $1, rent_due_date = $2, rent_paid_this_month = 0, status = $6, advance_rent_balance = $4, advance_rent_until = $5, updated_at = NOW()${rentUpdate} WHERE tenant_code = $3`,
+        `UPDATE tenants SET arrears = $1, rent_due_date = $2, rent_paid_this_month = 0, garbage_fee_paid = 0, status = $6, advance_rent_balance = $4, advance_rent_until = $5, updated_at = NOW()${rentUpdate} WHERE tenant_code = $3`,
         [manuallySet ? Number(t.arrears || 0) : Math.max(0, arrears), newDueDate, t.tenant_code, advanceRentBalance, newAdvanceUntil, newStatus, ...extraParams]
       );
       results.push({
@@ -2966,9 +4240,21 @@ async function rolloverBody() {
         new_arrears: manuallySet ? Number(t.arrears || 0) : Math.max(0, arrears),
         manually_preserved: manuallySet,
         new_due_date: newDueDate,
+        garbage_rolled: garbageRolled,
         advance_rent_applied: Number(t.advance_rent_balance || 0) - advanceRentBalance,
         rent_restored: rentUpdate ? stdRent : null,
       });
+
+      // Re-derive the tenant's position for the NEW cycle from complete
+      // payment history (the reconciliation engine's documented contract:
+      // called after approval, deletion, reversal AND rollover). This is what
+      // keeps rent_paid_this_month / status / advance-covered balances correct
+      // right after the rollover reset — never wipe manual arrears.
+      try {
+        await reconcileTenant(t.tenant_code);
+      } catch (err) {
+        console.error(`[Reconcile] Post-rollover reconciliation failed for ${t.tenant_code}:`, err.message);
+      }
     }
   }
 
@@ -3197,7 +4483,8 @@ async function getRentInvoiceData(tenantCode, billingPeriod) {
   const month = Number(monthStr);
   const periodLabel = new Date(year, month - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   const fromDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const toDate = `${year}-${String(month).padStart(2, '0')}-31`;
+  // Last day of billing month, timezone-safe (avoids toISOString UTC offset)
+  const toDateEnd = `${year}-${String(month).padStart(2, '0')}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, '0')}`;
 
   const pending = await listPendingPenalties(tenantCode);
   const pendingByCat = { penalty: [], maintenance: [], other: [] };
@@ -3213,7 +4500,7 @@ async function getRentInvoiceData(tenantCode, billingPeriod) {
      WHERE p.tenant_code = $1 AND p.status = 'Approved' AND COALESCE(p.payment_type, 'rent') <> 'deposit'
        AND p.payment_date >= $2 AND p.payment_date <= $3
      ORDER BY p.payment_date ASC, p.id ASC`,
-    [tenantCode, fromDate, toDate]
+    [tenantCode, fromDate, toDateEnd]
   );
   const payments = paymentsRes.rows.map(r => ({ ...r, amount: Number(r.amount) }));
   const paymentsReceived = payments.reduce((s, p) => s + p.amount, 0);
@@ -3259,7 +4546,7 @@ async function getRentInvoiceData(tenantCode, billingPeriod) {
       house_name: house ? house.house_name : null,
       payment_instructions: getPaymentInstructionsText(house, tenant.tenant_code),
     },
-    billing: { period, period_label: periodLabel, from_date: fromDate, to_date: toDate },
+    billing: { period, period_label: periodLabel, from_date: fromDate, to_date: toDateEnd },
     opening_balance: openingBalance,
     charges,
     total_due: totalDue,
@@ -3314,6 +4601,10 @@ function normalizeWorkItems(items) {
 }
 
 async function createWorkOrder(data) {
+  if (data.client_txn_id) {
+    const existing = await findRecordByClientTxnId('work_orders', data.client_txn_id);
+    if (existing) return { ...existing, _idempotentReplay: true };
+  }
   const woNumber = await generateWorkOrderNumber();
   const items = normalizeWorkItems(data.items);
   const totalCost = items.reduce((s, it) => s + Number(it.labour_cost || 0) + Number(it.material_cost || 0), 0);
@@ -3322,8 +4613,9 @@ async function createWorkOrder(data) {
        wo_number, property_name, house_paybill_number, unit_codes, caretaker_name,
        date_requested, date_work_started, date_completed,
        technician_name, technician_phone, date_assigned, expected_completion,
-       status, priority, items, actual_work_completed, materials_used, labour_involved, total_cost, notes
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+       status, priority, items, actual_work_completed, materials_used, labour_involved, total_cost, notes,
+       client_txn_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
      RETURNING *`,
     [
       woNumber,
@@ -3346,6 +4638,7 @@ async function createWorkOrder(data) {
       data.labour_involved || null,
       data.total_cost != null ? Number(data.total_cost) : totalCost,
       data.notes || null,
+      data.client_txn_id || null,
     ]
   );
   return res.rows[0];
@@ -3823,6 +5116,200 @@ async function getMonthlyReport(month, housePaybill) {
  * Build the enhanced monthly report data — unit-by-unit financial table,
  * work/maintenance summary, invoices issued, and monthly summary totals.
  */
+
+// ─── Landlord pack (read-only aggregations for the enhanced Excel) ─────────
+// Everything here only READS existing records. No workflow is touched.
+
+function parseAllocation(row) {
+  try {
+    const a = row.allocation_breakdown;
+    if (!a) return null;
+    return typeof a === 'string' ? JSON.parse(a) : a;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Collections for a billing period, split by allocation component.
+// Payments approved before allocation persistence fall back to full-rent.
+async function getPeriodCollections(month, housePaybill = null) {
+  const params = [month];
+  let houseFilter = '';
+  if (housePaybill) {
+    houseFilter = ' AND t.house_paybill_number = $2';
+    params.push(housePaybill);
+  }
+  const res = await query(
+    `SELECT p.id, p.amount, p.payment_type, p.allocation_breakdown,
+            t.tenant_code, t.name AS tenant_name, t.unit_label,
+            t.house_paybill_number, h.house_name AS property_name
+     FROM payments p
+     JOIN tenants t ON t.tenant_code = p.tenant_code
+     LEFT JOIN houses h ON h.paybill_number = t.house_paybill_number
+     WHERE p.status = 'Approved' AND p.billing_period = $1${houseFilter}
+     ORDER BY p.approved_at`,
+    params
+  );
+  const zero = () => ({ collected: 0, rent: 0, arrears: 0, deposit: 0, garbage: 0, water: 0, penalty: 0, maintenance: 0, other: 0, agreement: 0, count: 0 });
+  const totals = zero();
+  const byTenant = {};
+  for (const p of res.rows) {
+    const amount = Number(p.amount || 0);
+    const alloc = parseAllocation(p);
+    const split = p.payment_type === 'deposit'
+      ? { deposit: amount }
+      : alloc
+        ? {
+            rent: Number(alloc.rentSettled || 0),
+            arrears: Number(alloc.arrearsSettled || 0),
+            deposit: Number(alloc.depositSettled || 0),
+            garbage: Number(alloc.garbageFeeSettled || 0),
+            water: Number(alloc.waterSettled || 0),
+            penalty: Number(alloc.penaltySettled || 0),
+            maintenance: Number(alloc.maintenanceSettled || 0),
+            other: Number(alloc.otherSettled || 0),
+            agreement: Number(alloc.agreementSettled || 0),
+          }
+        : { rent: amount };
+    const entry = { collected: amount, rent: 0, arrears: 0, deposit: 0, garbage: 0, water: 0, penalty: 0, maintenance: 0, other: 0, agreement: 0, count: 1 };
+    for (const k of ['rent', 'arrears', 'deposit', 'garbage', 'water', 'penalty', 'maintenance', 'other', 'agreement']) {
+      entry[k] = Number(split[k] || 0);
+      totals[k] += entry[k];
+    }
+    totals.collected += amount;
+    const code = p.tenant_code;
+    if (!byTenant[code]) {
+      byTenant[code] = { ...zero(), tenant_code: code, tenant_name: p.tenant_name || '', unit_label: p.unit_label || '', property_name: p.property_name || '' };
+    }
+    const bt = byTenant[code];
+    bt.collected += amount;
+    bt.count += 1;
+    for (const k of ['rent', 'arrears', 'deposit', 'garbage', 'water', 'penalty', 'maintenance', 'other', 'agreement']) {
+      bt[k] += entry[k];
+    }
+  }
+  return { totals, byTenant };
+}
+
+// Other property expenses = contractor/material/repair invoices recorded in
+// the calendar month, EXCLUDING work-order-sourced ones (those already count
+// under work-order expenses via the WO Source convention).
+async function getOtherPropertyExpenses(month, housePaybill = null) {
+  const monthStart = `${month}-01`;
+  const d = new Date(`${month}-15T12:00:00`);
+  d.setMonth(d.getMonth() + 1);
+  const monthEnd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  const res = await query(
+    `SELECT id, mnt_number, property_name, house_paybill_number, date_reported,
+            status, grand_total, notes, created_at
+     FROM maintenance_invoices
+     WHERE created_at >= $1 AND created_at < $2
+     ORDER BY created_at`,
+    [monthStart, monthEnd]
+  );
+  let houseName = null;
+  if (housePaybill) {
+    const h = await getHouse(housePaybill);
+    houseName = h ? String(h.house_name || '').toLowerCase() : null;
+  }
+  const rows = [];
+  for (const r of res.rows) {
+    if (housePaybill) {
+      const matchPaybill = r.house_paybill_number && String(r.house_paybill_number) === String(housePaybill);
+      const matchName = houseName && String(r.property_name || '').toLowerCase() === houseName;
+      if (!matchPaybill && !matchName) continue;
+    }
+    if (/^\s*WO Source:/i.test(String(r.notes || ''))) continue;
+    rows.push({
+      id: r.id,
+      mnt_number: r.mnt_number,
+      property_name: r.property_name || '',
+      date_reported: r.date_reported || null,
+      status: r.status || '',
+      amount: Number(r.grand_total || 0),
+      notes: r.notes || '',
+    });
+  }
+  return { rows, total: rows.reduce((s, r) => s + r.amount, 0) };
+}
+
+// Pending tenant penalties + agreement balances (current obligations).
+async function getTenantChargeSummary(housePaybill = null) {
+  const params = [];
+  let where = '';
+  if (housePaybill) {
+    where = ' WHERE t.house_paybill_number = $1';
+    params.push(housePaybill);
+  }
+  const res = await query(
+    `SELECT t.tenant_code, t.name AS tenant_name, t.unit_label, t.status,
+            t.deposit_amount, t.deposit_paid, t.agreement_outstanding,
+            h.house_name AS property_name
+     FROM tenants t
+     LEFT JOIN houses h ON h.paybill_number = t.house_paybill_number${where}
+     ORDER BY h.house_name, t.unit_label`,
+    params
+  );
+  const penRes = await query(
+    `SELECT p.tenant_code, COALESCE(SUM(CASE WHEN p.status = 'Pending' THEN p.amount ELSE 0 END), 0) AS pending_total,
+            COUNT(*) FILTER (WHERE p.status = 'Pending') AS pending_count
+     FROM penalties p GROUP BY p.tenant_code`
+  );
+  const penMap = {};
+  for (const r of penRes.rows) {
+    penMap[r.tenant_code] = { pending_total: Number(r.pending_total || 0), pending_count: Number(r.pending_count || 0) };
+  }
+  return res.rows.map((t) => {
+    const pen = penMap[t.tenant_code] || { pending_total: 0, pending_count: 0 };
+    const required = Number(t.deposit_amount || 0);
+    const paid = Number(t.deposit_paid || 0);
+    return {
+      tenant_code: t.tenant_code,
+      tenant_name: t.name || '',
+      unit_label: t.unit_label || '',
+      property_name: t.property_name || '',
+      status: t.status || '',
+      deposit_required: required,
+      deposit_paid: paid,
+      deposit_balance: Math.max(0, required - paid),
+      penalties_pending: pen.pending_total,
+      penalties_count: pen.pending_count,
+      agreement_outstanding: Number(t.agreement_outstanding || 0),
+    };
+  });
+}
+
+// Compose every landlord-pack dataset for (month, house?) in one call.
+async function buildLandlordPack(month, housePaybill = null) {
+  const commission = await getCommissionReport(month, housePaybill);
+  const collections = await getPeriodCollections(month, housePaybill);
+  const otherExpenses = await getOtherPropertyExpenses(month, housePaybill);
+  const charges = await getTenantChargeSummary(housePaybill);
+  let houses = [];
+  if (housePaybill) {
+    const h = await getHouse(housePaybill);
+    if (h) houses = [{ paybill_number: h.paybill_number || housePaybill, house_name: h.house_name || '' }];
+  } else {
+    const all = await listHouses({});
+    houses = all.map((h) => ({ paybill_number: h.paybill_number || h.id, house_name: h.house_name || '' }));
+  }
+  const waterByHouse = [];
+  for (const h of houses) {
+    try {
+      waterByHouse.push(await buildWaterBillReport({ house_paybill: h.paybill_number, billing_month: month }));
+    } catch (_) {
+      waterByHouse.push(null);
+    }
+  }
+  const waterTotals = waterByHouse.filter(Boolean).reduce((s, w) => ({
+    total_units: s.total_units + w.totals.total_units,
+    occupied_units: s.occupied_units + w.totals.occupied_units,
+    vacant_units: s.vacant_units + w.totals.vacant_units,
+    total_consumption: s.total_consumption + w.totals.total_consumption,
+    total_water_charges: s.total_water_charges + w.totals.total_water_charges,
+  }), { total_units: 0, occupied_units: 0, vacant_units: 0, total_consumption: 0, total_water_charges: 0 });
+  return { commission, collections, otherExpenses, charges, waterByHouse: waterByHouse.filter(Boolean), waterTotals };
+}
 async function buildEnhancedMonthlyReport(month, housePaybill) {
   const monthStart = `${month}-01`;
   const d = new Date(`${month}-15T12:00:00`);
@@ -3920,12 +5407,27 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     // Penalties this month for this tenant — only count Pending (unpaid) penalties
     const penaltyTotal = tenantPenalties.filter(p => p.status === 'Pending').reduce((s, p) => s + Number(p.amount || 0), 0);
 
-    // Rent Due = rent + water + garbage + penalties
-    const rentDue = rentAmount + waterCharge + garbageCharge + penaltyTotal;
+    // One-time water charge: bill it in the month its money landed (from each
+    // payment's allocation snapshot) plus whatever is still unpaid today.
+    // Re-adding the full charge every month phantom-billed tenants forever
+    // after the refundable water deposit was settled.
+    let waterSettledThisMonth = 0;
+    for (const p of tenantPayments) {
+      let bd = p.allocation_breakdown;
+      try { if (typeof bd === 'string') bd = JSON.parse(bd); } catch (_) { bd = null; }
+      if (bd && bd.waterSettled != null) waterSettledThisMonth += Number(bd.waterSettled) || 0;
+    }
+    const waterStillOwed = Math.max(0, waterCharge - Number(t.water_charge_paid || 0));
+    const waterDue = Math.min(waterCharge, waterSettledThisMonth + waterStillOwed);
 
-    // Payments this month
+    // Rent Due = rent + water + garbage + penalties
+    const rentDue = rentAmount + waterDue + garbageCharge + penaltyTotal;
+
+    // Payments this month. Deposit money is reported through the Deposit
+    // column — it is not rent collected and must not offset rent/charges
+    // (it produced phantom OVERPAYMENT/CLEARED statuses).
     const depositPaid = tenantPayments.filter(p => p.payment_type === 'deposit').reduce((s, p) => s + Number(p.amount || 0), 0);
-    const totalPaid = tenantPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const totalPaid = tenantPayments.filter(p => (p.payment_type || 'rent') !== 'deposit').reduce((s, p) => s + Number(p.amount || 0), 0);
 
     // Latest payment for receipt/ref/date
     const latestPayment = tenantPayments.length > 0
@@ -3960,7 +5462,7 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
 
     units.push({
       unit_number: t.unit_label || t.tenant_code, tenant_name: t.name,
-      telephone: t.phone_number || '', deposit: depositPaid, water: waterCharge,
+      telephone: t.phone_number || '', deposit: depositPaid, water: waterDue,
       penalty: penaltyTotal, monthly_rent: rentAmount, balance_bf: arrears,
       rent_due: rentDue, rent_paid: totalPaid, receipt_no: receiptNo,
       transaction_ref: transactionRef, payment_date: paymentDate,
@@ -3971,7 +5473,7 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     totalRentDue += rentDue;
     totalRentPaid += totalPaid;
     totalDepositCollected += depositPaid;
-    totalWaterCharges += waterCharge;
+    totalWaterCharges += waterDue;
     totalPenalties += penaltyTotal;
     if (balance > 0) totalOutstanding += balance;
     if (balance < 0) totalAdvance += Math.abs(balance);
@@ -4094,6 +5596,10 @@ async function closeAllMonthlyReports(month) {
 }
 
 async function createMaintenanceInvoice(data) {
+  if (data.client_txn_id) {
+    const existing = await findRecordByClientTxnId('maintenance_invoices', data.client_txn_id);
+    if (existing) return { ...existing, _idempotentReplay: true };
+  }
   const mntNumber = await generateMaintenanceInvoiceNumber();
   const items = normalizeWorkItems(data.items);
   const labourTotal = items.reduce((s, it) => s + Number(it.labour_cost || 0), 0);
@@ -4104,8 +5610,8 @@ async function createMaintenanceInvoice(data) {
        mnt_number, property_name, house_paybill_number, unit_codes, caretaker_name,
        date_reported, date_work_started, date_completed,
        technician_name, technician_phone, status, items,
-       labour_total, material_total, grand_total, notes
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       labour_total, material_total, grand_total, notes, client_txn_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING *`,
     [
       mntNumber,
@@ -4124,6 +5630,7 @@ async function createMaintenanceInvoice(data) {
       materialTotal,
       grandTotal,
       data.notes || null,
+      data.client_txn_id || null,
     ]
   );
   return res.rows[0];
@@ -4181,19 +5688,20 @@ async function updateMaintenanceInvoice(id, data) {
        date_completed = COALESCE($8, date_completed),
        technician_name = COALESCE($9, technician_name),
        technician_phone = COALESCE($10, technician_phone),
-       status = $17,
-       items = $12,
-       labour_total = $13,
-       material_total = $14,
-       grand_total = $15,
-       notes = COALESCE($16, notes),
+       status = $16,
+       items = $11,
+       labour_total = $12,
+       material_total = $13,
+       grand_total = $14,
+       notes = COALESCE($15, notes),
        updated_at = NOW()
      WHERE id = $1 RETURNING *`,
     [
       id,
       data.property_name, data.house_paybill_number, data.unit_codes, data.caretaker_name,
       data.date_reported, data.date_work_started, data.date_completed,
-      data.technician_name, data.technician_phone, data.status, JSON.stringify(items),
+      data.technician_name, data.technician_phone,
+      JSON.stringify(items),
       labourTotal, materialTotal, grandTotal, data.notes,
       newStatus,
     ]
@@ -4275,6 +5783,225 @@ async function hasApprovedRentPaymentFor(tenantCode, excludeId = null, run) {
   return (res.rows[0]?.c || 0) > 0;
 }
 
+// ===========================================================================
+// PAYMENT ARRANGEMENTS — management-only approved payment dates.
+// Internal controls only: original due date (tenants.rent_due_date) is NEVER
+// written here, actual payment dates live on payments rows, and nothing in
+// this section touches the rent ledger, allocation, invoices or statuses.
+// ===========================================================================
+
+const ARR_ACTIVE = ['Pending', 'Approved'];
+const ARR_CLOSED = ['Declined', 'Cancelled', 'Expired'];
+
+function arrDateOnly(v) {
+  // pg DATE columns arrive as local-midnight Date objects (never strings).
+  // Format in LOCAL time: toISOString() would shift the day for UTC+ zones.
+  if (!v) return null;
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
+function normArrangementRow(row) {
+  if (!row) return row;
+  return { ...row, requested_date: arrDateOnly(row.requested_date), approved_date: arrDateOnly(row.approved_date) };
+}
+
+async function logArrangementEvent(arrangementId, { actor, action, prevStatus, newStatus, prevApprovedDate, newApprovedDate, reason }, run) {
+  await runOrQuery(run,
+    `INSERT INTO payment_arrangement_events (arrangement_id, actor, action, prev_status, new_status, prev_approved_date, new_approved_date, reason)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [arrangementId, actor || null, action, prevStatus || null, newStatus || null, prevApprovedDate || null, newApprovedDate || null, reason || null]
+  );
+}
+
+async function createArrangement({ tenant_code, billing_period, requested_date, approved_date, reason, created_by }) {
+  const tenant = await getTenant(tenant_code);
+  if (!tenant) throw new Error('Tenant not found');
+  if (!tenant || tenant.status === 'Vacant') throw new Error('Arrangements require an active tenancy');
+  const bp = /^\d{4}-\d{2}$/.test(String(billing_period || ''))
+    ? String(billing_period)
+    : String(tenant.rent_due_date || new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const req = arrDateOnly(requested_date);
+  const app = arrDateOnly(approved_date);
+  const res = await query(
+    `INSERT INTO payment_arrangements (tenant_code, billing_period, requested_date, approved_date, reason, status, created_by)
+     VALUES ($1, $2, $3, $4, $5, 'Pending', $6)
+     RETURNING *`,
+    [tenant_code, bp, req, app, reason ? String(reason).slice(0, 2000) : null, created_by || null]
+  );
+  const row = res.rows[0];
+  await logArrangementEvent(row.id, { actor: created_by, action: 'created', newStatus: 'Pending', newApprovedDate: app, reason });
+  return normArrangementRow(row);
+}
+
+async function getArrangement(id, run) {
+  const res = await runOrQuery(run, `SELECT * FROM payment_arrangements WHERE id = $1`, [id]);
+  return normArrangementRow(res.rows[0] || null);
+}
+
+async function getArrangementHistory(id) {
+  const res = await query(
+    `SELECT * FROM payment_arrangement_events WHERE arrangement_id = $1 ORDER BY created_at ASC, id ASC`,
+    [id]
+  );
+  return res.rows.map((e) => ({
+    ...e,
+    prev_approved_date: arrDateOnly(e.prev_approved_date),
+    new_approved_date: arrDateOnly(e.new_approved_date),
+  }));
+}
+
+// Derived display state: base status + period payments. Fulfilled / Partially
+// Paid / Overdue—Approved-Date-Passed are computed at read time so the stored
+// record (and the ledger) is never rewritten by viewing it.
+async function describeArrangement(row) {
+  const tenant = await getTenant(row.tenant_code);
+  const rent = tenant ? Number(tenant.rent_amount || 0) : 0;
+  const dueDate = tenant && tenant.rent_due_date ? String(tenant.rent_due_date).slice(0, 10) : null;
+  const payRes = await query(
+    `SELECT COALESCE(SUM(amount), 0) AS paid, MAX(payment_date)::text AS last_paid
+     FROM payments WHERE tenant_code = $1 AND status = 'Approved'
+       AND COALESCE(billing_period, LEFT(payment_date::text, 7)) = $2`,
+    [row.tenant_code, row.billing_period]
+  );
+  const paid = Number(payRes.rows[0]?.paid || 0);
+  const lastPaid = payRes.rows[0]?.last_paid || null;
+  const outstanding = Math.max(0, rent - paid);
+  const today = new Date().toISOString().slice(0, 10);
+  const approvedDate = arrDateOnly(row.approved_date);
+  const requestedDate = arrDateOnly(row.requested_date);
+  let display = row.status;
+  if (row.status === 'Approved') {
+    if (paid >= rent && rent > 0) display = 'Fulfilled';
+    else if (paid > 0) display = 'Partially Paid';
+    else if (approvedDate && approvedDate < today && outstanding > 0) display = 'Overdue — Approved Date Passed';
+  }
+  return {
+    ...row,
+    requested_date: requestedDate,
+    approved_date: approvedDate,
+    rent_amount: rent,
+    normal_due_date: dueDate,
+    amount_paid: paid,
+    outstanding,
+    actual_payment_date: lastPaid,
+    display_status: display,
+  };
+}
+
+async function listArrangements(tenantCode) {
+  const res = await query(
+    `SELECT * FROM payment_arrangements WHERE tenant_code = $1 ORDER BY billing_period DESC, id DESC`,
+    [tenantCode]
+  );
+  const out = [];
+  for (const row of res.rows) out.push(await describeArrangement(row));
+  const active = out.find((r) => ARR_ACTIVE.includes(r.status)) || null;
+  return { arrangements: out, active };
+}
+
+async function transitionArrangement(id, { action, approved_date, requested_date, reason, actor }) {
+  const row = await getArrangement(id);
+  if (!row) throw new Error('Arrangement not found');
+  const prevStatus = row.status;
+  const prevDate = arrDateOnly(row.approved_date);
+  let nextStatus = prevStatus;
+  let nextDate = prevDate;
+  const sets = [];
+  const params = [null]; // $1 = nextStatus (filled below)
+
+  if (action === 'approve') {
+    if (prevStatus !== 'Pending') throw new Error('Only pending arrangements can be approved');
+    const app = arrDateOnly(approved_date) || prevDate;
+    if (!app) throw new Error('Approved payment date required');
+    nextStatus = 'Approved';
+    nextDate = app;
+    sets.push(`approved_date = $${params.length + 1}`, `approved_by = $${params.length + 2}`, `approved_at = NOW()`);
+    params.push(app, actor || null);
+  } else if (action === 'decline') {
+    if (prevStatus !== 'Pending') throw new Error('Only pending arrangements can be declined');
+    nextStatus = 'Declined';
+  } else if (action === 'modify') {
+    if (!['Pending', 'Approved'].includes(prevStatus)) throw new Error('Only pending or approved arrangements can be modified');
+    const app = arrDateOnly(approved_date);
+    const req = arrDateOnly(requested_date);
+    if (app) { sets.push(`approved_date = $${params.length + 1}`); params.push(app); nextDate = app; }
+    if (req) { sets.push(`requested_date = $${params.length + 1}`); params.push(req); }
+    if (reason !== undefined) { sets.push(`reason = $${params.length + 1}`); params.push(reason ? String(reason).slice(0, 2000) : null); }
+    if (!sets.length) throw new Error('Nothing to modify');
+  } else if (action === 'cancel') {
+    if (!['Pending', 'Approved'].includes(prevStatus)) throw new Error('Only pending or approved arrangements can be cancelled');
+    nextStatus = 'Cancelled';
+  } else if (action === 'expire') {
+    if (prevStatus !== 'Approved') throw new Error('Only approved arrangements can expire');
+    nextStatus = 'Expired';
+  } else {
+    throw new Error('Unknown action');
+  }
+
+  params[0] = nextStatus;
+  if (['Cancelled', 'Declined', 'Expired'].includes(nextStatus)) sets.push('closed_at = NOW()');
+  // Status change + audit event commit atomically — never one without the other.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const run = (sql, p) => client.query(sql, p);
+    await run(
+      `UPDATE payment_arrangements SET status = $1, updated_at = NOW()${sets.length ? `, ${sets.join(', ')}` : ''} WHERE id = $${params.length + 1}`,
+      [...params, id]
+    );
+    await logArrangementEvent(id, {
+      actor, action, prevStatus, newStatus: nextStatus,
+      prevApprovedDate: prevDate, newApprovedDate: nextDate,
+      reason: reason !== undefined ? reason : row.reason,
+    }, run);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  return (await getArrangement(id)) || row;
+}
+
+// Vacancy reset: auto-close live arrangements for the vacated unit. History
+// rows stay under the old tenant_code for audit; a new tenant (new code)
+// always starts with none.
+async function closeArrangementsForVacancy(tenantCode, actor) {
+  const res = await query(
+    `SELECT * FROM payment_arrangements WHERE tenant_code = $1 AND status IN ('Pending', 'Approved')`,
+    [tenantCode]
+  );
+  if (!res.rows.length) return 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const run = (sql, p) => client.query(sql, p);
+    for (const row of res.rows) {
+      await run(`UPDATE payment_arrangements SET status = 'Cancelled', closed_at = NOW(), updated_at = NOW() WHERE id = $1`, [row.id]);
+      await logArrangementEvent(row.id, {
+        actor: actor || 'system', action: 'cancel', prevStatus: row.status, newStatus: 'Cancelled',
+        prevApprovedDate: arrDateOnly(row.approved_date),
+        newApprovedDate: null, reason: 'Tenancy vacated — arrangement auto-closed',
+      }, run);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  return res.rows.length;
+}
+
 // ---- Exit invoices ---------------------------------------------------------
 
 async function generateExitInvoiceNumber() {
@@ -4282,19 +6009,20 @@ async function generateExitInvoiceNumber() {
 }
 
 /**
- * Compute exit settlement based on management's rent and deposit treatment decisions.
- * Returns: { rentCharged, outstanding, depositAppliedToRent, depositAppliedToDeductions, depositRefund, finalSettlement }
+ * Compute exit settlement.
+ * Refundable Amount = deposit_paid + water_charges
+ * Total Deductions  = outstanding (arrears + rent + penalties + garbage) + user deduction lines
+ * Net Refund        = Refundable Amount − Total Deductions
+ * Returns: { rentCharged, outstanding, refundableAmount, totalDeductions, depositRefund, finalSettlement }
  */
 function computeExitSettlement(opts) {
-  const { tenant, summary, lines, deductionsTotal, depositAmount, depositPaid,
-    rentTreatment, rentChargedAmount, proRatedDays,
-    depositTreatment, depositAppliedToRent: reqDepRent, depositAppliedToDeductions: reqDepDed } = opts;
+  const { tenant, summary, lines, deductionsTotal, depositAmount, depositPaid, waterCharges,
+    rentTreatment, rentChargedAmount, proRatedDays } = opts;
 
   const rentAmount = Number(tenant.rent_amount || 0);
   const arrears = summary ? Number(summary.totals.arrears || 0) : 0;
   const penalties = summary ? Number(summary.totals.penalties || 0) : 0;
   const garbage = summary ? Number(summary.totals.garbage_fee || 0) : 0;
-  const unpaidRentFromSummary = summary ? Number(summary.totals.unpaid_rent || 0) : 0;
 
   // 1. Determine rent charged based on treatment
   let rentCharged = 0;
@@ -4309,57 +6037,47 @@ function computeExitSettlement(opts) {
     rentCharged = rentChargedAmount;
   }
 
-  // 2. Total outstanding = arrears + rent charged + penalties + garbage
+  // 2. Outstanding = arrears + rent charged + penalties + garbage
   const outstanding = arrears + rentCharged + penalties + garbage;
 
-  // 3. Deposit application
-  let depToRent = 0;
-  let depToDed = 0;
+  // 3. Refundable amount = deposit paid + water charges
+  const refundableAmount = Number(depositPaid || 0) + Number(waterCharges || 0);
 
-  if (depositTreatment === 'apply_to_rent') {
-    depToRent = Math.min(depositPaid, rentCharged);
-  } else if (depositTreatment === 'apply_to_deductions') {
-    depToDed = Math.min(depositPaid, deductionsTotal);
-  } else if (depositTreatment === 'apply_to_both') {
-    // Apply to rent first, then deductions with remaining
-    depToRent = Math.min(depositPaid, rentCharged);
-    const remaining = depositPaid - depToRent;
-    depToDed = Math.min(remaining, deductionsTotal);
-  } else if (depositTreatment === 'refund') {
-    // Deposit is fully refunded, not applied to anything
-    depToRent = 0;
-    depToDed = 0;
-  } else if (depositTreatment === 'other') {
-    // Use requested amounts
-    depToRent = Math.min(reqDepRent || 0, depositPaid);
-    const remaining = depositPaid - depToRent;
-    depToDed = Math.min(reqDepDed || 0, remaining);
-  }
+  // 4. Total deductions = outstanding + user-added deduction lines
+  const totalDeductions = outstanding + deductionsTotal;
 
-  // 4. Final settlement
-  // Total obligations = outstanding + deductions
-  // Total credits = deposit (applied to rent + deductions)
-  const totalObligations = outstanding + deductionsTotal;
-  const totalCredits = depToRent + depToDed;
-  const finalSettlement = totalCredits - totalObligations;
-  const depositRefund = Math.max(0, depositPaid - depToRent - depToDed);
+  // 5. Net refund = refundable − deductions (negative = tenant owes; positive = refund)
+  const finalSettlement = refundableAmount - totalDeductions;
+  const depositRefund = Math.max(0, refundableAmount - totalDeductions);
 
   return {
     rentCharged,
     outstanding: Math.max(0, outstanding),
-    depositAppliedToRent: depToRent,
-    depositAppliedToDeductions: depToDed,
+    refundableAmount,
+    totalDeductions,
     depositRefund,
     finalSettlement,
   };
 }
 
 async function createExitInvoice(tenantCode, data = {}) {
+  if (data.client_txn_id) {
+    const existing = await findRecordByClientTxnId('exit_invoices', data.client_txn_id);
+    if (existing) {
+      const full = await getExitInvoice(existing.id);
+      return { ...(full || existing), _idempotentReplay: true };
+    }
+  }
   const tenant = await getTenant(tenantCode);
   if (!tenant) return null;
   const exitNumber = await generateExitInvoiceNumber();
   const depositAmount = Number(tenant.deposit_amount || 0);
   const depositPaid = Number(tenant.deposit_paid || 0);
+  // Refundable water credit = what was actually PAID (capped at the charge),
+  // never the full charge when partially paid. Explicit overrides still win.
+  const waterCharges = data.water_charges != null
+    ? Number(data.water_charges)
+    : Math.min(Number(tenant.water_charge_paid || 0), Number(tenant.water_charge_amount || 0));
   const lines = Array.isArray(data.lines) ? data.lines : [];
   const deductionsTotal = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
   const summary = await getTenantExitSummary(tenantCode);
@@ -4368,31 +6086,28 @@ async function createExitInvoice(tenantCode, data = {}) {
   const rentTreatment = data.rent_treatment || 'full_month';
   const rentChargedAmount = data.rent_charged_amount != null ? Number(data.rent_charged_amount) : null;
   const proRatedDays = data.pro_rated_days ? Number(data.pro_rated_days) : null;
-  const depositTreatment = data.deposit_treatment || 'apply_to_deductions';
-  const depositAppliedToRent = Number(data.deposit_applied_to_rent || 0);
-  const depositAppliedToDeductions = Number(data.deposit_applied_to_deductions || 0);
 
   // Compute settlement
   const settlement = computeExitSettlement({
-    tenant, summary, lines, deductionsTotal, depositAmount, depositPaid,
+    tenant, summary, lines, deductionsTotal, depositAmount, depositPaid, waterCharges,
     rentTreatment, rentChargedAmount, proRatedDays,
-    depositTreatment, depositAppliedToRent, depositAppliedToDeductions,
   });
 
   const res = await query(
     `INSERT INTO exit_invoices
       (exit_number, tenant_code, property_name, house_paybill_number, unit_label, status,
-       lines, deductions_total, deposit_amount, deposit_paid, deposit_refund,
+       lines, deductions_total, deposit_amount, deposit_paid, water_charges, deposit_refund,
        outstanding_balance, final_settlement, move_out_date, reason,
        rent_treatment, rent_charged_amount, pro_rated_days, rent_treatment_reason,
-       deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason)
-     VALUES ($1,$2,$3,$4,$5,'Draft',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+       deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason,
+       client_txn_id)
+     VALUES ($1,$2,$3,$4,$5,'Draft',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
      RETURNING *, move_out_date::text AS move_out_date`,
     [
       exitNumber, tenant.tenant_code, tenant.property_name || null,
       tenant.house_id || null, tenant.unit_label || tenant.tenant_code || null,
       JSON.stringify(lines), Number(deductionsTotal.toFixed(2)),
-      depositAmount, depositPaid,
+      depositAmount, depositPaid, waterCharges,
       Number(settlement.depositRefund.toFixed(2)),
       Number(settlement.outstanding.toFixed(2)),
       Number(settlement.finalSettlement.toFixed(2)),
@@ -4400,9 +6115,10 @@ async function createExitInvoice(tenantCode, data = {}) {
       rentTreatment,
       settlement.rentCharged, proRatedDays,
       data.rent_treatment_reason || null,
-      depositTreatment,
-      settlement.depositAppliedToRent, settlement.depositAppliedToDeductions,
+      data.deposit_treatment || 'refund',
+      0, 0,
       data.settlement_decision_reason || null,
+      data.client_txn_id || null,
     ]
   );
   return getExitInvoice(res.rows[0].id);
@@ -4421,6 +6137,7 @@ async function getExitInvoice(id) {
     deductions_total: Number(r.deductions_total || 0),
     deposit_amount: Number(r.deposit_amount || 0),
     deposit_paid: Number(r.deposit_paid || 0),
+    water_charges: Number(r.water_charges || 0),
     deposit_refund: Number(r.deposit_refund || 0),
     outstanding_balance: Number(r.outstanding_balance || 0),
     final_settlement: Number(r.final_settlement || 0),
@@ -4440,6 +6157,7 @@ async function listExitInvoices(tenantCode = null) {
     deductions_total: Number(r.deductions_total || 0),
     deposit_amount: Number(r.deposit_amount || 0),
     deposit_paid: Number(r.deposit_paid || 0),
+    water_charges: Number(r.water_charges || 0),
     deposit_refund: Number(r.deposit_refund || 0),
     outstanding_balance: Number(r.outstanding_balance || 0),
     final_settlement: Number(r.final_settlement || 0),
@@ -4455,48 +6173,47 @@ async function updateExitInvoice(id, patch = {}) {
   const deductionsTotal = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
   const depositAmount = patch.deposit_amount != null ? Number(patch.deposit_amount) : existing.deposit_amount;
   const depositPaid = patch.deposit_paid != null ? Number(patch.deposit_paid) : existing.deposit_paid;
+  const waterCharges = patch.water_charges != null ? Number(patch.water_charges) : Number(existing.water_charges || 0);
 
   // Management decision fields (use patch value, or keep existing)
   const rentTreatment = patch.rent_treatment || existing.rent_treatment || 'full_month';
   const rentChargedAmount = patch.rent_charged_amount != null ? Number(patch.rent_charged_amount) : existing.rent_charged_amount;
   const proRatedDays = patch.pro_rated_days != null ? Number(patch.pro_rated_days) : existing.pro_rated_days;
-  const depositTreatment = patch.deposit_treatment || existing.deposit_treatment || 'apply_to_deductions';
-  const depositAppliedToRent = patch.deposit_applied_to_rent != null ? Number(patch.deposit_applied_to_rent) : existing.deposit_applied_to_rent;
-  const depositAppliedToDeductions = patch.deposit_applied_to_deductions != null ? Number(patch.deposit_applied_to_deductions) : existing.deposit_applied_to_deductions;
 
   // Compute settlement
   const settlement = tenant ? computeExitSettlement({
-    tenant, summary, lines, deductionsTotal, depositAmount, depositPaid,
+    tenant, summary, lines, deductionsTotal, depositAmount, depositPaid, waterCharges,
     rentTreatment, rentChargedAmount, proRatedDays,
-    depositTreatment, depositAppliedToRent, depositAppliedToDeductions,
   }) : {
     rentCharged: rentChargedAmount || 0,
     outstanding: existing.outstanding_balance,
-    depositAppliedToRent, depositAppliedToDeductions,
+    refundableAmount: depositPaid + waterCharges,
+    totalDeductions: existing.deductions_total + existing.outstanding_balance,
     depositRefund: existing.deposit_refund, finalSettlement: existing.final_settlement,
   };
 
   await query(
     `UPDATE exit_invoices SET
        lines = $2, deductions_total = $3, deposit_amount = $4, deposit_paid = $5,
-       deposit_refund = $6, outstanding_balance = $7, final_settlement = $8,
-       move_out_date = COALESCE($9, move_out_date), reason = COALESCE($10, reason),
-       rent_treatment = $11, rent_charged_amount = $12, pro_rated_days = $13,
-       rent_treatment_reason = COALESCE($14, rent_treatment_reason),
-       deposit_treatment = $15, deposit_applied_to_rent = $16, deposit_applied_to_deductions = $17,
-       settlement_decision_reason = COALESCE($18, settlement_decision_reason),
+       water_charges = $6, deposit_refund = $7, outstanding_balance = $8, final_settlement = $9,
+       move_out_date = COALESCE($10, move_out_date), reason = COALESCE($11, reason),
+       rent_treatment = $12, rent_charged_amount = $13, pro_rated_days = $14,
+       rent_treatment_reason = COALESCE($15, rent_treatment_reason),
+       deposit_treatment = $16, deposit_applied_to_rent = $17, deposit_applied_to_deductions = $18,
+       settlement_decision_reason = COALESCE($19, settlement_decision_reason),
        updated_at = NOW()
      WHERE id = $1`,
     [
       id, JSON.stringify(lines), Number(deductionsTotal.toFixed(2)),
-      depositAmount, depositPaid,
+      depositAmount, depositPaid, waterCharges,
       Number(settlement.depositRefund.toFixed(2)),
       Number(settlement.outstanding.toFixed(2)),
       Number(settlement.finalSettlement.toFixed(2)),
       patch.move_out_date || null, patch.reason != null ? patch.reason : null,
       rentTreatment, settlement.rentCharged, proRatedDays,
       patch.rent_treatment_reason || null,
-      depositTreatment, settlement.depositAppliedToRent, settlement.depositAppliedToDeductions,
+      patch.deposit_treatment || existing.deposit_treatment || 'refund',
+      0, 0,
       patch.settlement_decision_reason || null,
     ]
   );
@@ -4530,7 +6247,7 @@ async function updateExitInvoice(id, patch = {}) {
         updated.tenant_code, updated.id, updated.archive_id || null,
         Number(updated.deposit_amount || 0), Number(updated.deposit_paid || 0),
         Number(updated.deductions_total || 0),
-        Number(updated.deposit_applied_to_rent || 0), Number(updated.deposit_applied_to_deductions || 0),
+        0, 0,
         refundable, refundable, exitDate, refundDueDate, refundStatus,
       ]
     );
@@ -4680,10 +6397,11 @@ async function archiveTenancy(tenantCode, options = {}) {
   const res = await query(
     `INSERT INTO tenancy_archive
       (tenant_code, property_name, house_paybill_number, unit_label, tenant_name, phone_number, national_id,
+       guardian_name, guardian_id, guardian_phone, guardian_relationship,
        move_in_date, move_out_date, rent_amount, deposit_amount, deposit_paid, deposit_refund,
        opening_balance, final_balance, exit_reason, exit_invoice_number,
        payments, penalties, documents, message_logs, statements, inspections, exit_invoice, financial_snapshot, archived_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
      RETURNING id`,
     [
       tenant.tenant_code,
@@ -4693,6 +6411,10 @@ async function archiveTenancy(tenantCode, options = {}) {
       tenant.name,
       tenant.phone_number || null,
       tenant.national_id || null,
+      tenant.guardian_name || null,
+      tenant.guardian_id || null,
+      tenant.guardian_phone || null,
+      tenant.guardian_relationship || null,
       tenant.move_in_date || null,
       moveOutDate,
       Number(tenant.rent_amount || 0),
@@ -4720,6 +6442,7 @@ async function archiveTenancy(tenantCode, options = {}) {
 async function getTenancyArchive(id) {
   const res = await query(
     `SELECT id, tenant_code, property_name, house_paybill_number, unit_label, tenant_name, phone_number, national_id,
+       guardian_name, guardian_id, guardian_phone, guardian_relationship,
        move_in_date::text AS move_in_date, move_out_date::text AS move_out_date, rent_amount,
        deposit_amount, deposit_paid, deposit_refund, opening_balance, final_balance, exit_reason,
        exit_invoice_number, payments, penalties, documents, message_logs, statements, inspections,
@@ -4871,6 +6594,13 @@ async function vacateTenancy(tenantCode, options = {}) {
   const r = res.rows[0];
   if (!r) return null;
 
+  // Vacancy reset: auto-close live payment arrangements for this unit.
+  // Arrangement history stays under the old tenant_code for audit; a new
+  // tenant (new code) always starts with none.
+  try { await closeArrangementsForVacancy(tenantCode, options.archived_by || 'system'); } catch (err) {
+    console.error(`[Arrangements] Vacancy auto-close failed for ${tenantCode}:`, err.message);
+  }
+
   await logAudit({
     actor: options.archived_by || 'system',
     action: 'tenancy_archived',
@@ -4891,6 +6621,10 @@ async function resetTenancyFinancials(tenantCode) {
   // financial profile (including correct first-payment detection).
   await query('DELETE FROM payments WHERE tenant_code = $1', [tenantCode]);
   await query('DELETE FROM penalties WHERE tenant_code = $1', [tenantCode]);
+  // New tenancy owns this code from here on: void the previous tenancy's
+  // open register rows so they can never surface as the new tenant's
+  // invoices (payment processing, suggestions, history). Rows stay for audit.
+  try { await voidTenantInvoices(tenantCode, 'system', 'New tenancy started'); } catch (_) {}
   await query(
     `UPDATE tenants SET
        arrears = 0, deposit_amount = 0, deposit_paid = 0,
@@ -5315,13 +7049,13 @@ async function getStaffAdvance(id) {
 
 async function createStaffAdvance(data) {
   const outstanding = Number(data.amount || 0) - Number(data.amount_recovered || 0);
-  const res = await query(`INSERT INTO staff_advances (employee_name, date_advanced, amount, reason, property_name, unit_code, recovery_method, expected_recovery_month, amount_recovered, outstanding, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [data.employee_name, data.date_advanced || new Date().toISOString().slice(0, 10), data.amount || 0, data.reason || null, data.property_name || null, data.unit_code || null, data.recovery_method || 'salary_deduction', data.expected_recovery_month || null, data.amount_recovered || 0, outstanding, data.notes || null]);
+  const res = await query(`INSERT INTO staff_advances (employee_name, person_type, date_advanced, amount, reason, property_name, unit_code, recovery_method, expected_recovery_month, amount_recovered, outstanding, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`, [data.employee_name, data.person_type || 'Employee', data.date_advanced || new Date().toISOString().slice(0, 10), data.amount || 0, data.reason || null, data.property_name || null, data.unit_code || null, data.recovery_method || 'salary_deduction', data.expected_recovery_month || null, data.amount_recovered || 0, outstanding, data.notes || null]);
   return res.rows[0];
 }
 
 async function updateStaffAdvance(id, patch) {
   const fields = []; const vals = []; let idx = 1;
-  for (const k of ['employee_name', 'date_advanced', 'amount', 'reason', 'property_name', 'unit_code', 'recovery_method', 'expected_recovery_month', 'notes', 'status']) {
+  for (const k of ['employee_name', 'person_type', 'date_advanced', 'amount', 'reason', 'property_name', 'unit_code', 'recovery_method', 'expected_recovery_month', 'notes', 'status']) {
     if (patch[k] !== undefined) { fields.push(`${k} = $${idx++}`); vals.push(patch[k]); }
   }
   if (fields.length === 0) return getStaffAdvance(id);
@@ -5523,6 +7257,10 @@ async function generateWaterInvoiceNumber() {
 }
 
 async function createWaterInvoice(data) {
+  if (data.client_txn_id) {
+    const existing = await findRecordByClientTxnId('water_invoices', data.client_txn_id);
+    if (existing) return { ...existing, _idempotentReplay: true };
+  }
   const wtrNumber = await generateWaterInvoiceNumber();
   const unitsUsed = Number(data.current_reading || 0) - Number(data.previous_reading || 0);
   if (unitsUsed < 0) throw new Error('Current reading must be >= previous reading');
@@ -5543,8 +7281,9 @@ async function createWaterInvoice(data) {
         unit_label, billing_month, payment_month, previous_reading, current_reading,
         units_used, rate_per_unit, total_amount, due_date, status, payment_terms, notes,
         rent_amount, garbage_fee, rent_arrears, water_arrears, garbage_arrears, other_arrears,
-        total_previous_outstanding, total_amount_payable)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+        total_previous_outstanding, total_amount_payable, client_txn_id,
+        anomaly_flag, anomaly_detail)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
      RETURNING *`,
     [
       wtrNumber, data.tenant_code, data.tenant_name || '', data.property_name || '',
@@ -5555,13 +7294,15 @@ async function createWaterInvoice(data) {
       data.due_date || null, data.status || 'Draft', data.payment_terms || null, data.notes || null,
       rentAmount, garbageFee, rentArrears, waterArrears, garbageArrears, otherArrears,
       totalPreviousOutstanding, totalAmountPayable,
+      data.client_txn_id || null,
+      data.anomaly_flag || null, data.anomaly_detail || null,
     ]
   );
   return res.rows[0];
 }
 
 async function getWaterInvoice(id) {
-  const res = await query(`SELECT * FROM water_invoices WHERE id = $1`, [id]);
+  const res = await query(`SELECT *, due_date::text AS due_date FROM water_invoices WHERE id = $1`, [id]);
   return res.rows[0] || null;
 }
 
@@ -5580,7 +7321,7 @@ async function listWaterInvoices(filters = {}) {
   }
   const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
   const res = await query(
-    `SELECT * FROM water_invoices${whereClause} ORDER BY created_at DESC`,
+    `SELECT *, due_date::text AS due_date FROM water_invoices${whereClause} ORDER BY created_at DESC`,
     params
   );
   return res.rows;
@@ -5646,6 +7387,120 @@ async function voidWaterInvoice(id, reason) {
   return res.rows[0] || null;
 }
 
+// ─── Agent commissions (per house, per month) ───────────────────────────────
+// commission = rate% × (collected − deposit − garbage − water)
+// landlord payout = collected − commission
+// Component splits come from the allocation persisted at approval time
+// (payments.allocation_breakdown). Payments approved before that column
+// existed fall back to treating the full amount as commissionable rent.
+
+async function getCommissionRates() {
+  const res = await query(`SELECT house_paybill_number, rate_percent FROM commission_rates`);
+  const out = {};
+  for (const r of res.rows) out[r.house_paybill_number] = Number(r.rate_percent || 0);
+  return out;
+}
+
+async function setCommissionRate(housePaybill, ratePercent, updatedBy) {
+  const rate = Math.max(0, Math.min(100, Number(ratePercent || 0)));
+  await query(
+    `INSERT INTO commission_rates (house_paybill_number, rate_percent, updated_by, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (house_paybill_number) DO UPDATE SET rate_percent = $2, updated_by = $3, updated_at = NOW()`,
+    [housePaybill, rate, updatedBy || null]
+  );
+  return { house_paybill_number: housePaybill, rate_percent: rate };
+}
+
+async function getCommissionReport(month, housePaybill = null) {
+  if (!/^\d{4}-\d{2}$/.test(String(month || ''))) {
+    throw new Error('month must be YYYY-MM');
+  }
+  const houses = await listHouses({});
+  const rates = await getCommissionRates();
+  const params = [month];
+  let houseFilter = '';
+  if (housePaybill) {
+    houseFilter = ' AND t.house_paybill_number = $2';
+    params.push(housePaybill);
+  }
+  const res = await query(
+    `SELECT p.id, p.amount, p.payment_type, p.allocation_breakdown,
+            t.house_paybill_number, t.property_name
+     FROM payments p
+     JOIN tenants t ON t.tenant_code = p.tenant_code
+     WHERE p.status = 'Approved' AND p.billing_period = $1${houseFilter}
+     ORDER BY p.approved_at`,
+    params
+  );
+  const byHouse = {};
+  const ensure = (hp, name) => {
+    if (!byHouse[hp]) {
+      byHouse[hp] = {
+        house_paybill_number: hp,
+        property_name: name || '',
+        collected: 0, deposit: 0, garbage: 0, water: 0,
+        payment_count: 0,
+      };
+    }
+    return byHouse[hp];
+  };
+  for (const h of houses) {
+    if (housePaybill && h.paybill_number !== housePaybill) continue;
+    ensure(h.paybill_number, h.house_name);
+  }
+  for (const p of res.rows) {
+    const hp = p.house_paybill_number || 'UNASSIGNED';
+    const row = ensure(hp, p.property_name);
+    const amount = Number(p.amount || 0);
+    row.collected += amount;
+    row.payment_count += 1;
+    let alloc = null;
+    try { alloc = typeof p.allocation_breakdown === 'string' ? JSON.parse(p.allocation_breakdown) : p.allocation_breakdown; } catch (_) { alloc = null; }
+    if (p.payment_type === 'deposit') {
+      row.deposit += amount;
+    } else if (alloc) {
+      row.deposit += Number(alloc.depositSettled || 0);
+      row.garbage += Number(alloc.garbageFeeSettled || 0);
+      row.water += Number(alloc.waterSettled || 0);
+    }
+    // No stored allocation (pre-column approvals): full amount counts as rent.
+  }
+  const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+  const rows = Object.values(byHouse).map((r) => {
+    const commissionable = Math.max(0, r.collected - r.deposit - r.garbage - r.water);
+    const rate = Number(rates[r.house_paybill_number] || 0);
+    const commission = round2((commissionable * rate) / 100);
+    return {
+      house_paybill_number: r.house_paybill_number,
+      property_name: r.property_name,
+      payment_count: r.payment_count,
+      collected: round2(r.collected),
+      deposit: round2(r.deposit),
+      garbage: round2(r.garbage),
+      water: round2(r.water),
+      commissionable: round2(commissionable),
+      rate_percent: rate,
+      commission,
+      landlord_payout: round2(r.collected - commission),
+    };
+  }).sort((a, b) => String(a.property_name).localeCompare(String(b.property_name)));
+  const totals = rows.reduce((s, r) => ({
+    collected: s.collected + r.collected,
+    deposit: s.deposit + r.deposit,
+    garbage: s.garbage + r.garbage,
+    water: s.water + r.water,
+    commissionable: s.commissionable + r.commissionable,
+    commission: s.commission + r.commission,
+    landlord_payout: s.landlord_payout + r.landlord_payout,
+    payment_count: s.payment_count + r.payment_count,
+  }), { collected: 0, deposit: 0, garbage: 0, water: 0, commissionable: 0, commission: 0, landlord_payout: 0, payment_count: 0 });
+  for (const k of Object.keys(totals)) {
+    if (k !== 'payment_count') totals[k] = round2(totals[k]);
+  }
+  return { month, rows, totals };
+}
+
 async function deleteWaterInvoice(id) {
   await query(`DELETE FROM water_invoices WHERE id = $1 AND status NOT IN ('Paid','Void')`, [id]);
 }
@@ -5681,6 +7536,113 @@ async function getLatestWaterReading(tenantCode) {
     [tenantCode]
   );
   return res.rows[0] ? Number(res.rows[0].current_reading) : 0;
+}
+
+/** Recent per-bill consumption figures (most recent first) for anomaly checks. */
+async function getRecentWaterUnits(tenantCode, n = 6) {
+  const res = await query(
+    `SELECT (current_reading - previous_reading) AS units FROM water_invoices
+     WHERE tenant_code = $1 ORDER BY created_at DESC LIMIT $2`,
+    [tenantCode, Number(n) || 6]
+  );
+  return res.rows.map((r) => Number(r.units)).filter((u) => Number.isFinite(u) && u >= 0);
+}
+
+// ─── Water Bill Report (read-only reporting over recorded invoices) ─────────
+// One row per unit of the property for the billing month. Vacant units are
+// NEVER excluded: without a fresh invoice they carry forward their last
+// known reading (previous = current, consumption 0); caretaker/construction
+// use recorded in an invoice still computes normally from its readings.
+async function buildWaterBillReport({ house_paybill, billing_month, unit = null }) {
+  if (!house_paybill) throw new Error('house_paybill required');
+  if (!/^\d{4}-\d{2}$/.test(String(billing_month || ''))) throw new Error('billing_month must be YYYY-MM');
+  const house = await getHouse(house_paybill);
+  if (!house) throw new Error('Property not found');
+  const houseRate = Number(house.water_rate_per_unit || 0);
+
+  const tenantRes = await query(
+    `SELECT tenant_code, name, unit_label, status FROM tenants WHERE house_paybill_number = $1`,
+    [house_paybill]
+  );
+  const invRes = await query(
+    `SELECT * FROM water_invoices WHERE house_paybill_number = $1 AND billing_month <= $2 ORDER BY billing_month DESC, created_at DESC`,
+    [house_paybill, billing_month]
+  );
+  const monthInvoices = invRes.rows.filter((r) => r.billing_month === billing_month);
+  const keyOf = (r) => String(r.unit_label || r.tenant_code || '').toUpperCase();
+  const latestByUnit = {};
+  for (const r of invRes.rows) {
+    const key = keyOf(r);
+    if (key && !latestByUnit[key]) latestByUnit[key] = r;
+  }
+  const tenantByUnit = {};
+  for (const t of tenantRes.rows) {
+    const key = String(t.unit_label || t.tenant_code || '').toUpperCase();
+    if (key) tenantByUnit[key] = t;
+  }
+  const unitKeys = [...new Set([
+    ...Object.keys(tenantByUnit),
+    ...Object.keys(latestByUnit),
+  ])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const wanted = unit ? String(unit).toUpperCase() : null;
+
+  const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+  const rows = [];
+  for (const key of unitKeys) {
+    if (wanted && key !== wanted) continue;
+    const tenant = tenantByUnit[key] || null;
+    const occupied = !!tenant && String(tenant.status || '') !== 'Vacant';
+    const inv = monthInvoices.find((r) =>
+      String(r.unit_label || '').toUpperCase() === key ||
+      String(r.tenant_code || '').toUpperCase() === key
+    ) || null;
+    let previous, current, rate, usageNote;
+    if (inv) {
+      previous = Number(inv.previous_reading || 0);
+      current = Number(inv.current_reading || 0);
+      rate = Number(inv.rate_per_unit || 0) || houseRate;
+      usageNote = !occupied && inv.notes ? String(inv.notes) : null;
+    } else {
+      const last = latestByUnit[key];
+      const baseline = last ? Number(last.current_reading || 0) : 0;
+      previous = baseline;
+      current = baseline;
+      rate = (last && Number(last.rate_per_unit || 0)) || houseRate;
+      usageNote = null;
+    }
+    const consumption = round2(Math.max(0, current - previous));
+    rows.push({
+      unit: tenant?.unit_label || inv?.unit_label || key,
+      tenant_name: occupied ? (tenant.name || '') : '',
+      occupancy: occupied ? 'Occupied' : 'Vacant',
+      previous_reading: round2(previous),
+      current_reading: round2(current),
+      consumption,
+      rate_per_unit: round2(rate),
+      water_charge: round2(consumption * rate),
+      usage_note: usageNote,
+      has_invoice: !!inv,
+    });
+  }
+  const totals = rows.reduce((s, r) => ({
+    total_units: s.total_units + 1,
+    occupied_units: s.occupied_units + (r.occupancy === 'Occupied' ? 1 : 0),
+    vacant_units: s.vacant_units + (r.occupancy === 'Vacant' ? 1 : 0),
+    total_consumption: round2(s.total_consumption + r.consumption),
+    total_water_charges: round2(s.total_water_charges + r.water_charge),
+  }), { total_units: 0, occupied_units: 0, vacant_units: 0, total_consumption: 0, total_water_charges: 0 });
+  const [yr, mo] = billing_month.split('-').map(Number);
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return {
+    property_name: house.house_name || '',
+    house_paybill_number: house_paybill,
+    billing_month,
+    billing_month_label: `${monthNames[mo - 1]} ${yr}`,
+    water_rate: houseRate,
+    generated_at: new Date().toISOString(),
+    rows,
+    totals,
+  };
 }
 
 async function findTenantByPropertyAndUnit(housePaybill, unitLabel) {
@@ -5730,8 +7692,20 @@ module.exports = {
   listPayments,
   findPaymentByReference,
   findPaymentById,
+  findPaymentByClientTxnId,
+  findRecordByClientTxnId,
+  findMessageByClientTxnId,
+  createInspection,
+  listInspections,
+  createMediaAttachment,
+  listMediaAttachments,
+  recordSyncConflict,
+  listSyncConflicts,
+  resolveSyncConflict,
+  getConflictResolutions,
   createPayment,
   approvePayment,
+  recalculateAll,
   syncHistoricalPayments,
   reconcileTenant,
   reconcileAllTenants,
@@ -5742,6 +7716,7 @@ module.exports = {
   getPropertyCollectionReport,
   deletePayment,
   getDashboardMetrics,
+  getDashboardDrilldown,
   logMessage,
   updateMessageDelivery,
   tenantsDueInDays,
@@ -5756,6 +7731,7 @@ module.exports = {
   getDepositsAndNewTenants,
   getTenantExitSummary,
   rolloverMonth,
+  rolloverBody,
   getLastRolloverMonth,
   getLastRolloverAt,
   getLastReminderMonth,
@@ -5768,6 +7744,13 @@ module.exports = {
   getOutstandingPenalties,
   listPendingPenalties,
   payPenaltiesFromPayment,
+  createArrangement,
+  getArrangement,
+  getArrangementHistory,
+  describeArrangement,
+  listArrangements,
+  transitionArrangement,
+  closeArrangementsForVacancy,
   allocateAdvanceRent,
   allocateCreditBalance,
   applyCreditBalance,
@@ -5781,15 +7764,25 @@ module.exports = {
   listAuditLog,
   addMonths,
   generateReceiptNumber,
+  generateLetterNumber,
   generateInvoiceNumber,
   generateStatementNumber,
   generateMaintenanceInvoiceNumber,
   generateWorkOrderNumber,
   createDocument,
+  updateLetterDraft,
+  finalizeLetterDocument,
+  markLetterDelivery,
   getDocument,
+  findReceiptDocument,
+  updateReceiptDocument,
   listDocuments,
   deleteDocument,
   createInvoiceRegister,
+  voidTenantInvoices,
+  updateInvoiceRegister,
+  deleteInvoiceRegister,
+  reuseInvoiceDocument,
   getInvoiceRegister,
   getInvoiceRegisterByDocument,
   getInvoiceRegisterByNumber,
@@ -5902,6 +7895,18 @@ module.exports = {
   updateWaterRate,
   getWaterRateHistory,
   getLatestWaterReading,
+  getRecentWaterUnits,
+  buildWaterBillReport,
   findTenantByPropertyAndUnit,
   getTenantInvoiceData,
+  getCommissionRates,
+  setCommissionRate,
+  getCommissionReport,
+  getPeriodCollections,
+  getOtherPropertyExpenses,
+  getTenantChargeSummary,
+  buildLandlordPack,
+  listOutstandingRegisterInvoices,
+  applyPaymentToInvoices,
+  reverseInvoiceLinks,
 };

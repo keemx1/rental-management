@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+    body {
+      font-family: 'Roboto', sans-serif;
+      margin: 0;
+      padding: 22px;
+      color: #333;
+      background: white;
+      font-size: 11px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .header img {
+      width: 90px;
+      max-width: 90px;
+      object-fit: contain;
+    }
+    .header-content {
+      flex: 1;
+      text-align: center;
+      padding-left: 16px;
+    }
+    .company-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a4b8c;
+      margin: 0 0 3px 0;
+    }
+    .company-slogan {
+      font-size: 9px;
+      font-style: italic;
+      color: #666;
+      margin: 0 0 3px 0;
+    }
+    .company-details {
+      font-size: 9px;
+      color: #555;
+    }
+    .separator-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 10px 0;
+      position: relative;
+    }
+    .separator-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .inv-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .inv-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1a4b8c;
+    }
+    .meta-grid {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .detail-box {
+      flex: 1;
+      border: 1px solid #d7dee8;
+      border-radius: 6px;
+      padding: 6px 8px;
+    }
+    .detail-box .label {
+      font-size: 8px;
+      font-weight: 700;
+      color: #1a4b8c;
+      letter-spacing: 0.5px;
+    }
+    .detail-box .value {
+      font-size: 12px;
+      font-weight: 700;
+      color: #111;
+    }
+    table.report {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 10px;
+    }
+    table.report th {
+      background: #1a4b8c;
+      color: #fff;
+      padding: 6px 5px;
+      text-align: left;
+      font-size: 9px;
+      letter-spacing: 0.3px;
+    }
+    table.report th.num, table.report td.num {
+      text-align: right;
+    }
+    table.report td {
+      padding: 5px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    table.report tr.vacant td {
+      background: #f8fafc;
+      color: #64748b;
+    }
+    .usage-note {
+      font-size: 8px;
+      font-style: italic;
+      color: #b45309;
+    }
+    .totals-area {
+      margin-top: 12px;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .totals-table {
+      border-collapse: collapse;
+      font-size: 11px;
+      min-width: 280px;
+    }
+    .totals-table td {
+      padding: 4px 8px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .totals-table tr td:first-child {
+      font-weight: 700;
+      color: #1a4b8c;
+    }
+    .totals-table tr td:last-child {
+      text-align: right;
+      font-weight: 700;
+    }
+    .totals-table tr.grand td {
+      font-size: 13px;
+      font-weight: 700;
+      background: #ffffff;
+      color: #cc0000;
+      border-top: 2px solid #cc0000;
+    }
+    .totals-table tr.grand td span {
+      color: #cc0000 !important;
+    }
+    .footer-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 14px 0 6px 0;
+      position: relative;
+    }
+    .footer-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .footer-text {
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: #1a4b8c;
+    }
+    .footer-slogan {
+      text-align: center;
+      font-size: 8px;
+      font-style: italic;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="{{logo_base64}}" alt="Logo">
+    <div class="header-content">
+      <h1 class="company-title">GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</h1>
+      <p class="company-slogan">Find a Home. Leave the Management to Us</p>
+      <p class="company-details">Dealers in: Rent management, property and General Consultancy<br>Located in Ruiru, Juja | Tel: +254 702 705 821 | Email: gutenbergelite@gmail.com</p>
+    </div>
+  </div>
+
+  <div class="separator-bar"></div>
+
+  <div class="inv-header">
+    <div class="inv-title">WATER BILL REPORT</div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="detail-box">
+      <div class="label">PROPERTY</div>
+      <div class="value">{{property_name}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">BILLING MONTH</div>
+      <div class="value">{{billing_month_label}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">WATER RATE</div>
+      <div class="value">{{water_rate_label}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">GENERATED DATE</div>
+      <div class="value">{{generated_date}}</div>
+    </div>
+  </div>
+
+  <table class="report">
+    <thead>
+      <tr>
+        <th>Unit</th>
+        <th>Tenant</th>
+        <th>Status</th>
+        <th class="num">Previous</th>
+        <th class="num">Current</th>
+        <th class="num">Consumption</th>
+        <th class="num">Rate</th>
+        <th class="num">Amount (KES)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{rows_html}}
+    </tbody>
+  </table>
+
+  <div class="totals-area">
+    <table class="totals-table">
+      <tr><td>TOTAL UNITS</td><td>{{total_units}}</td></tr>
+      <tr><td>OCCUPIED UNITS</td><td>{{occupied_units}}</td></tr>
+      <tr><td>VACANT UNITS</td><td>{{vacant_units}}</td></tr>
+      <tr><td>TOTAL CONSUMPTION</td><td>{{total_consumption}} units</td></tr>
+      <tr class="grand"><td>TOTAL WATER CHARGES</td><td>KES {{total_water_charges}}</td></tr>
+    </table>
+  </div>
+
+  <div style="margin:6px 0;line-height:1.5;">
+    <div>For: GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</div>
+    <div>{{GEHM_STAMP_LINE}}</div>
+    <div>Date: {{generated_date}}</div>
+  </div>
+
+  <div class="footer-bar"></div>
+  <div class="footer-text">Gutenberg Elite Home & Property Managements</div>
+  <div class="footer-slogan">Find a Home. Leave the Management to Us</div>
+
+</body>
+</html>

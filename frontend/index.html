@@ -9,7 +9,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/css/rental-theme.css?v=3" />
+  <link rel="stylesheet" href="/css/rental-theme.css?v=5" />
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#6366f1" />
   <meta name="description" content="Rental Messaging & Property Management System" />
@@ -18,9 +18,21 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Gutenberg Elite" />
+  <style>
+    /* Boot splash: covers the app until the session check decides
+       login vs dashboard — no more login-page flash on refresh. */
+    #boot-splash {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      background: #0f172a; color: #94a3b8;
+      font-family: monospace; font-size: 14px;
+    }
+    body.boot-done #boot-splash { display: none; }
+  </style>
 </head>
 
 <body class="h-full">
+  <div id="boot-splash">Loading GEHPM…</div>
   <div class="quantum-bg" aria-hidden="true">
     <div class="quantum-grid"></div>
     <div class="quantum-scanline"></div>
@@ -97,6 +109,10 @@
             <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             <span class="sidebar-label">Deposit Refunds</span>
           </a>
+          <a href="#" data-nav="commissions" class="sidebar-link" title="Commissions">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9 9h6v6H9z"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+            <span class="sidebar-label">Commissions</span>
+          </a>
 
           <!-- COMMUNICATIONS -->
           <div class="sidebar-section-label">Communications</div>
@@ -107,6 +123,10 @@
           <a href="#" data-nav="whatsapp" class="sidebar-link" title="WhatsApp">
             <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
             <span class="sidebar-label">WhatsApp</span>
+          </a>
+          <a href="#" data-nav="sms" class="sidebar-link" title="SMS">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/></svg>
+            <span class="sidebar-label">SMS</span>
           </a>
 
           <!-- OPERATIONS -->
@@ -140,6 +160,14 @@
             <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
             <span class="sidebar-label">Users</span>
           </a>
+          <a href="#" data-nav="settings" class="sidebar-link hidden" id="nav-settings-link" title="Settings">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.09a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span class="sidebar-label">Settings</span>
+          </a>
+          <a href="#" data-nav="sync-conflicts" class="sidebar-link hidden" id="nav-conflicts-link" title="Sync Conflicts">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span class="sidebar-label">Sync Conflicts</span>
+          </a>
           <a href="#" data-nav="archive" class="sidebar-link" title="Archive">
             <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
             <span class="sidebar-label">Archive</span>
@@ -161,6 +189,8 @@
               <button type="button" id="logout-btn" class="sidebar-signout">Sign Out</button>
             </div>
           </div>
+          <div class="text-[10px] font-mono text-slate-500 mt-2" id="gehm-version" style="cursor:pointer" title="Open diagnostics">app v60</div>
+          <button type="button" id="btn-install-app" class="hidden mt-2 text-[11px] font-semibold text-indigo-300 hover:text-indigo-100">📲 Install App</button>
         </div>
       </div>
     </aside>
@@ -217,6 +247,7 @@
         <a href="#" data-nav="payments" class="nav-link block py-3 px-4 rounded">Payments</a>
         <a href="#" data-nav="broadcasts" class="nav-link block py-3 px-4 rounded">Broadcasts</a>
         <a href="#" data-nav="whatsapp" class="nav-link block py-3 px-4 rounded">WhatsApp</a>
+        <a href="#" data-nav="sms" class="nav-link block py-3 px-4 rounded">SMS</a>
         <a href="#" data-nav="invoices" class="nav-link block py-3 px-4 rounded">Invoices</a>
         <a href="#" data-nav="work-orders" class="nav-link block py-3 px-4 rounded">Work Orders</a>
         <a href="#" data-nav="reports" class="nav-link block py-3 px-4 rounded">Reports</a>
@@ -225,9 +256,11 @@
         <a href="#" data-nav="monthly-reports" class="nav-link block py-3 px-4 rounded">Monthly Reports</a>
         <a href="#" data-nav="mgmt-expenses-report" class="nav-link block py-3 px-4 rounded">Mgmt Expenses</a>
         <a href="#" data-nav="deposit-refunds" class="nav-link block py-3 px-4 rounded">Deposit Refunds</a>
+        <a href="#" data-nav="commissions" class="nav-link block py-3 px-4 rounded">Commissions</a>
         <a href="#" data-nav="archive" class="nav-link block py-3 px-4 rounded">Archive</a>
         <a href="#" data-nav="pending-overpayments" class="nav-link block py-3 px-4 rounded">Pending Overpayments</a>
         <a href="#" data-nav="users" class="nav-link hidden block py-3 px-4 rounded">Users</a>
+        <a href="#" data-nav="settings" class="nav-link hidden block py-3 px-4 rounded">Settings</a>
       </nav>
 
       <div class="mt-auto border-t border-slate-200 pt-6">
@@ -274,41 +307,67 @@
         </header>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          <div class="metric-card glass-panel p-4">
+          <div class="metric-card glass-panel p-4" data-drill="tenants" role="button" tabindex="0" aria-label="View all tenants">
             <span class="sys-tag">[TENANTS]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">TOTAL</p>
             <p id="metric-total" class="metric-value text-3xl mt-1 font-orbitron">—</p>
           </div>
-          <div class="metric-card glass-panel p-4">
+          <div class="metric-card glass-panel p-4" data-drill="vacant" role="button" tabindex="0" aria-label="View vacant units">
             <span class="sys-tag">[VACANT]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">VACANT UNITS</p>
             <p id="metric-vacant" class="metric-value text-3xl mt-1 font-orbitron">—</p>
           </div>
-          <div class="metric-card metric-warn glass-panel p-4">
+          <div class="metric-card metric-warn glass-panel p-4" data-drill="overdue" role="button" tabindex="0" aria-label="View overdue units">
             <span class="sys-tag">[OVERDUE]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">OVERDUE</p>
             <p id="metric-overdue" class="metric-value text-3xl mt-1 font-orbitron">—</p>
           </div>
-          <div class="metric-card metric-green glass-panel p-4">
+          <div class="metric-card metric-green glass-panel p-4" data-drill="revenue" role="button" tabindex="0" aria-label="View collected rent payments">
             <span class="sys-tag">[REVENUE]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">COLLECTED MTD</p>
             <p id="metric-revenue" class="metric-value text-xl mt-1 font-orbitron">—</p>
           </div>
-          <div class="metric-card metric-warn glass-panel p-4">
+          <div class="metric-card metric-warn glass-panel p-4" data-drill="due7" role="button" tabindex="0" aria-label="View rent due in seven days">
             <span class="sys-tag">[DUE_7D]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">DUE IN 7 DAYS</p>
             <p id="metric-due7" class="metric-value text-3xl mt-1 font-orbitron">—</p>
           </div>
-          <div class="metric-card metric-warn glass-panel p-4">
+          <div class="metric-card metric-warn glass-panel p-4" data-drill="pending" role="button" tabindex="0" aria-label="View pending payments">
             <span class="sys-tag">[PENDING]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">PENDING PAYMENTS</p>
             <p id="metric-pending" class="metric-value text-3xl mt-1 font-orbitron">—</p>
           </div>
-          <div class="metric-card glass-panel p-4">
+          <div class="metric-card glass-panel p-4" data-drill="arrears" role="button" tabindex="0" aria-label="View arrears and outstanding balances">
             <span class="sys-tag">[ARREARS]</span>
             <p class="text-xs text-slate-500 font-mono mt-1">TOTAL ARREARS</p>
             <p id="metric-arrears" class="metric-value text-xl mt-1 font-orbitron text-rose-400">KES 0</p>
           </div>
+        </div>
+
+        <!-- COLLECTION PROGRESS — expected / collected / outstanding / % for the billing period -->
+        <div id="collection-progress-panel" class="glass-panel p-5" data-drill="progress" role="button" tabindex="0" aria-label="View collection progress breakdown">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div>
+              <span class="sys-tag">[COLLECTION]</span>
+              <p class="text-xs text-slate-500 font-mono mt-1">COLLECTION PROGRESS · <span id="cp-period">—</span></p>
+            </div>
+            <p id="cp-pct" class="text-2xl font-orbitron font-bold text-green-600">—</p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
+            <div>
+              <p class="text-xs text-slate-500 font-mono">AMOUNT EXPECTED</p>
+              <p id="cp-expected" class="text-lg text-slate-800 font-orbitron font-semibold">KES 0</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500 font-mono">AMOUNT COLLECTED</p>
+              <p id="cp-collected" class="text-lg text-green-600 font-orbitron font-semibold">KES 0</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500 font-mono">OUTSTANDING BALANCE</p>
+              <p id="cp-outstanding" class="text-lg text-rose-500 font-orbitron font-semibold">KES 0</p>
+            </div>
+          </div>
+          <div class="progress-track"><div id="cp-bar" class="progress-fill"></div></div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -350,7 +409,7 @@
             <div id="wa-connected-since" class="text-slate-400 text-xs mt-1"></div>
           </div>
 
-          <div id="wa-stats-row" class="hidden grid grid-cols-4 gap-3 mb-4">
+          <div id="wa-stats-row" class="hidden grid grid-cols-5 gap-3 mb-4">
             <div class="text-center p-2 rounded bg-slate-50 border border-slate-200">
               <div class="text-xl font-bold text-slate-800" id="wa-stat-today">0</div>
               <div class="text-xs text-slate-500">Today</div>
@@ -358,6 +417,10 @@
             <div class="text-center p-2 rounded bg-slate-50 border border-slate-200">
               <div class="text-xl font-bold text-green-600" id="wa-stat-sent">0</div>
               <div class="text-xs text-slate-500">Sent</div>
+            </div>
+            <div class="text-center p-2 rounded bg-slate-50 border border-slate-200">
+              <div class="text-xl font-bold text-blue-600" id="wa-stat-delivered">0</div>
+              <div class="text-xs text-slate-500">Delivered</div>
             </div>
             <div class="text-center p-2 rounded bg-slate-50 border border-slate-200">
               <div class="text-xl font-bold text-red-500" id="wa-stat-failed">0</div>
@@ -445,7 +508,7 @@
                 <th class="pb-2 pr-3">Phone</th>
                 <th class="pb-2 pr-3">Type</th>
                 <th class="pb-2 pr-3">Status</th>
-                <th class="pb-2 pr-3">Direction</th>
+                <th class="pb-2 pr-3">Message</th>
                 <th class="pb-2">Created</th>
               </tr></thead>
               <tbody id="wa-messages-tbody" class="divide-y divide-slate-100">
@@ -477,6 +540,88 @@
               <input type="text" id="wa-test-msg" placeholder="Hello from rental management!" class="qc-input mt-1">
             </div>
             <button type="button" class="qc-btn qc-btn-primary" onclick="waSendTestMsg()">Send</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- SMS GATEWAY (Bytewave Networks) -->
+      <section data-view="sms" class="hidden space-y-6">
+        <header class="section-head">
+          <p class="section-num">COMMUNICATIONS</p>
+          <h2 class="section-title text-2xl">SMS Module</h2>
+          <p class="section-desc">Bulk SMS via Bytewave Networks (Ultimate SMS gateway)</p>
+        </header>
+
+        <!-- Status + Config Panel -->
+        <div class="glass-panel p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-slate-800">SMS Gateway Status</h3>
+            <div class="flex items-center gap-4">
+              <div id="sms-status-badge" class="flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-sm">
+                <span id="sms-status-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+                <span id="sms-status-text" class="text-slate-700">Checking…</span>
+              </div>
+              <div id="sms-balance-display" class="flex items-center gap-4 text-sm">—</div>
+            </div>
+          </div>
+
+          <div id="sms-provider-info" class="hidden mb-4 p-3 rounded bg-slate-50 border border-slate-200 text-sm font-mono text-slate-700">
+            <div id="sms-provider-name"></div>
+            <div id="sms-api-base" class="text-slate-500"></div>
+            <div id="sms-sender-display" class="text-slate-400 text-xs mt-1"></div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+            <div>
+              <label class="text-xs text-slate-500">API Token <span class="text-slate-400">(write-only — leave blank to keep current)</span></label>
+              <input type="password" id="sms-api-token" placeholder="Paste Bytewave API token" class="qc-input mt-1" autocomplete="off">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500">Sender ID <span class="text-slate-400">(optional)</span></label>
+              <input type="text" id="sms-sender-id" placeholder="e.g. GEHM" class="qc-input mt-1">
+            </div>
+          </div>
+          <div class="flex gap-2 flex-wrap items-center">
+            <button type="button" class="qc-btn qc-btn-primary" onclick="smsSaveSettings()">Save Settings</button>
+          </div>
+        </div>
+
+        <!-- Message History -->
+        <div class="glass-panel p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-lg font-semibold text-slate-800">SMS History</h3>
+            <button type="button" class="qc-btn text-sm" onclick="smsLoadMessages()">Refresh</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="text-left text-slate-500 border-b border-slate-200">
+                <th class="pb-2 pr-3">Tenant</th>
+                <th class="pb-2 pr-3">Type</th>
+                <th class="pb-2 pr-3">Status</th>
+                <th class="pb-2 pr-3">Message</th>
+                <th class="pb-2">Created</th>
+              </tr></thead>
+              <tbody id="sms-messages-tbody" class="divide-y divide-slate-100">
+                <tr><td colspan="5" class="py-4 text-center text-slate-400">No SMS messages yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="sms-messages-pagination" class="flex justify-center gap-2 mt-3"></div>
+        </div>
+
+        <!-- Test Message -->
+        <div class="glass-panel p-5">
+          <h3 class="text-lg font-semibold mb-3 text-slate-800">Send Test SMS</h3>
+          <div class="flex gap-2 items-end">
+            <div class="flex-1">
+              <label class="text-xs text-slate-500">Phone number</label>
+              <input type="text" id="sms-test-phone" placeholder="0712345678" class="qc-input mt-1">
+            </div>
+            <div class="flex-1">
+              <label class="text-xs text-slate-500">Message</label>
+              <input type="text" id="sms-test-msg" placeholder="Hello from rental management!" class="qc-input mt-1">
+            </div>
+            <button type="button" class="qc-btn qc-btn-primary" onclick="smsSendTestMsg()">Send</button>
           </div>
         </div>
       </section>
@@ -550,6 +695,39 @@
           </div>
         </div>
 
+        <!-- Payment Arrangement (management-only internal control) -->
+        <div id="td-arrangement-panel" class="glass-panel p-4">
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span class="sys-tag">[MGMT_ARRANGEMENT]</span>
+              <p class="font-orbitron text-sm text-white mt-1">Payment Arrangement <span class="text-slate-500 text-xs font-mono">— management only, never shown to tenant</span></p>
+            </div>
+            <span id="td-arr-status" class="font-mono text-xs font-bold text-slate-400">NONE</span>
+          </div>
+          <div id="td-arr-body" class="text-xs font-mono text-slate-400">Loading…</div>
+          <div id="td-arr-history-wrap" class="mt-2 hidden">
+            <p class="text-xs text-slate-500 font-mono mb-1">History (audit)</p>
+            <div class="overflow-x-auto"><table class="data-grid w-full">
+              <thead><tr><th>Period</th><th>Requested</th><th>Approved</th><th>Paid</th><th>Status</th></tr></thead>
+              <tbody id="td-arr-history-tbody"></tbody>
+            </table></div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
+            <div><label class="form-label text-xs">Requested Date</label><input type="date" id="td-arr-requested" class="cyber-input w-full text-xs" /></div>
+            <div><label class="form-label text-xs">Approved Payment Date</label><input type="date" id="td-arr-approved" class="cyber-input w-full text-xs" /></div>
+            <div><label class="form-label text-xs">Reason / Notes</label><input type="text" id="td-arr-reason" class="cyber-input w-full text-xs" placeholder="Management notes (confidential)" /></div>
+          </div>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button" id="btn-td-arr-save" class="qc-btn text-xs">Save Pending</button>
+            <button type="button" id="btn-td-arr-approve" class="qc-btn qc-btn-primary text-xs">Approve</button>
+            <button type="button" id="btn-td-arr-modify" class="qc-btn text-xs">Modify</button>
+            <button type="button" id="btn-td-arr-decline" class="qc-btn text-xs">Decline</button>
+            <button type="button" id="btn-td-arr-cancel" class="qc-btn text-xs">Cancel</button>
+            <button type="button" id="btn-td-arr-expire" class="qc-btn text-xs">Expire</button>
+          </div>
+          <p id="td-arr-msg" class="text-xs font-mono text-center mt-2"></p>
+        </div>
+
         <!-- Summary Metrics -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div class="metric-card glass-panel p-4">
@@ -593,6 +771,10 @@
                   <td id="td-info-national-id" class="py-2 font-mono text-slate-300">—</td>
                 </tr>
                 <tr class="border-b border-slate-700">
+                  <td class="py-2 text-slate-400 font-mono">Guardian / Emergency Contact</td>
+                  <td id="td-info-guardian" class="py-2 font-mono text-slate-300">—</td>
+                </tr>
+                <tr class="border-b border-slate-700">
                   <td class="py-2 text-slate-400 font-mono">Rent (KES)</td>
                   <td id="td-info-rent" class="py-2 font-mono text-green-400">—</td>
                 </tr>
@@ -611,6 +793,10 @@
                 <tr>
                   <td class="py-2 text-slate-400 font-mono">Water Charges</td>
                   <td id="td-info-water" class="py-2 font-mono text-cyan-400">—</td>
+                </tr>
+                <tr>
+                  <td class="py-2 text-slate-400 font-mono">Water Charge Paid</td>
+                  <td id="td-info-water-paid" class="py-2 font-mono text-cyan-400">—</td>
                 </tr>
               </tbody>
             </table>
@@ -697,6 +883,49 @@
               <tr><td colspan="7" class="text-center py-6 text-slate-500">No penalties</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Tenancy Agreement (signed PDF in private storage) -->
+        <div class="glass-panel overflow-x-auto" id="td-agreement-panel">
+          <div class="p-4 border-b border-slate-700 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span class="sys-tag">[TENANCY_AGREEMENT]</span>
+              <h3 class="font-orbitron text-white mt-1">Signed Tenancy Agreement</h3>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="file" id="td-agreement-file" class="hidden" accept=".pdf,.jpg,.jpeg,.png" multiple />
+              <input type="file" id="td-agreement-scan" class="hidden" accept="image/*" capture="environment" multiple />
+              <button type="button" id="btn-td-scan-doc" class="qc-btn !py-1 !px-3 text-xs">Scan Document</button>
+              <button type="button" id="btn-td-agreement-upload" class="qc-btn qc-btn-primary !py-1 !px-3 text-xs">Upload Signed Copy</button>
+            </div>
+          </div>
+          <p class="px-4 pt-2 text-[11px] font-mono text-slate-500">Stored privately per tenant. Scanned pages are compressed to a few hundred KB before upload.</p>
+          <table class="data-grid w-full min-w-[600px]">
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Size</th>
+                <th>Uploaded</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="td-agreements-tbody">
+              <tr><td colspan="4" class="text-center py-6 text-slate-500">No signed agreement on file.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div id="td-agreement-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div class="glass-panel w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between p-4 border-b border-slate-700">
+              <h3 class="font-orbitron text-white">Agreement Preview</h3>
+              <button type="button" id="btn-td-agreement-close" class="action-btn !py-1 !px-3 text-xs">Close</button>
+            </div>
+            <p id="td-agreement-preview-note" class="px-4 pt-2 text-[11px] font-mono text-slate-500"></p>
+            <div class="p-4 flex-1 min-h-[60vh]">
+              <iframe id="td-agreement-frame" class="w-full h-[60vh] rounded bg-white" title="Agreement preview"></iframe>
+            </div>
+          </div>
         </div>
 
         <!-- Payment History -->
@@ -1562,10 +1791,6 @@
                       <option value="Paid">Paid</option>
                     </select>
                   </div>
-                  <div>
-                    <label class="form-label">Amount (KES)</label>
-                    <input type="number" id="mnt-amount" class="cyber-input" min="0" step="0.01" required />
-                  </div>
                 </div>
 
                 <div id="mnt-property-row" class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1579,6 +1804,28 @@
 
                 <!-- Dynamic fields container — populated by JS based on category -->
                 <div id="mnt-dynamic-fields" class="space-y-4"></div>
+
+                <!-- Multi-Plot Expenses (staff reimbursement only) -->
+                <div id="mnt-plot-expenses-section" class="hidden">
+                  <div class="border border-amber-700 rounded-lg p-4 bg-amber-950/20">
+                    <div class="flex items-center justify-between mb-3">
+                      <div class="text-xs font-semibold text-amber-400 uppercase">Plot Expenses</div>
+                      <button type="button" class="text-xs text-cyan-400 hover:text-cyan-300" id="btn-add-plot-expense">+ Add Plot</button>
+                    </div>
+                    <div id="mnt-plot-expenses-list" class="space-y-2"></div>
+                    <div class="flex justify-end mt-3">
+                      <div class="bg-amber-900/30 border border-amber-600 rounded-lg px-4 py-2">
+                        <span class="text-xs text-amber-300">Total: </span>
+                        <span class="text-lg font-bold text-amber-400" id="mnt-plot-total">KES 0</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="mnt-amount-row">
+                  <label class="form-label">Amount (KES)</label>
+                  <input type="number" id="mnt-amount" class="cyber-input" min="0" step="0.01" required />
+                </div>
 
                 <div class="flex flex-wrap justify-end gap-3 pt-4 border-t border-slate-800">
                   <button type="button" class="action-btn" id="btn-cancel-mnt-form">Cancel</button>
@@ -1995,7 +2242,14 @@
               <input type="hidden" id="sa-form-id" />
               <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
-                  <label class="form-label">Employee Name</label>
+                  <label class="form-label">Person Type</label>
+                  <select id="sa-person-type" class="cyber-input">
+                    <option value="Employee">Employee</option>
+                    <option value="Landlord">Landlord</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label">Name</label>
                   <input type="text" id="sa-employee" class="cyber-input" placeholder="e.g. Peter" required />
                 </div>
                 <div>
@@ -2006,6 +2260,8 @@
                   <label class="form-label">Amount (KES)</label>
                   <input type="number" id="sa-amount" class="cyber-input" min="0.01" step="0.01" required />
                 </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <label class="form-label">Recovery Method</label>
                   <select id="sa-recovery-method" class="cyber-input">
@@ -2014,7 +2270,6 @@
                     <option value="installment">Installment Plan</option>
                   </select>
                 </div>
-              </div>
               <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label class="form-label">Reason / Purpose</label>
@@ -2087,6 +2342,7 @@
               <thead>
                 <tr>
                   <th>Employee</th>
+                  <th>Type</th>
                   <th>Date</th>
                   <th>Reason</th>
                   <th>Property</th>
@@ -2098,7 +2354,7 @@
                 </tr>
               </thead>
               <tbody id="sa-list-tbody">
-                <tr><td colspan="9" class="text-center text-slate-500 py-6">Loading staff advances...</td></tr>
+                <tr><td colspan="10" class="text-center text-slate-500 py-6">Loading staff advances...</td></tr>
               </tbody>
             </table>
           </div>
@@ -2161,6 +2417,7 @@
           </div>
         </div>
       </div>
+      </div><!-- /#staff-advance-panel -->
 
       <!-- EMPLOYEE RENT -->
       <div id="employee-rent-panel" class="hidden">
@@ -2453,6 +2710,7 @@
                     </div>
                   </div>
                 </div>
+                <div id="wb-anomaly-warn" class="hidden text-sm font-mono rounded p-2 mt-2"></div>
               </div>
 
               <!-- Previous Outstanding -->
@@ -2646,8 +2904,9 @@
           </div>
         </div>
 
-        <div class="max-w-full mx-auto mb-4">
+        <div class="max-w-full mx-auto mb-4 flex flex-wrap gap-2">
           <button type="button" id="btn-new-work-order" class="qc-btn qc-btn-primary">+ New Work Order</button>
+          <button type="button" id="btn-new-inspection" class="qc-btn">+ Property Inspection</button>
         </div>
 
         <div id="work-order-form-wrap" class="hidden mb-6">
@@ -2815,6 +3074,26 @@
           </div>
           <p id="wo-list-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
         </div>
+
+        <div class="glass-panel p-6 w-full">
+          <h3 class="text-md font-semibold text-white mb-1">Recent Inspections</h3>
+          <p class="section-desc mb-3">Property inspections — conducted online or offline, synced automatically</p>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left cyber-table text-sm">
+              <thead>
+                <tr>
+                  <th>Property</th>
+                  <th>Unit</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody id="insp-list-tbody">
+                <tr><td colspan="4" class="text-center text-slate-500 py-4">Loading inspections...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <!-- REPORTS -->
@@ -2893,7 +3172,11 @@
             <h2 class="section-title mt-1">Documents <span class="accent">Hub</span></h2>
             <p class="section-desc">Search, download, print and share every generated document</p>
           </div>
-          <button type="button" id="btn-documents-refresh" class="qc-btn qc-btn-primary">Refresh</button>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" id="btn-documents-new" class="qc-btn qc-btn-primary">+ New Document</button>
+            <button type="button" id="btn-custom-notice" class="qc-btn qc-btn-primary">+ Custom Notice</button>
+            <button type="button" id="btn-documents-refresh" class="qc-btn qc-btn-primary">Refresh</button>
+          </div>
         </div>
 
         <div class="glass-panel p-6">
@@ -2906,6 +3189,7 @@
                 <option value="invoice">Invoice</option>
                 <option value="exit_invoice">Exit Invoice</option>
                 <option value="report">Report</option>
+                <option value="letter">Letter</option>
               </select>
             </div>
             <div class="md:col-span-1">
@@ -2972,6 +3256,178 @@
             <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
               <button type="button" class="action-btn" id="btn-documents-share-cancel">Cancel</button>
               <button type="button" class="qc-btn qc-btn-primary" id="btn-documents-share-send">Send</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="documents-view-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div class="glass-panel w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between p-4 border-b border-slate-700">
+              <h3 class="font-orbitron text-white" id="documents-view-title">Document</h3>
+              <button type="button" id="btn-documents-view-close" class="action-btn !py-1 !px-3 text-xs">Close</button>
+            </div>
+            <div class="p-4 flex-1 min-h-[60vh]">
+              <iframe id="documents-view-frame" class="w-full h-[60vh] rounded bg-white" title="Document preview"></iframe>
+            </div>
+          </div>
+        </div>
+
+        <div id="doc-template-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div class="glass-panel p-6 max-w-3xl w-full max-h-[85vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-1">
+              <h3 class="form-label mb-0">Select Document Template</h3>
+              <button type="button" class="text-slate-400 hover:text-white text-xl" id="btn-doc-template-close">&times;</button>
+            </div>
+            <p class="text-xs text-slate-500 mb-4">Official GEHPM letterhead is applied automatically on generate.</p>
+            <div id="doc-template-grid" class="grid grid-cols-1 md:grid-cols-2 gap-2"></div>
+          </div>
+        </div>
+
+        <div id="doc-letter-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div class="glass-panel p-6 max-w-4xl w-full max-h-[92vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-1">
+              <h3 class="form-label mb-0" id="doc-letter-title">New Document</h3>
+              <button type="button" class="text-slate-400 hover:text-white text-xl" id="btn-doc-letter-close">&times;</button>
+            </div>
+            <p class="text-xs text-slate-500 mb-4" id="doc-letter-desc"></p>
+            <input type="hidden" id="doc-letter-key" />
+            <input type="hidden" id="doc-letter-id" />
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <div>
+                <label class="form-label">Tenant (auto-fills details — optional)</label>
+                <select id="doc-letter-tenant" class="cyber-input w-full"><option value="">— No tenant —</option></select>
+              </div>
+              <div>
+                <label class="form-label">Property (for property-wide batch)</label>
+                <select id="doc-letter-property" class="cyber-input w-full"><option value="">— No property —</option></select>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <div>
+                <label class="form-label">Subject</label>
+                <input type="text" id="doc-letter-subject" class="cyber-input w-full" />
+              </div>
+              <div class="flex items-end">
+                <button type="button" id="btn-doc-letter-batch" class="action-btn hidden">Generate for Entire Property</button>
+              </div>
+            </div>
+            <div id="doc-letter-fields" class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3"></div>
+            <div class="mb-3">
+              <label class="form-label">Recipient Block</label>
+              <textarea id="doc-letter-recipient" rows="2" class="cyber-input w-full font-mono text-xs"></textarea>
+            </div>
+            <div class="mb-3">
+              <div class="flex items-center justify-between">
+                <label class="form-label mb-0">Letter Body (editable)</label>
+                <button type="button" id="btn-doc-letter-preview" class="action-btn text-xs">Preview</button>
+              </div>
+              <textarea id="doc-letter-body" rows="12" class="cyber-input w-full font-mono text-xs mt-1"></textarea>
+              <div class="flex items-center gap-2 mt-1">
+                <select id="doc-placeholder-pick" class="cyber-input text-xs flex-1">
+                  <option value="">— Insert placeholder at cursor (Subject / Recipient / Body) —</option>
+                </select>
+                <button type="button" id="btn-doc-placeholder-insert" class="action-btn text-xs">Insert</button>
+              </div>
+              <div id="doc-letter-preview" class="hidden mt-2 rounded border border-slate-700 bg-white text-slate-900 p-4 text-sm max-h-96 overflow-y-auto"></div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <div>
+                <label class="form-label">Signed By (optional)</label>
+                <input type="text" id="doc-letter-sender" data-doc-field="sender_name" class="cyber-input w-full" placeholder="Defaults to your username" />
+              </div>
+              <div>
+                <label class="form-label">Signatory Title (optional)</label>
+                <input type="text" id="doc-letter-sender-title" data-doc-field="sender_title" class="cyber-input w-full" placeholder="Property Manager" />
+              </div>
+            </div>
+            <p id="doc-letter-status" class="text-sm font-mono text-center mb-2"></p>
+            <div class="flex flex-wrap justify-end gap-2">
+              <button type="button" id="btn-doc-letter-autofill" class="action-btn">Autofill</button>
+              <button type="button" id="btn-doc-letter-draft" class="qc-btn">Save Draft</button>
+              <button type="button" id="btn-doc-letter-generate" class="qc-btn qc-btn-primary">Generate &amp; Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="custom-notice-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div class="glass-panel p-6 max-w-4xl w-full max-h-[92vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-1">
+              <h3 class="form-label mb-0">Custom Notice — Blank Letterhead</h3>
+              <button type="button" class="text-slate-400 hover:text-white text-xl" id="btn-cn-close">&times;</button>
+            </div>
+            <p class="text-xs text-slate-500 mb-4">Official letterhead, footer and watermark are automatic. One separate notice is created per tenant and saved under that tenant — nothing is sent until you click Send on each notice.</p>
+
+            <div class="mb-3">
+              <label class="form-label">Notice For</label>
+              <div class="flex flex-wrap gap-4 text-sm text-slate-300">
+                <label class="flex items-center gap-2"><input type="radio" name="cn-recipient-type" value="tenant" checked /> Tenant</label>
+                <label class="flex items-center gap-2"><input type="radio" name="cn-recipient-type" value="unit" /> Unit Number</label>
+                <label class="flex items-center gap-2"><input type="radio" name="cn-recipient-type" value="property" /> Property</label>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <div id="cn-tenant-wrap">
+                <label class="form-label">Tenant</label>
+                <select id="cn-tenant" class="cyber-input w-full"><option value="">— Select tenant —</option></select>
+              </div>
+              <div id="cn-unit-wrap" class="hidden">
+                <label class="form-label">Unit Number</label>
+                <select id="cn-unit" class="cyber-input w-full"><option value="">— Select unit —</option></select>
+              </div>
+              <div id="cn-property-wrap" class="hidden">
+                <label class="form-label">Property</label>
+                <select id="cn-property" class="cyber-input w-full"><option value="">— Select property —</option></select>
+              </div>
+              <div id="cn-scope-wrap" class="hidden">
+                <label class="form-label">Tenants in Property</label>
+                <div class="flex flex-wrap gap-4 text-sm text-slate-300 pt-1">
+                  <label class="flex items-center gap-2"><input type="radio" name="cn-scope" value="all" checked /> All Tenants</label>
+                  <label class="flex items-center gap-2"><input type="radio" name="cn-scope" value="specific" /> Specific Tenants / Units</label>
+                </div>
+              </div>
+            </div>
+
+            <div id="cn-specific-wrap" class="hidden mb-3">
+              <label class="form-label">Choose Tenants / Units</label>
+              <div id="cn-specific-list" class="max-h-48 overflow-y-auto border border-slate-700 rounded p-2 grid grid-cols-1 md:grid-cols-2 gap-1 text-sm"></div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Recipients Review (<span id="cn-review-count">0</span>)</label>
+              <div class="border border-slate-700 rounded overflow-hidden">
+                <table class="w-full text-xs">
+                  <thead><tr class="bg-slate-800/60 text-slate-400 text-left">
+                    <th class="p-2">Tenant</th><th class="p-2">Unit</th><th class="p-2">Property</th>
+                  </tr></thead>
+                  <tbody id="cn-review-body">
+                    <tr><td colspan="3" class="p-2 text-slate-500">No recipients selected</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <div>
+                <label class="form-label">Notice Date</label>
+                <input type="date" id="cn-date" class="cyber-input w-full" />
+              </div>
+              <div>
+                <label class="form-label">Subject</label>
+                <input type="text" id="cn-subject" class="cyber-input w-full" placeholder="e.g. Water Supply Interruption Notice" />
+              </div>
+            </div>
+            <div class="mb-3">
+              <div class="flex items-center justify-between">
+                <label class="form-label mb-0">Notice Content</label>
+                <span class="text-[10px] text-slate-500">Auto per tenant: {{TENANT_NAME}} {{UNIT_NUMBER}} {{PROPERTY_NAME}} {{TODAY}}</span>
+              </div>
+              <textarea id="cn-body" rows="10" class="cyber-input w-full font-mono text-xs mt-1" placeholder="Write the notice content here..."></textarea>
+            </div>
+            <p id="cn-status" class="text-sm font-mono text-center mb-2"></p>
+            <div class="flex flex-wrap justify-end gap-2">
+              <button type="button" id="btn-cn-cancel" class="action-btn">Cancel</button>
+              <button type="button" id="btn-cn-create" class="qc-btn qc-btn-primary">Create Individual Notices</button>
             </div>
           </div>
         </div>
@@ -3052,11 +3508,12 @@
                   <th>Date</th>
                   <th class="text-right">Amount</th>
                   <th>Status</th>
+                  <th class="text-right">Paid</th>
                   <th class="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody id="ir-tbody">
-                <tr><td colspan="8" class="text-center text-slate-500 py-6">No invoices yet.</td></tr>
+                <tr><td colspan="9" class="text-center text-slate-500 py-6">No invoices yet.</td></tr>
               </tbody>
             </table>
           </div>
@@ -3096,6 +3553,25 @@
             </div>
           </div>
         </div>
+
+        <div id="ir-edit-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div class="glass-panel p-6 max-w-md w-full">
+            <h3 class="form-label mb-1">Edit Invoice Amount</h3>
+            <p class="text-xs text-slate-500 mb-4" id="ir-edit-context">—</p>
+            <div class="space-y-4">
+              <div>
+                <label class="form-label">Total Amount (KES)</label>
+                <input type="number" id="ir-edit-amount" min="0" step="1" class="cyber-input font-mono" />
+                <p class="text-xs text-slate-500 mt-1" id="ir-edit-paid-note"></p>
+              </div>
+              <p id="ir-edit-status" class="text-sm font-mono text-amber-400"></p>
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button type="button" class="action-btn" id="btn-ir-edit-cancel">Cancel</button>
+              <button type="button" class="qc-btn qc-btn-primary" id="btn-ir-edit-save">Save Changes</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- MONTHLY REPORTS -->
@@ -3109,6 +3585,7 @@
           <div class="flex gap-2" id="mr-view-toggle">
             <button type="button" class="action-btn text-xs" data-mr-view="standard" id="btn-mr-standard">Standard Report</button>
             <button type="button" class="action-btn text-xs" data-mr-view="enhanced" id="btn-mr-enhanced">Enhanced Report</button>
+            <button type="button" class="action-btn text-xs" data-mr-view="water" id="btn-mr-water">Water Bill Report</button>
           </div>
         </div>
 
@@ -3321,6 +3798,40 @@
             </div>
           </div>
         </div>
+
+          <!-- WATER BILL REPORT (read-only reporting over recorded invoices) -->
+          <div id="mr-water-view" class="hidden">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-bold text-white">Water Bill Report</h3>
+              <div class="flex gap-2">
+                <button type="button" id="btn-download-water-report" class="action-btn text-sm">Download PDF</button>
+                <button type="button" id="btn-send-water-report" class="action-btn text-sm">Send</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-3 mb-4 items-end">
+              <div>
+                <label class="form-label text-xs">Unit (optional — blank = all units)</label>
+                <input type="text" id="mr-water-unit" class="cyber-input font-mono" placeholder="e.g. A1" />
+              </div>
+              <button type="button" id="btn-generate-water-report" class="action-btn">Generate Report</button>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4" id="mr-water-summary"></div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left cyber-table text-sm">
+                <thead>
+                  <tr>
+                    <th>Unit</th><th>Tenant</th><th>Status</th>
+                    <th class="text-right">Previous</th><th class="text-right">Current</th>
+                    <th class="text-right">Consumption</th><th class="text-right">Rate</th>
+                    <th class="text-right">Amount (KES)</th>
+                  </tr>
+                </thead>
+                <tbody id="mr-water-tbody"></tbody>
+                <tfoot id="mr-water-tfoot"></tfoot>
+              </table>
+            </div>
+            <p id="mr-water-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+          </div>
       </section>
 
       <!-- MANAGEMENT EXPENSES MONTHLY REPORT -->
@@ -3739,6 +4250,133 @@
           </table>
         </div>
       </section>
+
+      <!-- COMPANY SETTINGS (admin) -->
+      <section data-view="settings" class="hidden space-y-6">
+        <div>
+          <span class="sys-tag">[SYS_ADMIN]</span>
+          <h2 class="section-title mt-1">Company <span class="accent">Settings</span></h2>
+          <p class="section-desc">Official document assets applied automatically to finalized PDFs.</p>
+        </div>
+        <div class="glass-panel p-6 max-w-3xl">
+          <h3 class="font-orbitron text-white">Official GEHPM Stamp</h3>
+          <p class="text-xs text-slate-500 mt-1 mb-4">Transparent-background PNG preferred. Applied automatically to finalized PDFs (download / generate / send) in each document's authorization area — never in editors or previews. Replacing the stamp updates all future PDFs with no template changes.</p>
+          <div class="flex flex-wrap items-center gap-4 mb-4">
+            <img id="stamp-preview" class="hidden max-h-32 border border-slate-700 rounded bg-white p-1" alt="Official stamp preview" />
+            <div class="text-sm font-mono text-slate-300" id="stamp-status">Loading…</div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <input type="file" id="stamp-file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="cyber-input text-xs" />
+            <button type="button" id="btn-stamp-upload" class="qc-btn qc-btn-primary">Upload / Replace</button>
+            <button type="button" id="btn-stamp-toggle" class="qc-btn">Deactivate</button>
+            <button type="button" id="btn-stamp-delete" class="qc-btn">Remove</button>
+          </div>
+          <p id="stamp-msg" class="text-sm font-mono text-center mt-2"></p>
+        </div>
+        <div class="glass-panel p-6 max-w-3xl">
+          <h3 class="font-orbitron text-white">Authorized Signature</h3>
+          <p class="text-xs text-slate-500 mt-1 mb-4">Pre-assigns the authorized signatory on letter documents (signature image + holder name in the signature block) so downloads are never left blank. Applies to previews and finalized PDFs — never in editor inputs. Replacing updates all future documents.</p>
+          <div class="flex flex-wrap items-center gap-4 mb-4">
+            <img id="sig-preview" class="hidden max-h-32 border border-slate-700 rounded bg-white p-1" alt="Signature preview" />
+            <div class="text-sm font-mono text-slate-300" id="sig-status">Loading…</div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+            <div><label class="form-label text-xs">Signature Holder Name</label><input type="text" id="sig-holder" class="cyber-input w-full text-xs" placeholder="e.g. David Muiruri" /></div>
+            <div><label class="form-label text-xs">Signature Image (PNG/JPEG)</label><input type="file" id="sig-file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="cyber-input w-full text-xs" /></div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" id="btn-sig-upload" class="qc-btn qc-btn-primary">Upload / Replace</button>
+            <button type="button" id="btn-sig-save-name" class="qc-btn">Save Name</button>
+            <button type="button" id="btn-sig-toggle" class="qc-btn">Deactivate</button>
+            <button type="button" id="btn-sig-delete" class="qc-btn">Remove</button>
+          </div>
+          <p id="sig-msg" class="text-sm font-mono text-center mt-2"></p>
+        </div>
+      </section>
+
+      <!-- SYNC CONFLICTS (manager review queue) -->
+      <section data-view="sync-conflicts" class="hidden space-y-6">
+        <div>
+          <span class="sys-tag">[SYNC_CONFLICTS]</span>
+          <h2 class="section-title mt-1">Sync <span class="accent">Conflicts</span></h2>
+          <p class="section-desc">Offline uploads the server rejected (duplicates, occupied units, invalid readings). Dismiss keeps the server record; Retry uploads the agent's version again. Resolutions apply to agents' devices automatically on their next sync.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" id="btn-conflicts-pending" class="qc-btn qc-btn-primary">Pending</button>
+          <button type="button" id="btn-conflicts-resolved" class="qc-btn">Resolved</button>
+          <button type="button" id="btn-conflicts-refresh" class="qc-btn">↻ Refresh</button>
+        </div>
+        <div class="glass-panel p-6 w-full">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left cyber-table text-sm">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Tenant / Unit</th>
+                  <th>Reason</th>
+                  <th>Server record</th>
+                  <th>Status</th>
+                  <th class="text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="conflicts-tbody">
+                <tr><td colspan="7" class="text-center text-slate-500 py-6">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p id="conflicts-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+        </div>
+      </section>
+
+      <!-- COMMISSIONS (agent commission per house per month) -->
+      <section data-view="commissions" class="hidden space-y-6">
+        <div>
+          <span class="sys-tag">[COMMISSIONS]</span>
+          <h2 class="section-title mt-1">Agent <span class="accent">Commissions</span></h2>
+          <p class="section-desc">Commission = chosen % × (rent collected − deposit − garbage fee − water bill), per house per month. Set each house's rate, then review what is owed to you and what goes to the landlord.</p>
+        </div>
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <label class="form-label text-xs">Month</label>
+            <input type="month" id="cm-month" class="cyber-input" />
+          </div>
+          <div>
+            <label class="form-label text-xs">House</label>
+            <select id="cm-house-filter" class="cyber-input"><option value="">All houses</option></select>
+          </div>
+          <button type="button" id="btn-cm-refresh" class="qc-btn qc-btn-primary">Calculate</button>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="cm-summary-cards">
+          <div class="glass-panel p-4"><p class="text-xs text-slate-500 font-mono">Total collected</p><p id="cm-t-collected" class="font-mono text-green-400 font-bold text-lg">KES 0</p></div>
+          <div class="glass-panel p-4"><p class="text-xs text-slate-500 font-mono">Commissionable rent</p><p id="cm-t-base" class="font-mono text-cyan-400 font-bold text-lg">KES 0</p></div>
+          <div class="glass-panel p-4"><p class="text-xs text-slate-500 font-mono">Your commission</p><p id="cm-t-commission" class="font-mono text-amber-400 font-bold text-lg">KES 0</p></div>
+          <div class="glass-panel p-4"><p class="text-xs text-slate-500 font-mono">To landlords</p><p id="cm-t-payout" class="font-mono text-emerald-400 font-bold text-lg">KES 0</p></div>
+        </div>
+        <div class="glass-panel p-6 w-full">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left cyber-table text-sm">
+              <thead>
+                <tr>
+                  <th>House</th>
+                  <th class="text-right">Collected</th>
+                  <th class="text-right">− Deposit</th>
+                  <th class="text-right">− Garbage</th>
+                  <th class="text-right">− Water</th>
+                  <th class="text-right">= Rent base</th>
+                  <th class="text-right">Rate %</th>
+                  <th class="text-right">Commission</th>
+                  <th class="text-right">Landlord payout</th>
+                </tr>
+              </thead>
+              <tbody id="cm-tbody">
+                <tr><td colspan="9" class="text-center text-slate-500 py-6">Pick a month and press Calculate.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p id="cm-result" class="text-sm font-mono text-slate-300 text-right mt-2"></p>
+        </div>
+      </section>
     </main>
     </div><!-- .main-area -->
     </div><!-- .app-shell -->
@@ -3936,6 +4574,10 @@
             <input name="water_charge_amount" type="number" min="0" value="0" class="cyber-input" title="Water charges for the tenancy." />
           </div>
           <div>
+            <label class="form-label">Water Paid (KES)</label>
+            <input name="water_charge_paid" type="number" min="0" value="0" class="cyber-input" title="Amount already paid toward water charges. Set this for existing tenants with partial or fully paid water deposits." />
+          </div>
+          <div>
             <label class="form-label">Opening Arrears (KES) <span id="arrears-manual-badge" class="hidden text-xs text-amber-400 ml-1">(Manually Set)</span></label>
             <input name="arrears" type="number" min="0" value="0" class="cyber-input" title="Outstanding balance from before system adoption, or manually corrected arrears. Leave 0 if none. When set, rollover will not overwrite this value." />
           </div>
@@ -3967,6 +4609,7 @@
             <label class="form-label">Status</label>
             <select name="status" class="cyber-input font-mono">
               <option value="Active">Active</option>
+              <option value="Paid">Paid</option>
               <option value="Overdue">Overdue</option>
               <option value="Evicted">Evicted</option>
               <option value="Vacant">Vacant</option>
@@ -4144,14 +4787,14 @@
       <input type="hidden" id="ei-tenant-code" />
       <div id="ei-status-msg" class="hidden text-sm font-mono text-amber-400 mb-3"></div>
 
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
         <div class="bg-slate-900 border border-slate-700 rounded p-3">
           <p class="text-xs text-slate-500 font-mono">Deposit Paid</p>
           <p id="ei-deposit-paid" class="font-mono text-cyan-400 font-bold text-lg">KES 0</p>
         </div>
         <div class="bg-slate-900 border border-slate-700 rounded p-3">
-          <p class="text-xs text-slate-500 font-mono">Deposit Required</p>
-          <p id="ei-deposit-required" class="font-mono text-slate-300 font-bold text-lg">KES 0</p>
+          <p class="text-xs text-slate-500 font-mono">Water Charges (Refundable)</p>
+          <p id="ei-water-charges" class="font-mono text-cyan-400 font-bold text-lg">KES 0</p>
         </div>
         <div class="bg-slate-900 border border-slate-700 rounded p-3">
           <p class="text-xs text-slate-500 font-mono">Outstanding Balance</p>
@@ -4160,6 +4803,10 @@
         <div class="bg-slate-900 border border-slate-700 rounded p-3">
           <p class="text-xs text-slate-500 font-mono">Monthly Rent</p>
           <p id="ei-rent" class="font-mono text-green-400 font-bold text-lg">KES 0</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-700 rounded p-3">
+          <p class="text-xs text-slate-500 font-mono">Total Refundable</p>
+          <p id="ei-total-refundable" class="font-mono text-green-400 font-bold text-lg">KES 0</p>
         </div>
       </div>
 
@@ -4298,15 +4945,15 @@
 
       <div class="bg-slate-900 border border-slate-700 rounded p-4 mb-4 space-y-1 font-mono text-sm">
         <div class="flex justify-between text-slate-400">
+          <span>Total Refundable</span>
+          <span id="ei-total-refundable-val" class="text-green-400 font-bold">KES 0</span>
+        </div>
+        <div class="flex justify-between text-slate-400">
           <span>Total Deductions</span>
           <span id="ei-total-deductions" class="text-rose-400 font-bold">KES 0</span>
         </div>
-        <div class="flex justify-between text-slate-400">
-          <span>Deposit Refund</span>
-          <span id="ei-deposit-refund" class="text-cyan-400 font-bold">KES 0</span>
-        </div>
         <div class="flex justify-between text-white font-bold text-lg border-t border-slate-700 pt-2 mt-1">
-          <span>Final Settlement</span>
+          <span>Net Refund / (Amount Due)</span>
           <span id="ei-final-settlement" class="text-green-400">KES 0</span>
         </div>
       </div>
@@ -4500,6 +5147,18 @@
     </div>
   </div>
 
+  <!-- DASHBOARD DRILLDOWN — records behind a dashboard card -->
+  <div id="dash-drill-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+    <div class="glass-panel p-6 w-full max-w-5xl max-h-[92vh] overflow-y-auto">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <h3 id="dash-drill-title" class="font-orbitron text-xl text-white">Details</h3>
+        <button type="button" id="dash-drill-close" class="qc-btn text-sm">✕ Close</button>
+      </div>
+      <p id="dash-drill-sub" class="text-slate-400 text-sm mb-4">—</p>
+      <div id="dash-drill-body" class="space-y-4"></div>
+    </div>
+  </div>
+
   <div id="message-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
     <div class="glass-panel p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
       <h3 id="message-modal-title" class="font-orbitron text-xl text-white mb-4">Send Custom Message</h3>
@@ -4686,11 +5345,84 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=17"></script>
+  <!-- DIAGNOSTICS MODAL (support report) -->
+  <div id="diagnostics-modal" class="fixed inset-0 bg-black/60 z-50 hidden items-center justify-center p-4">
+    <div class="glass-panel p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" style="background:#0f172a">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-lg font-semibold text-white">Diagnostics Report</h3>
+        <button type="button" class="text-slate-400 hover:text-white text-xl" id="btn-diagnostics-close">&times;</button>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">If a menu shows blank, open this and send the report to support — it shows exactly what your device sees.</p>
+      <pre id="diagnostics-report" class="text-xs font-mono text-slate-200 bg-black/40 rounded p-3 whitespace-pre-wrap max-h-[50vh] overflow-y-auto">Collecting…</pre>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" id="btn-navtest" class="qc-btn">▶ Test menu switching</button>
+        <button type="button" id="btn-diagnostics-ok" class="qc-btn">Close</button>
+        <button type="button" id="btn-diagnostics-copy" class="qc-btn qc-btn-primary">Copy Report</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROPERTY INSPECTION MODAL (offline-capable) -->
+  <div id="inspection-modal" class="fixed inset-0 bg-black/60 z-50 hidden items-center justify-center p-4">
+    <div class="glass-panel p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" style="background:#0f172a">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-white">Property Inspection <span id="insp-offline-tag" class="hidden text-xs font-mono text-amber-400 ml-2">📴 OFFLINE — will sync</span></h3>
+        <button type="button" class="text-slate-400 hover:text-white text-xl" id="btn-inspection-close">&times;</button>
+      </div>
+      <input type="hidden" id="insp-client-txn" />
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <div>
+          <label class="form-label text-xs">Property</label>
+          <select id="insp-property" class="cyber-input w-full"></select>
+        </div>
+        <div>
+          <label class="form-label text-xs">Unit</label>
+          <input type="text" id="insp-unit" class="cyber-input w-full" placeholder="e.g. B12" />
+        </div>
+        <div>
+          <label class="form-label text-xs">Tenant (optional)</label>
+          <select id="insp-tenant" class="cyber-input w-full"><option value="">—</option></select>
+        </div>
+        <div>
+          <label class="form-label text-xs">Inspection Date</label>
+          <input type="date" id="insp-date" class="cyber-input w-full" />
+        </div>
+      </div>
+      <div class="text-xs font-semibold text-slate-300 uppercase mb-2">Checklist (OK / Needs attention)</div>
+      <div id="insp-checklist" class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4"></div>
+      <div class="mb-4">
+        <label class="form-label text-xs">Photos (compressed on-device)</label>
+        <input type="file" id="insp-photos" class="cyber-input w-full" accept="image/*" capture="environment" multiple />
+        <div id="insp-photo-list" class="text-xs font-mono text-slate-400 mt-1"></div>
+      </div>
+      <div class="mb-4">
+        <label class="form-label text-xs">Notes</label>
+        <textarea id="insp-notes" class="cyber-input w-full" rows="3" placeholder="General condition, issues found…"></textarea>
+      </div>
+      <div class="mb-4">
+        <label class="form-label text-xs">Status</label>
+        <select id="insp-status" class="cyber-input w-full">
+          <option value="Draft">Draft</option>
+          <option value="Completed">Completed</option>
+        </select>
+      </div>
+      <div id="insp-result" class="text-sm font-mono text-right mb-2"></div>
+      <div class="flex justify-end gap-2">
+        <button type="button" id="btn-inspection-cancel" class="qc-btn">Cancel</button>
+        <button type="button" id="btn-inspection-save" class="qc-btn qc-btn-primary">Save Inspection</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/js/app.js?v=62"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=17').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=62').catch(() => {});
     }
+    // Safety: never trap the user behind the splash — if the app module
+    // hasn't revealed itself within 25s (hung request, slow device),
+    // reveal anyway; in-flight work resolves on its own.
+    setTimeout(() => { document.body.classList.add('boot-done'); }, 25000);
     document.querySelector('.app-shell')?.classList.add('login-mode');
   </script>
 </body>

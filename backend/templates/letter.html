@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+    body {
+      font-family: 'Roboto', sans-serif;
+      margin: 0;
+      padding: 24px;
+      color: #333;
+      background: white;
+      font-size: 12px;
+      line-height: 1.65;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .header img {
+      width: 90px;
+      max-width: 90px;
+      object-fit: contain;
+    }
+    .header-content {
+      flex: 1;
+      text-align: center;
+      padding-left: 16px;
+    }
+    .company-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a4b8c;
+      margin: 0 0 3px 0;
+    }
+    .company-slogan {
+      font-size: 9px;
+      font-style: italic;
+      color: #666;
+      margin: 0 0 3px 0;
+    }
+    .company-details {
+      font-size: 9px;
+      color: #555;
+    }
+    .separator-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 10px 0 16px 0;
+      position: relative;
+    }
+    .separator-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .doc-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a4b8c;
+    }
+    .doc-date {
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .doc-no-bar {
+      display: inline-block;
+      background: #e9f1fd;
+      border: 1px solid #bfd6f5;
+      color: #1e3a8a;
+      font-weight: 700;
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+    }
+    .recipient {
+      margin: 10px 0 6px 0;
+      white-space: pre-line;
+      font-size: 12px;
+    }
+    .salutation-space {
+      height: 6px;
+    }
+    .body p {
+      margin: 0 0 10px 0;
+      text-align: justify;
+    }
+    .signature {
+      margin-top: 28px;
+      margin-bottom: 8px;
+      line-height: 1.35;
+    }
+    .signature .sign-name {
+      font-weight: 700;
+      margin-top: 10px;
+    }
+    /* Fixed footer: anchored to the physical bottom of every page, content
+       can never flow over it (body reserves clearance below). */
+    .page-footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: white;
+      padding: 0 22px 10px 22px;
+    }
+    .footer-bar {
+      height: 3px;
+      background: #e31837;
+      width: 100%;
+      margin: 0 0 6px 0;
+      position: relative;
+    }
+    .footer-bar::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 30%;
+      right: 0;
+      height: 3px;
+      background: #111;
+    }
+    .footer-text {
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: #1a4b8c;
+    }
+    .footer-slogan {
+      text-align: center;
+      font-size: 8px;
+      font-style: italic;
+      color: #666;
+    }
+    .footer-page {
+      text-align: right;
+      font-size: 8px;
+      color: #888;
+    }
+    .footer-page::after {
+      content: "Page " counter(page) " of " counter(pages);
+    }
+    body {
+      padding-bottom: 110px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="{{logo_base64}}" alt="Logo">
+    <div class="header-content">
+      <h1 class="company-title">GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</h1>
+      <p class="company-slogan">Find a Home. Leave the Management to Us</p>
+      <p class="company-details">Dealers in: Rent management, property and General Consultancy<br>Located in Ruiru, Juja | Tel: +254 702 705 821 | Email: gutenbergelite@gmail.com</p>
+    </div>
+  </div>
+
+  <div class="separator-bar"></div>
+
+  <div class="meta-row">
+    <span class="doc-title">RE: {{subject}}</span>
+    <span class="doc-date">{{date_line}}</span>
+  </div>
+
+  <span class="doc-no-bar">DOCUMENT NO: {{ref_no}}</span>
+
+  <div class="recipient">{{recipient_block}}</div>
+
+  <div class="body">{{body_html}}</div>
+
+  <div class="signature">
+    Yours faithfully,<br>
+    <div style="margin:6px 0;line-height:1.5;">
+      <div>For: GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</div>
+      <div>Authorised Officer: {{sender_name}}</div>
+      <div>Designation: {{sender_title}}</div>
+      <div>{{GEHM_STAMP_LINE}}</div>
+      <div>{{GEHM_SIGNATURE_LINE}}</div>
+      <div>Date: {{date_line}}</div>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <div class="footer-bar"></div>
+    <div class="footer-text">Gutenberg Elite Home &Property managements</div>
+    <div class="footer-slogan">Find a Home. Leave the managements to Us.</div>
+    <div class="footer-page"></div>
+  </div>
+
+</body>
+</html>

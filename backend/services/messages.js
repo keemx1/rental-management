@@ -299,49 +299,32 @@ function buildNewTenancyConfirmation(tenant, payment, allocation) {
 }
 
 async function sendNewTenancyConfirmation(tenant, payment, allocation) {
-  const body = buildNewTenancyConfirmation(tenant, payment, allocation);
-  let status = 'Sent';
-  let failureReason = null;
-  let whatsappMessageId = null;
-  try {
-    const result = await whatsapp.sendTextMessage(tenant.phone_number, body);
-    status = result.status;
-    whatsappMessageId = result.messageId;
-    failureReason = result.failureReason || (result.status === 'Failed' ? 'ack_error' : null);
-  } catch (err) {
-    status = 'Failed';
-    failureReason = err.message;
-    console.error(`[New Tenancy] ${tenant.tenant_code}:`, err.message);
-  }
-  await store.logMessage({
-    tenantId: tenant.id,
-    messageType: 'New Tenancy Confirmation',
-    messageBody: body,
-    status,
-    whatsappMessageId,
-    failureReason,
-  });
-  return { status, whatsappMessageId, failureReason };
+  return sendReceiptText(tenant, buildNewTenancyConfirmation(tenant, payment, allocation), 'New Tenancy Confirmation');
 }
 
 async function sendPaymentConfirmation(tenant, payment, allocation) {
-  const body = buildPaymentConfirmation(tenant, payment, allocation);
+  return sendReceiptText(tenant, buildPaymentConfirmation(tenant, payment, allocation), 'Payment Confirmation');
+}
+
+// Receipt delivery through the linked Baileys session (your own number).
+// Honest result: failure when the session is down, never a false 'Sent'.
+async function sendReceiptText(tenant, body, messageType) {
   let status = 'Sent';
   let failureReason = null;
   let whatsappMessageId = null;
+  const logTag = `[${messageType}] ${tenant.tenant_code}:`;
   try {
-    const result = await whatsapp.sendTextMessage(tenant.phone_number, body);
-    status = result.status;
-    whatsappMessageId = result.messageId;
-    failureReason = result.failureReason || (result.status === 'Failed' ? 'ack_error' : null);
+    const sm = require('../whatsapp/session-manager');
+    const sent = await sm.sendText(tenant.phone_number, body);
+    whatsappMessageId = (sent && sent.id) || null;
   } catch (err) {
     status = 'Failed';
     failureReason = err.message;
-    console.error(`[Payment] ${tenant.tenant_code}:`, err.message);
+    console.error(logTag, err.message);
   }
   await store.logMessage({
     tenantId: tenant.id,
-    messageType: 'Payment Confirmation',
+    messageType,
     messageBody: body,
     status,
     whatsappMessageId,
@@ -523,6 +506,13 @@ function buildSkipOverpaymentConfirmation(tenant, payment) {
   return msg;
 }
 
+// Generic custom-text sender with the same Baileys-first delivery and
+// honest status reporting as receipts (used e.g. for overpayment
+// resolution confirmations, which were previously built but never sent).
+async function sendCustomText(tenant, body, messageType) {
+  return sendReceiptText(tenant, body, messageType || 'Custom Message');
+}
+
 module.exports = {
   buildMonthlyInitialReminder,
   buildPaymentConfirmation,
@@ -533,4 +523,5 @@ module.exports = {
   sendMonthlyInitialReminder,
   sendPaymentConfirmation,
   sendNewTenancyConfirmation,
+  sendCustomText,
 };

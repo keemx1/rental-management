@@ -76,8 +76,9 @@
     }
     .receipt-no-bar {
       display: inline-block;
-      background: #e31837;
-      color: white;
+      background: #fdecec;
+      border: 1px solid #f3c0c0;
+      color: #7f1d1d;
       font-weight: 700;
       font-size: 12px;
       padding: 5px 12px;
@@ -264,8 +265,20 @@
       <div class="value">{{mpesa_reference}}</div>
     </div>
     <div class="detail-box">
-      <div class="label">TRANSACTION DATE</div>
+      <div class="label">PAYMENT DATE</div>
       <div class="value">{{date}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">RENT PERIOD</div>
+      <div class="value">{{rent_period}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">PAYMENT METHOD</div>
+      <div class="value">{{payment_mode}}</div>
+    </div>
+    <div class="detail-box">
+      <div class="label">STATUS</div>
+      <div class="value">{{payment_status}}</div>
     </div>
   </div>
 
@@ -302,6 +315,12 @@
 
   <div style="margin-top:10px;padding:8px;border:1px solid #16a34a;border-radius:6px;background:#f0fdf4;font-size:10px;color:#166534;text-align:center;">
     Thank you for your payment. This receipt is computer-generated and does not require a signature.
+  </div>
+
+  <div style="margin:6px 0;line-height:1.5;">
+    <div>For: GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</div>
+    <div>{{GEHM_STAMP_LINE}}</div>
+    <div>Date: {{date}}</div>
   </div>
 
   <div class="footer-bar"></div>

@@ -1,11 +1,26 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const whatsapp = require('../config/whatsapp');
+const { renameForDelivery } = require('./docNames');
 
 async function writeWorkbookTemp(workbook, baseName) {
   const tempFilePath = path.join(os.tmpdir(), `${baseName}_${Date.now()}_${Math.floor(Math.random() * 100000)}.xlsx`);
   await workbook.xlsx.writeFile(tempFilePath);
   return tempFilePath;
+}
+
+/**
+ * Deliver a generated workbook to a phone number via WhatsApp.
+ * Shared by every Excel report route (reports, payments, houses...).
+ */
+async function sendExcelReport(phone_number, workbook, filename, caption) {
+  const tempFilePath = path.join(os.tmpdir(), `report_${Date.now()}.xlsx`);
+  await workbook.xlsx.writeFile(tempFilePath);
+  const deliveryPath = renameForDelivery(tempFilePath, filename);
+  const waResult = await whatsapp.sendDocumentSmart(phone_number, deliveryPath, caption);
+  if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the report');
+  fs.unlinkSync(deliveryPath);
 }
 
 function streamWorkbook(res, workbook, baseName, displayName, filename) {
@@ -27,4 +42,4 @@ function streamWorkbook(res, workbook, baseName, displayName, filename) {
     });
 }
 
-module.exports = { streamWorkbook };
+module.exports = { streamWorkbook, writeWorkbookTemp, sendExcelReport };

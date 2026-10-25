@@ -28,23 +28,143 @@ function renderTemplate(templateName, vars) {
   let html = fs.readFileSync(templatePath, 'utf8');
   html = html.replace('{{logo_base64}}', readLogoBase64());
   for (const [key, value] of Object.entries(vars)) {
-    html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => String(value ?? ''));
+    html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => styleDocValue(key, value));
   }
   return html;
 }
 
-async function generatePdfToFile(html, dir, filename) {
+// ─── GEHPM document formatting & emphasis rules ─────────────────────────────
+// Designated styles (inline so every template + PDF honors them identically):
+//   DOC_STYLE_PH   — all auto-populated placeholder values: bold dark-blue.
+//   DOC_STYLE_PAY  — payment details (paybill/till/account blocks): bold black.
+//   DOC_STYLE_MODE — payment mode values: red.
+//   DOC_STYLE_NUM  — invoice / receipt numbers: red (priority over DOC_STYLE_PH).
+//   DOC_STYLE_WARN — critical cautions / warnings: bold red.
+// styleDocValue() wraps a substituted template value accordingly. Keys used
+// inside attributes (status classes), pre-composed HTML blocks, the logo and
+// empty values are never wrapped.
+const DOC_STYLE_PH = 'font-weight:700;color:#1e40af';
+const DOC_STYLE_PAY = 'font-weight:700;color:#000000';
+const DOC_STYLE_MODE = 'color:#cc0000';
+const DOC_STYLE_NUM = 'color:#cc0000';
+const DOC_STYLE_WARN = 'font-weight:700;color:#cc0000';
+
+const DOC_NUM_KEYS = new Set([
+  'invoice_number', 'invoice_no', 'exit_number', 'mnt_number',
+  'wtr_number', 'receipt_no', 'advanceNo',
+]);
+const DOC_PAY_KEYS = new Set(['house_paybill', 'payment_instructions']);
+const DOC_NEVER_WRAP_KEYS = new Set([
+  'logo_base64', 'status', 'status_class', 'priority_class', 'body_html',
+  'allocation_html', 'payments_html', 'payments_section', 'paymentsSection',
+  'overpayment_row', 'statusBadge', 'notesSection', 'mode_of_payment',
+]);
+
+function escDocText(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function styleDocValue(key, value) {
+  const text = String(value ?? '');
+  if (!text) return '';
+  if (DOC_NEVER_WRAP_KEYS.has(key)) return text;
+  if (text.includes('<')) return text; // pre-composed HTML keeps its own styling
+  if (DOC_NUM_KEYS.has(key)) return `<span style="${DOC_STYLE_NUM}">${escDocText(text)}</span>`;
+  if (DOC_PAY_KEYS.has(key)) return `<span style="${DOC_STYLE_PAY}">${escDocText(text)}</span>`;
+  return `<span style="${DOC_STYLE_PH}">${escDocText(text)}</span>`;
+}
+
+// ─── System-wide PDF print rules ────────────────────────────────────────────
+// Every PDF in the system funnels through generatePdfToFile, so injecting
+// here covers receipts, invoices, statements, letters, reports and all
+// future document types automatically — no per-template changes needed.
+//
+// - table headers (thead) repeat on every printed page
+// - table rows never split across pages
+// - background colours/badges print exactly as shown
+const PRINT_CSS =
+  '<style data-gehm-print>' +
+  '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
+  'thead{display:table-header-group;}' +
+  'tfoot{display:table-footer-group;}' +
+  'tr{break-inside:avoid;page-break-inside:avoid;}' +
+  'h1,h2,h3{break-after:avoid-page;page-break-after:avoid;}' +
+  '</style>';
+
+function applyPrintStyles(html) {
+  try {
+    if (!html || typeof html !== 'string') return html;
+    if (html.includes('</head>')) return html.replace('</head>', `${PRINT_CSS}</head>`);
+    return PRINT_CSS + html;
+  } catch (_) {
+    return html;
+  }
+}
+
+/**
+ * Render HTML to a PDF file.
+ * opts.landscape — wide, column-heavy reports (water bills, expense
+ * registers...) print landscape so nothing needs shrinking to stay readable.
+ */
+async function generatePdfToFile(html, dir, filename, opts = {}) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const pdfPath = path.join(dir, filename);
   const browser = await puppeteer.launch(getPuppeteerLaunchOptions());
   try {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    await page.pdf({ path: pdfPath, format: 'A4', printBackground: true, margin: { top: '0px', bottom: '0px' } });
+    // Official softcopy stamp (global rule): per-template authorization-area
+    // markers resolve here (or end-of-document fallback) — only finalized
+    // PDFs pass through this path. Then the full-page watermark.
+    const { applyStampWithFallback } = require('./officialStamp');
+    await page.setContent(
+      applyWatermark(applyStampWithFallback(applyPrintStyles(html))),
+      { waitUntil: 'networkidle0' }
+    );
+    // Print-safe page margins: content never bleeds to the paper edge (most
+    // printers and PDF readers clip full-bleed content).
+    await page.pdf({
+      path: pdfPath,
+      format: 'A4',
+      landscape: !!opts.landscape,
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
   } finally {
     await browser.close();
   }
   return pdfPath;
+}
+
+// ─── System-wide GEHPM logo watermark ───────────────────────────────────────
+// Every PDF in the system funnels through generatePdfToFile, so injecting
+// here covers receipts, invoices, statements, letters, reports and all
+// future document types automatically — no per-template changes needed.
+//
+// Technique: a fixed, centered, near-transparent logo layer. `position:
+// fixed` makes Chromium repeat it on every printed page; negative z-index
+// keeps it strictly behind all document content. Anything that prevents a
+// clean injection (or a missing logo) skips silently — generation never breaks.
+function applyWatermark(html) {
+  try {
+    if (!html || typeof html !== 'string' || !/<body[^>]*>/i.test(html)) return html;
+    const logo = readLogoBase64();
+    if (!logo) return html;
+    const css =
+      '<style>@media print,screen{' +
+      '.gehm-watermark{position:fixed;top:0;bottom:0;left:0;right:0;margin:auto;' +
+      'width:420px;height:420px;max-width:80vw;max-height:80vh;' +
+      'background-image:url("' + logo + '");background-repeat:no-repeat;' +
+      'background-position:center center;background-size:contain;' +
+      'opacity:0.07;z-index:-1;pointer-events:none;}' +
+      '}</style>';
+    const withCss = /<\/head\s*>/i.test(html)
+      ? html.replace(/<\/head\s*>/i, (m) => css + m)
+      : css + html;
+    return withCss.replace(/<body[^>]*>/i, (m) => m + '<div class="gehm-watermark" aria-hidden="true"></div>');
+  } catch (_) {
+    return html;
+  }
 }
 
 function formatDate(iso, opts = {}) {
@@ -56,6 +176,15 @@ function formatDate(iso, opts = {}) {
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatBillingPeriod(bp) {
+  if (!bp) return '';
+  const parts = String(bp).split('-');
+  if (parts.length !== 2) return bp;
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, 15);
+  if (Number.isNaN(d.getTime())) return bp;
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 }
 
 const KES = (v) => 'KES ' + Number(v || 0).toLocaleString('en-KE', { maximumFractionDigits: 2 });
@@ -78,12 +207,25 @@ function buildAllocationHtml(allocation) {
   if (allocation.paymentType === 'deposit') {
     add('Deposit paid', allocation.depositSettled);
   } else {
+    add('Agreement fee settled', allocation.agreementSettled);
+    add('Deposit settled', allocation.depositSettled);
     add('Arrears settled', allocation.arrearsSettled);
     add('Penalties settled', allocation.penaltySettled);
     add('Maintenance settled', allocation.maintenanceSettled);
     add('Other charges settled', allocation.otherSettled);
     add('Garbage fee settled', allocation.garbageFeeSettled);
+    add('Water charges settled', allocation.waterSettled);
     add('Rent settled', allocation.rentSettled);
+  }
+
+  // Resolved-overpayment placement rows (future rent months / credit
+  // balance). Absent on regular payment allocations — existing receipt
+  // output is byte-for-byte unchanged for them.
+  if (Array.isArray(allocation.advanceMonths)) {
+    for (const m of allocation.advanceMonths) add(`Advance rent — ${m.month}`, m.amount);
+  }
+  if (Number(allocation.creditCredited || 0) > 0) {
+    add('Credited to tenant credit balance', allocation.creditCredited);
   }
 
   if (rows.length === 0) {
@@ -110,8 +252,14 @@ function buildReceiptHtml(tenant, payment, allocation) {
   const paymentType = payment?.payment_type === 'deposit' ? 'Deposit' : 'Rent';
   const allocationHtml = buildAllocationHtml(allocation);
 
+  // Rent period = billing_period (the rent cycle being paid), NOT payment_date
+  const rentPeriod = payment?.billing_period
+    ? formatBillingPeriod(payment.billing_period)
+    : formatDate(payment?.payment_date || null, { monthFull: true });
+
   return renderTemplate('receipt.html', {
     date: formatDate(payment?.payment_date || null, { monthFull: true }),
+    rent_period: rentPeriod,
     receipt_no: payment?.receipt_number || '',
     tenant_name: tenant?.name || '',
     unit_label: unitLabel,
@@ -119,6 +267,8 @@ function buildReceiptHtml(tenant, payment, allocation) {
     house_paybill: housePaybill,
     amount_paid: KES(amount),
     payment_type: paymentType,
+    payment_mode: payment?.payment_mode || '—',
+    payment_status: payment?.status || 'Approved',
     mpesa_reference: mpesaRef,
     allocation_html: allocationHtml,
     remaining_balance: KES(allocation?.remainingBalance ?? 0),
@@ -154,9 +304,90 @@ async function generateAndStoreReceipt(tenant, payment, allocation) {
       unit_label: tenant?.unit_label || null,
       amount: payment?.amount,
       doc_date: payment?.payment_date || null,
+      payment_id: payment?.id ?? null,
     });
   } catch (err) {
     console.error('[Documents] Receipt generation failed:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Receipt allocation snapshot for a RESOLVED overpayment: the original
+ * approved breakdown plus where the excess was finally placed — specific
+ * future billing periods (advance rent) or the tenant credit balance.
+ * The overpayment total resets to zero: once the resolution is saved,
+ * nothing unresolved remains on the payment.
+ */
+function buildResolutionAllocation(payment, resolution) {
+  let base = payment?.allocation_breakdown ?? null;
+  if (typeof base === 'string') {
+    try { base = JSON.parse(base); } catch (_) { base = null; }
+  }
+  if (!base || typeof base !== 'object') base = {};
+
+  const isAdvance = resolution?.type === 'advance_rent';
+  const months = isAdvance && Array.isArray(resolution.months)
+    ? resolution.months.filter((m) => Number(m?.amount || 0) > 0)
+    : [];
+  const credited = !isAdvance ? Math.max(0, Number(resolution?.creditedAmount || 0)) : 0;
+
+  return {
+    ...base,
+    paymentType: base.paymentType || (payment?.payment_type === 'deposit' ? 'deposit' : 'rent'),
+    advanceMonths: months.length ? months : undefined,
+    creditCredited: credited > 0 ? credited : undefined,
+    overpayment: 0,
+    remainingBalance: Number(base.remainingBalance || 0),
+  };
+}
+
+/**
+ * Generate — or regenerate IN PLACE — the single receipt PDF of a payment so
+ * it confirms a SAVED overpayment resolution (advance rent to specific future
+ * billing periods, or a credit balance). Same template, branding, receipt
+ * numbering and file name as the regular receipt; only the allocation rows
+ * and the resolved credit total differ. The existing documents row is reused
+ * so one payment keeps exactly one receipt. Never throws: a receipt failure
+ * must not fail the resolution itself.
+ */
+async function generateResolutionReceipt(tenant, payment, resolution) {
+  try {
+    if (!payment || !tenant) return null;
+    const allocation = buildResolutionAllocation(payment, resolution);
+    const html = buildReceiptHtml(tenant, payment, allocation);
+    const filename = receiptDocumentName({
+      receiptNo: payment?.receipt_number,
+      tenantName: tenant?.name,
+      unitCode: tenant?.unit_label || tenant?.tenant_code,
+    });
+    ensureDir();
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+
+    const existing = await store.findReceiptDocument(payment.id);
+    if (existing) {
+      return await store.updateReceiptDocument(existing.id, {
+        file_path: pdfPath,
+        filename,
+        amount: payment?.amount,
+      });
+    }
+    return await store.createDocument({
+      doc_type: 'receipt',
+      doc_number: payment?.receipt_number,
+      title: `Payment Receipt ${payment?.receipt_number || ''}`.trim(),
+      filename,
+      file_path: pdfPath,
+      tenant_code: tenant?.tenant_code || tenant?.id,
+      house_paybill_number: tenant?.house_id || tenant?.house_paybill_number || null,
+      property_name: tenant?.linked_house_name || tenant?.property_name || null,
+      unit_label: tenant?.unit_label || null,
+      amount: payment?.amount,
+      doc_date: payment?.payment_date || null,
+      payment_id: payment?.id ?? null,
+    });
+  } catch (err) {
+    console.error('[Documents] Resolution receipt generation failed:', err.message);
     return null;
   }
 }
@@ -166,7 +397,7 @@ async function generateAndStoreReceipt(tenant, payment, allocation) {
  * record it in the hub. `srcPath` is the source file; `filename` is the
  * descriptive delivery name.
  */
-async function storeGeneratedPdf({ srcPath, filename, doc_type, doc_number, title, tenant, house, amount, doc_date }) {
+async function storeGeneratedPdf({ srcPath, filename, doc_type, doc_number, title, tenant, house, amount, doc_date, reuse_invoice_doc }) {
   try {
     ensureDir();
     const target = path.join(DOCUMENTS_DIR, filename);
@@ -184,6 +415,7 @@ async function storeGeneratedPdf({ srcPath, filename, doc_type, doc_number, titl
       unit_label: tenant?.unit_label || null,
       amount: amount != null ? amount : null,
       doc_date: doc_date || null,
+      reuse_invoice_doc: reuse_invoice_doc === true,
     });
   } catch (err) {
     console.error('[Documents] Storing PDF failed:', err.message);
@@ -441,6 +673,7 @@ async function generateAndStoreRentInvoice(tenantCode, billingPeriod, actor) {
       unit_label: data.tenant.unit_label || null,
       amount: data.total_due,
       doc_date: new Date().toISOString().slice(0, 10),
+      reuse_invoice_doc: true,
     });
 
     return await registerInvoice(doc, {
@@ -456,8 +689,8 @@ async function generateAndStoreRentInvoice(tenantCode, billingPeriod, actor) {
       amount: data.total_due,
     });
   } catch (err) {
-    console.error('[Documents] Rent invoice generation failed:', err.message);
-    return null;
+    console.error('[Documents] Rent invoice generation failed:', err.message, err.stack);
+    throw err;
   }
 }
 
@@ -480,36 +713,48 @@ function exitInvoiceLinesRows(lines) {
 function buildExitInvoiceHtml(invoice, tenant = {}) {
   const lines = parseItems(invoice.lines);
 
+  const rentTreatment = invoice.rent_treatment || 'full_month';
+  const rentCharged = Number(invoice.rent_charged_amount || 0);
+  const depositPaid = Number(invoice.deposit_paid || 0);
+  const waterCharges = Number(invoice.water_charges || 0);
+  const refundableAmount = depositPaid + waterCharges;
+  const deductionsTotal = Number(invoice.deductions_total || 0);
+  const outstanding = Number(invoice.outstanding_balance || 0);
+  const totalDeductions = outstanding + deductionsTotal;
+  const netRefund = refundableAmount - totalDeductions;
+
   // Management decision labels
   const rentLabels = { full_month: 'Full Month Rent', pro_rated: 'Pro-rated / Overstayed Days', waived: 'Rent Waived' };
-  const depositLabels = { apply_to_rent: 'Applied to Rent', apply_to_deductions: 'Applied to Deductions', apply_to_both: 'Applied to Rent & Deductions', refund: 'Deposit Refunded', other: 'Other Management Adjustment' };
-  const rentTreatment = invoice.rent_treatment || 'full_month';
-  const depositTreatment = invoice.deposit_treatment || 'apply_to_deductions';
-  const rentCharged = Number(invoice.rent_charged_amount || 0);
-  const depToRent = Number(invoice.deposit_applied_to_rent || 0);
-  const depToDed = Number(invoice.deposit_applied_to_deductions || 0);
-
-  // Always show management decision section on finalized invoices
   let decisionHtml = '';
-  if (invoice.status === 'Finalized' || rentTreatment !== 'full_month' || depositTreatment !== 'apply_to_deductions') {
+  if (invoice.status === 'Finalized' || rentTreatment !== 'full_month') {
     let d = '<div class="reason-box" style="border-color:#1a4b8c;background:#eef3fb;">';
     d += '<strong>Settlement Decision</strong><br>';
     d += `Rent Treatment: <strong>${rentLabels[rentTreatment] || rentTreatment}</strong>`;
     if (rentTreatment === 'waived') d += ' — KES 0 (excluded from settlement)';
     else if (rentCharged > 0) d += ` — KES ${KESNum(rentCharged)}`;
-    else d += ` — KES ${KESNum(Number(invoice.rent_amount || 0))}`;
     if (invoice.pro_rated_days) d += ` (${invoice.pro_rated_days} days)`;
-    d += '<br>';
-    d += `Deposit Treatment: <strong>${depositLabels[depositTreatment] || depositTreatment}</strong>`;
-    if (depToRent > 0) d += ` — KES ${KESNum(depToRent)} to rent`;
-    if (depToDed > 0) d += ` — KES ${KESNum(depToDed)} to deductions`;
-    if (depToRent === 0 && depToDed === 0 && depositTreatment === 'refund') d += ' — full refund';
-    if (depToRent === 0 && depToDed === 0 && depositTreatment === 'apply_to_deductions') d += ' — no deposit applied';
     d += '<br>';
     if (invoice.rent_treatment_reason) d += `<em>Reason: ${invoice.rent_treatment_reason}</em><br>`;
     if (invoice.settlement_decision_reason) d += `<em>Notes: ${invoice.settlement_decision_reason}</em>`;
     d += '</div>';
     decisionHtml = d;
+  }
+
+  // Build refundable items rows
+  let refundableRows = '';
+  refundableRows += `<tr><td>Deposit Paid</td><td style="text-align: right; color: #166534; font-weight: 600;">KES ${KESNum(depositPaid)}</td></tr>`;
+  refundableRows += `<tr><td>Water Charges (Refundable)</td><td style="text-align: right; color: #166534; font-weight: 600;">KES ${KESNum(waterCharges)}</td></tr>`;
+
+  // Build deduction items rows
+  let deductionRows = '';
+  deductionRows += `<tr><td>Outstanding Balance (arrears, rent, penalties, garbage)</td><td style="text-align: right; font-weight: 600;">KES ${KESNum(outstanding)}</td></tr>`;
+  if (lines && lines.length) {
+    for (const l of lines) {
+      const cat = l.category ? l.category.charAt(0).toUpperCase() + l.category.slice(1) : '';
+      const desc = l.description || l.label || '';
+      const display = desc ? (cat ? `${cat}: ${desc}` : desc) : (cat || 'Charge');
+      deductionRows += `<tr><td>${display}</td><td style="text-align: right; font-weight: 600;">KES ${KESNum(l.amount)}</td></tr>`;
+    }
   }
 
   return renderTemplate('exit_invoice.html', {
@@ -529,12 +774,16 @@ function buildExitInvoiceHtml(invoice, tenant = {}) {
       ? `<div class="reason-box"><strong>Exit Reason:</strong> ${invoice.reason}</div>`
       : '',
     decision_box: decisionHtml,
+    refundable_rows: refundableRows,
+    refundable_total: KESNum(refundableAmount),
+    deduction_rows: deductionRows,
+    deductions_total: KESNum(totalDeductions),
     lines_html: exitInvoiceLinesRows(lines),
-    deposit_paid: KESNum(invoice.deposit_paid),
-    deductions_total: KESNum(invoice.deductions_total),
-    outstanding_balance: KESNum(invoice.outstanding_balance),
-    deposit_refund: KESNum(invoice.deposit_refund),
-    final_settlement: KESNum(invoice.final_settlement),
+    deposit_paid: KESNum(depositPaid),
+    water_charges: KESNum(waterCharges),
+    outstanding_balance: KESNum(outstanding),
+    net_refund: KESNum(netRefund),
+    final_settlement: KESNum(netRefund),
   });
 }
 
@@ -567,6 +816,7 @@ async function generateAndStoreExitInvoice(id, actor) {
       unit_label: invoice.unit_label || null,
       amount: invoice.final_settlement,
       doc_date: invoice.move_out_date || new Date().toISOString().slice(0, 10),
+      reuse_invoice_doc: true,
     });
 
     return await registerInvoice(doc, {
@@ -606,16 +856,37 @@ function buildWaterInvoiceHtml(invoice) {
 
   const issueMonthLabel = new Date(invoice.created_at).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
-  const dueDateOrdinal = invoice.due_date
+  // Due date parts that accept Date objects (pg DATE columns arrive as local
+  // midnight Date objects), ISO strings, and fall back to the GEHPM rule:
+  // 5th of the payment month.
+  const dueParts = (() => {
+    const asParts = (d) => {
+      if (d instanceof Date && !isNaN(d)) {
+        return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+      }
+      const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+      return null;
+    };
+    return asParts(invoice.due_date)
+      || (invoice.payment_month ? asParts(`${invoice.payment_month}-05`) : null);
+  })();
+
+  const dueDateOrdinal = dueParts
     ? (() => {
-        const parts = String(invoice.due_date).split('-');
-        const year = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10);
-        const day = parseInt(parts[2], 10);
-        if (isNaN(day) || isNaN(month) || isNaN(year)) return 'N/A';
-        const suffix = ['th','st','nd','rd'][(day % 100 > 10 && day % 100 < 14) ? 0 : Math.min(day % 10, 3)];
+        const { year, month, day } = dueParts;
+        if (!day || !month || !year) return 'N/A';
+        const ordinal = (n) => {
+          if (n % 100 >= 11 && n % 100 <= 13) return `${n}th`;
+          switch (n % 10) {
+            case 1: return `${n}st`;
+            case 2: return `${n}nd`;
+            case 3: return `${n}rd`;
+            default: return `${n}th`;
+          }
+        };
         const monthName = ['', 'January','February','March','April','May','June','July','August','September','October','November','December'][month];
-        return `${day}${suffix} ${monthName} ${year}`;
+        return `${ordinal(day)} ${monthName} ${year}`;
       })()
     : 'N/A';
 
@@ -638,17 +909,21 @@ function buildWaterInvoiceHtml(invoice) {
 
   const house = invoice.house || {};
   const paymentMethod = (house.payment_method || 'paybill').toLowerCase();
+  // Formatting rules: payment MODE red, payment DETAILS (numbers/accounts)
+  // bold black. Labels stay unstyled.
+  const modeSpan = (t) => `<span style="${DOC_STYLE_MODE}">${escDocText(t)}</span>`;
+  const paySpan = (t) => `<span style="${DOC_STYLE_PAY}">${escDocText(t)}</span>`;
   let modeOfPayment = '';
   if (paymentMethod === 'paybill' && house.payment_paybill) {
     const acctFormat = house.account_number_format || '';
     const acctNumber = acctFormat.replace(/\{\{TENANT_CODE\}\}/gi, invoice.tenant_code || '');
-    modeOfPayment = `M-PESA Paybill ${house.payment_paybill}<br>Account Number: ${unitLabel}${acctNumber ? ' (' + acctNumber + ')' : ''}`;
+    modeOfPayment = `${modeSpan('M-PESA Paybill')} ${paySpan(house.payment_paybill)}<br>Account Number: ${unitLabel}${acctNumber ? ' (' + paySpan(acctNumber) + ')' : ''}`;
   } else if (paymentMethod === 'till' && house.till_number) {
-    modeOfPayment = `M-PESA Till ${house.till_number}${house.till_name ? ' (' + house.till_name + ')' : ''}`;
+    modeOfPayment = `${modeSpan('M-PESA Till')} ${paySpan(house.till_number)}${house.till_name ? ' (' + escDocText(house.till_name) + ')' : ''}`;
   } else if (paymentMethod === 'bank') {
-    modeOfPayment = `Bank Transfer<br>Bank: ${house.bank_name || 'N/A'}<br>Account Name: Gutenberg Elite Home & Property Managements<br>Account Number: ${house.bank_account || 'N/A'}`;
+    modeOfPayment = `${modeSpan('Bank Transfer')}<br>Bank: ${escDocText(house.bank_name || 'N/A')}<br>Account Name: Gutenberg Elite Home & Property Managements<br>Account Number: ${paySpan(house.bank_account || 'N/A')}`;
   } else {
-    modeOfPayment = `Payment via ${house.payment_method || 'M-PESA'} — Contact management for payment details.`;
+    modeOfPayment = `Payment via ${escDocText(house.payment_method || 'M-PESA')} — Contact management for payment details.`;
   }
 
   const defaultNotes = `Water charges for ${billingMonthLabel} are calculated from the recorded meter readings using the applicable water rate of KSh ${ratePerUnit.toLocaleString('en-US', { minimumFractionDigits: 2 })} per unit. Total consumption recorded is ${unitsUsed} units, resulting in a water bill of KSh ${waterBill.toLocaleString('en-US', { minimumFractionDigits: 2 })}. This invoice also includes the applicable rent, garbage fee and any previous outstanding balance.`;
@@ -718,6 +993,7 @@ async function generateAndStoreWaterInvoice(id, actor) {
       unit_label: invoice.unit_label || null,
       amount: invoice.total_amount,
       doc_date: invoice.due_date || new Date().toISOString().slice(0, 10),
+      reuse_invoice_doc: true,
     });
 
     return await registerInvoice(doc, {
@@ -734,6 +1010,57 @@ async function generateAndStoreWaterInvoice(id, actor) {
     });
   } catch (err) {
     console.error('[Documents] Water invoice generation failed:', err.message);
+    return null;
+  }
+}
+
+// ─── Water Bill Report (read-only reporting PDF) ────────────────────────────
+
+function buildWaterBillReportHtml(report) {
+  const fmt = (n) => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 });
+  const rowsHtml = (report.rows || []).map((r) => {
+    const vacant = r.occupancy === 'Vacant';
+    const note = vacant && r.usage_note
+      ? `<div class="usage-note">${esc(r.usage_note)}</div>` : '';
+    return `<tr class="${vacant ? 'vacant' : ''}">`
+      + `<td><strong>${esc(r.unit || '')}</strong></td>`
+      + `<td>${vacant ? '—' : esc(r.tenant_name || '')}</td>`
+      + `<td>${vacant ? 'Vacant' + note : 'Occupied'}</td>`
+      + `<td class="num">${Number(r.previous_reading || 0).toFixed(1)}</td>`
+      + `<td class="num">${Number(r.current_reading || 0).toFixed(1)}</td>`
+      + `<td class="num">${Number(r.consumption || 0).toFixed(1)}</td>`
+      + `<td class="num">${Number(r.rate_per_unit || 0).toFixed(2)}</td>`
+      + `<td class="num"><strong>${fmt(r.water_charge)}</strong></td>`
+      + `</tr>`;
+  }).join('') || '<tr><td colspan="8" style="text-align:center;">No units found.</td></tr>';
+  const t = report.totals || {};
+  const generated = new Date(report.generated_at || Date.now());
+  const generatedDate = `${String(generated.getDate()).padStart(2, '0')} ${generated.toLocaleString('en-US', { month: 'long' })} ${generated.getFullYear()}`;
+  return renderTemplate('water_bill_report.html', {
+    property_name: report.property_name || '',
+    billing_month_label: report.billing_month_label || '',
+    water_rate_label: `KES ${Number(report.water_rate || 0).toFixed(2)} / unit`,
+    generated_date: generatedDate,
+    rows_html: rowsHtml,
+    total_units: t.total_units ?? 0,
+    occupied_units: t.occupied_units ?? 0,
+    vacant_units: t.vacant_units ?? 0,
+    total_consumption: Number(t.total_consumption || 0).toFixed(1),
+    total_water_charges: fmt(t.total_water_charges),
+  });
+}
+
+async function generateWaterBillReportPdf(report, actor) {
+  try {
+    const safe = (s) => String(s || 'property').replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 40);
+    const filename = `WATER-BILL-REPORT-${safe(report.property_name)}-${report.billing_month}.pdf`;
+    ensureDir();
+    const html = buildWaterBillReportHtml(report);
+    // 8-column table: landscape keeps every column readable without shrinking.
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename, { landscape: true });
+    return { file_path: pdfPath, filename };
+  } catch (err) {
+    console.error('[Documents] Water bill report generation failed:', err.message);
     return null;
   }
 }
@@ -970,6 +1297,7 @@ async function generateAndStoreMaintenanceInvoice(id, actor) {
       unit_label: mnt.unit_codes || null,
       amount: mnt.grand_total,
       doc_date: mnt.date_reported || new Date().toISOString().slice(0, 10),
+      reuse_invoice_doc: true,
     });
 
     return await registerInvoice(doc, {
@@ -1036,7 +1364,8 @@ async function generateAndStoreWorkOrder(id) {
     });
     ensureDir();
     const html = buildWorkOrderHtml(wo);
-    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+    // 10-column issue register: landscape keeps every column legible.
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename, { landscape: true });
 
     return await store.createDocument({
       doc_type: 'work_order',
@@ -1050,6 +1379,7 @@ async function generateAndStoreWorkOrder(id) {
       unit_label: (wo.unit_codes || '').slice(0, 64) || null,
       amount: wo.total_cost,
       doc_date: wo.date_requested || new Date().toISOString().slice(0, 10),
+      reuse_invoice_doc: true,
     });
   } catch (err) {
     console.error('[Documents] Work order generation failed:', err.message);
@@ -1114,6 +1444,7 @@ async function generateAndStoreSalaryInvoice(recordId, actor) {
       unit_label: null,
       amount: Number(record.expected_salary || 0) + Number(record.previous_balance || 0),
       doc_date: new Date().toISOString().slice(0, 10),
+      reuse_invoice_doc: true,
     });
 
     return { filename, pdfPath, doc, invoice_number: invoiceNumber };
@@ -1126,8 +1457,9 @@ async function generateAndStoreSalaryInvoice(recordId, actor) {
 function buildReimbursementInvoiceHtml(invoice, payments) {
   const totalPaid = Number(invoice.total_paid || 0);
   const outstanding = Number(invoice.outstanding || 0);
-  const item = Array.isArray(invoice.items) && invoice.items.length ? invoice.items[0] : {};
-  const dynamicData = item.materials ? (typeof item.materials === 'string' ? JSON.parse(item.materials || '{}') : item.materials) : {};
+  const items = Array.isArray(invoice.items) ? invoice.items : [];
+  const firstItem = items.length ? items[0] : {};
+  const dynamicData = firstItem.materials ? (typeof firstItem.materials === 'string' ? JSON.parse(firstItem.materials || '{}') : firstItem.materials) : {};
 
   let paymentsSection = '';
   if (payments && payments.length) {
@@ -1138,22 +1470,38 @@ function buildReimbursementInvoiceHtml(invoice, payments) {
     paymentsSection += '</tbody></table>';
   }
 
-  const staffName = dynamicData['mnt-person'] || item.work_done || 'Staff';
-  const purpose = item.problem || 'Staff reimbursement';
-  const originalAmount = Number(item.labour_cost || 0) + Number(item.material_cost || 0);
+  const staffName = dynamicData['mnt-person'] || firstItem.work_done || 'Staff';
+  const purpose = firstItem.problem || 'Staff reimbursement';
+  const totalOriginal = items.reduce((s, it) => s + Number(it.labour_cost || 0) + Number(it.material_cost || 0), 0);
+
+  // Build per-plot expenses table
+  let plotExpensesTable = '';
+  if (items.length > 1) {
+    let rows = '';
+    items.forEach(it => {
+      const mat = it.materials ? (typeof it.materials === 'string' ? JSON.parse(it.materials || '{}') : it.materials) : {};
+      const plotName = mat.plot_name || mat.plot_paybill || it.unit_code || '—';
+      const desc = mat.plot_description || it.problem || '—';
+      const amt = Number(it.labour_cost || 0) + Number(it.material_cost || 0);
+      rows += `<tr><td>${plotName}</td><td>${desc}</td><td style="text-align:right;">KES ${KESNum(amt)}</td></tr>`;
+    });
+    rows += `<tr style="font-weight:700;background:#f0f0ff;"><td colspan="2" style="text-align:right;">TOTAL</td><td style="text-align:right;">KES ${KESNum(totalOriginal)}</td></tr>`;
+    plotExpensesTable = '<div style="margin-bottom:12px;"><div style="font-weight:700;font-size:12px;color:#1a4b8c;margin-bottom:6px;">PLOT EXPENSES BREAKDOWN</div><table><thead><tr><th>Plot / Property</th><th>Description</th><th style="text-align:right;">Amount (KES)</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
 
   return renderTemplate('reimbursement_invoice.html', {
     date: formatDate(new Date(), { monthFull: true }),
     invoice_number: invoice.mnt_number || 'REIMB-000',
     employee_name: staffName,
     expense_date: formatDate(invoice.date_reported),
-    property_name: invoice.property_name || '—',
+    property_name: invoice.property_name || 'All Properties',
     purpose: purpose,
-    original_amount: KESNum(originalAmount),
-    previous_outstanding: KESNum(originalAmount - totalPaid),
+    original_amount: KESNum(totalOriginal),
+    previous_outstanding: KESNum(totalOriginal - totalPaid),
     total_paid: KESNum(totalPaid),
     outstanding: KESNum(outstanding),
     status: invoice.status || 'Pending Reimbursement',
+    plot_expenses_table: plotExpensesTable,
     payments_section: paymentsSection,
   });
 }
@@ -1184,6 +1532,7 @@ async function generateAndStoreReimbursementInvoice(invoiceId, actor) {
       unit_label: null,
       amount: invoice.grand_total,
       doc_date: invoice.date_reported || new Date().toISOString().slice(0, 10),
+      reuse_invoice_doc: true,
     });
 
     return { filename, pdfPath, doc, invoice_number: invoice.mnt_number };
@@ -1248,7 +1597,7 @@ function buildExpenseInvoiceHtml(invoice, payments) {
     invoice_title: `${categoryLabel.toUpperCase()} INVOICE`,
     category: categoryLabel,
     expense_date: formatDate(invoice.date_reported),
-    property_name: invoice.property_name || '—',
+    property_name: invoice.property_name || 'All Properties',
     source: woRef ? `Work Order (${woRef})` : source,
     dynamic_fields_html: dynamicFieldsHtml,
     total_amount: KESNum(totalAmount),
@@ -1289,6 +1638,7 @@ async function generateAndStoreExpenseInvoice(invoiceId, actor) {
       unit_label: null,
       amount: invoice.grand_total,
       doc_date: invoice.date_reported || new Date().toISOString().slice(0, 10),
+      reuse_invoice_doc: true,
     });
 
     return { filename, pdfPath, doc, invoice_number: invoice.mnt_number };
@@ -1355,7 +1705,7 @@ function buildManagementExpensesReportHtml(report) {
     .inv-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
     .inv-title{font-size:16px;font-weight:700;color:#1a4b8c}
     .inv-date{font-weight:700;font-size:12px}
-    .inv-no-bar{display:inline-block;background:#1a4b8c;color:white;font-weight:700;font-size:12px;padding:5px 12px;border-radius:4px;margin-bottom:10px}
+    .inv-no-bar{display:inline-block;background:#e9f1fd;border:1px solid #bfd6f5;color:#1e3a8a;font-weight:700;font-size:12px;padding:5px 12px;border-radius:4px;margin-bottom:10px}
     .summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
     .summary-box{border:1px solid #dee2e6;border-radius:6px;padding:8px 10px;text-align:center}
     .summary-box .label{font-weight:700;font-size:9px;color:#666;text-transform:uppercase;margin-bottom:2px}
@@ -1378,13 +1728,13 @@ function buildManagementExpensesReportHtml(report) {
   </style></head><body>
   <div class="header"><img src="${readLogoBase64()}" alt="Logo"><div class="header-content"><h1 class="company-title">GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</h1><p class="company-slogan">Find a Home. Leave the Management to Us</p><p class="company-details">Dealers in: Rent management, property and General Consultancy<br>Located in Ruiru, Juja | Tel: +254 702 705 821 | Email: jujaview@gmail.com</p></div></div>
   <div class="separator-bar"></div>
-  <div class="inv-header"><div class="inv-title">MANAGEMENT EXPENSES REPORT</div><div class="inv-date">${formatDate(new Date(), { monthFull: true })}</div></div>
-  <span class="inv-no-bar">REPORT PERIOD: ${report.month || 'All Time'}</span>
+  <div class="inv-header"><div class="inv-title">MANAGEMENT EXPENSES REPORT</div><div class="inv-date"><span style="${DOC_STYLE_PH}">${escDocText(formatDate(new Date(), { monthFull: true }))}</span></div></div>
+  <span class="inv-no-bar">REPORT PERIOD: <span style="${DOC_STYLE_PH}">${escDocText(report.month || 'All Time')}</span></span>
   <div class="summary-grid">
-    <div class="summary-box"><div class="label">Total Incurred</div><div class="value cyan">KES ${Number(summary.total_incurred || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div></div>
-    <div class="summary-box"><div class="label">Total Paid</div><div class="value green">KES ${Number(summary.total_paid || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div></div>
-    <div class="summary-box"><div class="label">Outstanding</div><div class="value red">KES ${Number(summary.total_outstanding || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div></div>
-    <div class="summary-box"><div class="label">Total Expenses</div><div class="value">${expenses.length}</div></div>
+    <div class="summary-box"><div class="label">Total Incurred</div><div class="value cyan"><span style="${DOC_STYLE_PH}">KES ${Number(summary.total_incurred || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div></div>
+    <div class="summary-box"><div class="label">Total Paid</div><div class="value green"><span style="${DOC_STYLE_PH}">KES ${Number(summary.total_paid || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div></div>
+    <div class="summary-box"><div class="label">Outstanding</div><div class="value red"><span style="${DOC_STYLE_PH}">KES ${Number(summary.total_outstanding || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div></div>
+    <div class="summary-box"><div class="label">Total Expenses</div><div class="value"><span style="${DOC_STYLE_PH}">${expenses.length}</span></div></div>
   </div>
   ${propertySummarySection}
   <div class="section-label">Expenses by Category</div>
@@ -1392,6 +1742,10 @@ function buildManagementExpensesReportHtml(report) {
   <div class="section-label">Full Expense List</div>
   ${hasExpenses ? `<table><thead><tr><th>Date</th><th>Invoice #</th><th>Category</th><th>Description</th><th>Property</th><th>Source</th><th style="text-align:right">Amount</th><th>Status</th></tr></thead><tbody>${expensesHtml}</tbody></table>` : '<div class="no-activity">No expenses recorded for this period.</div>'}
   ${salarySection}
+  <div style="margin:6px 0;line-height:1.5;">
+    <div>For: GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</div>
+    <div>{{GEHM_STAMP_LINE}}</div>
+  </div>
   <div class="footer-bar"></div>
   <div class="footer-text">Gutenberg Elite Home & Property Managements</div>
   <div class="footer-slogan">Find a Home. Leave the Management to Us</div>
@@ -1403,7 +1757,8 @@ async function generateAndStoreManagementExpensesReport(reportData, actor) {
     const filename = `Management-Expenses-Report_${(reportData.month || 'all').replace(/[^A-Za-z0-9]/g, '-')}.pdf`;
     ensureDir();
     const html = buildManagementExpensesReportHtml(reportData);
-    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+    // Wide expense/salary tables: landscape keeps headings and figures clear.
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename, { landscape: true });
 
     const doc = await store.createDocument({
       doc_type: 'management_expenses_report',
@@ -1435,25 +1790,30 @@ function buildStaffAdvanceHtml(advance, payments) {
   const path = require('path');
   const templatePath = path.join(__dirname, '..', 'templates', 'staff_advance_invoice.html');
   let html = fs.readFileSync(templatePath, 'utf8');
+  html = html.replace('{{logo_base64}}', readLogoBase64());
   const formatKes = (v) => `KES ${Number(v || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
   const statusBadge = (s) => {
     const cls = s === 'Fully Recovered' ? 'status-full' : s === 'Written Off' ? 'status-pending' : 'status-partial';
     return `<span class="status-badge ${cls}">${s || 'Pending'}</span>`;
   };
+  const advanceNo = `ADV-${String(advance.id).padStart(5, '0')}`;
   const replacements = {
     '{{generatedDate}}': new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
+    '{{advanceNo}}': advanceNo,
     '{{employeeName}}': advance.employee_name || '',
+    '{{personType}}': advance.person_type || 'Employee',
+    '{{propertyName}}': advance.property_name || '—',
+    '{{unitCode}}': advance.unit_code || '—',
     '{{dateAdvanced}}': advance.date_advanced ? new Date(advance.date_advanced).toLocaleDateString('en-KE') : '',
     '{{reason}}': advance.reason || '—',
     '{{recoveryMethod}}': (advance.recovery_method || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-    '{{propertyUnit}}': advance.property_name ? `${advance.property_name}${advance.unit_code ? ' / ' + advance.unit_code : ''}` : '—',
     '{{expectedRecovery}}': advance.expected_recovery_month || '—',
     '{{amountAdvanced}}': formatKes(advance.amount),
     '{{amountRecovered}}': formatKes(advance.amount_recovered),
     '{{outstandingBalance}}': formatKes(advance.outstanding),
   };
   for (const [key, val] of Object.entries(replacements)) {
-    html = html.split(key).join(val);
+    html = html.split(key).join(styleDocValue(key.replace(/^\{\{|\}\}$/g, ''), val));
   }
   html = html.replace('{{{statusBadge}}}', statusBadge(advance.status));
 
@@ -1467,22 +1827,20 @@ function buildStaffAdvanceHtml(advance, payments) {
     }
     paymentsHtml += '</tbody></table>';
   } else {
-    paymentsHtml = '<p style="color:#94a3b8;font-style:italic;">No recovery payments recorded yet.</p>';
+    paymentsHtml = '<p style="color:#6c757d;font-style:italic;font-size:11px;">No recovery payments recorded yet.</p>';
   }
-  html = html.replace(/{{#if payments\.length}}[\s\S]*?{{\/if}}/, paymentsHtml);
-  html = html.replace(/\{\{#each payments\}\}[\s\S]*?\{\{\/each\}\}/, '');
+  html = html.replace('{{paymentsSection}}', paymentsHtml);
 
   if (advance.notes) {
-    html = html.replace(/{{#if notes}}[\s\S]*?{{\/if}}/, `<div class="section-title">Notes</div><p style="font-size:13px;color:#475569;">${advance.notes}</p>`);
+    html = html.replace('{{notesSection}}', `<div class="section-label">Notes</div><div class="note-box" style="text-align:left;color:#333;background:#f8f9fa;border-color:#dee2e6;">${advance.notes}</div>`);
   } else {
-    html = html.replace(/{{#if notes}}[\s\S]*?{{\/if}}/, '');
+    html = html.replace('{{notesSection}}', '');
   }
   return html;
 }
 
 async function generateAndStoreStaffAdvanceInvoice(advanceId) {
-  const { query } = require('../db/pool');
-  const { generatePdfToFile } = require('./pdfGenerator');
+  const { query } = require('../config/database');
   const { staffAdvanceInvoiceDocumentName } = require('./docNames');
   try {
     const advRes = await query('SELECT * FROM staff_advances WHERE id = $1', [advanceId]);
@@ -1492,13 +1850,10 @@ async function generateAndStoreStaffAdvanceInvoice(advanceId) {
     const payments = payRes.rows;
     const html = buildStaffAdvanceHtml(advance, payments);
     const filename = staffAdvanceInvoiceDocumentName(advance.employee_name);
-    const { filename: pdfFilename, filepath: pdfPath } = await generatePdfToFile(html, filename);
-    const doc = await storeGeneratedPdf(pdfFilename, pdfPath, {
-      title: `Staff Advance Invoice — ${advance.employee_name}`,
-      source_type: 'staff_advance_invoice',
-      source_id: advance.id,
-    });
-    return { filename: pdfFilename, pdfPath, doc };
+    ensureDir();
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+    const doc = await storeGeneratedPdf({ srcPath: pdfPath, filename, doc_type: 'staff_advance_invoice', doc_number: filename, title: `Staff Advance Invoice — ${advance.employee_name}`, reuse_invoice_doc: true });
+    return { filename, pdfPath, doc };
   } catch (err) {
     console.error('[Documents] Staff advance invoice generation failed:', err.message);
     return null;
@@ -1536,7 +1891,7 @@ function buildEmployeeRentHtml(rent, payments) {
     '{{outstanding}}': formatKes(rent.outstanding),
   };
   for (const [key, val] of Object.entries(replacements)) {
-    html = html.split(key).join(val);
+    html = html.split(key).join(styleDocValue(key.replace(/^\{\{|\}\}$/g, ''), val));
   }
   html = html.replace('{{{statusBadge}}}', statusBadge(rent.status));
 
@@ -1562,8 +1917,7 @@ function buildEmployeeRentHtml(rent, payments) {
 }
 
 async function generateAndStoreEmployeeRentInvoice(rentId) {
-  const { query } = require('../db/pool');
-  const { generatePdfToFile } = require('./pdfGenerator');
+  const { query } = require('../config/database');
   const { employeeRentInvoiceDocumentName } = require('./docNames');
   try {
     const rentRes = await query('SELECT * FROM employee_rent WHERE id = $1', [rentId]);
@@ -1573,23 +1927,64 @@ async function generateAndStoreEmployeeRentInvoice(rentId) {
     const payments = payRes.rows;
     const html = buildEmployeeRentHtml(rent, payments);
     const filename = employeeRentInvoiceDocumentName(rent.employee_name, rent.rent_period);
-    const { filename: pdfFilename, filepath: pdfPath } = await generatePdfToFile(html, filename);
-    const doc = await storeGeneratedPdf(pdfFilename, pdfPath, {
-      title: `Employee Rent — ${rent.employee_name} (${rent.rent_period})`,
-      source_type: 'employee_rent_invoice',
-      source_id: rent.id,
-    });
-    return { filename: pdfFilename, pdfPath, doc };
+    ensureDir();
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+    const doc = await storeGeneratedPdf({ srcPath: pdfPath, filename, doc_type: 'employee_rent_invoice', doc_number: filename, title: `Employee Rent — ${rent.employee_name} (${rent.rent_period})`, reuse_invoice_doc: true });
+    return { filename, pdfPath, doc };
   } catch (err) {
     console.error('[Documents] Employee rent invoice generation failed:', err.message);
     return null;
   }
 }
 
+// ─── Documents Hub letters (templates) ──────────────────────────────────────
+
+function buildLetterHtml({ subject, recipientBlock, dateLine, refNo, bodyHtml, senderName, senderTitle }) {
+  // Pre-assigned authorized signature: image marker resolves here and the
+  // printed name becomes the holder's (not the generating operator's).
+  // Unconfigured → byte-identical legacy behavior.
+  const { applySignatureMarkers, getActiveSignature } = require('./officialSignature');
+  const sig = getActiveSignature();
+  const html = renderTemplate('letter.html', {
+    subject: subject || '',
+    recipient_block: recipientBlock || '',
+    date_line: dateLine || '',
+    ref_no: refNo || '',
+    body_html: bodyHtml || '',
+    sender_name: (sig ? sig.holderName : senderName) || 'Management',
+    sender_title: senderTitle || 'Property Manager',
+  });
+  return applySignatureMarkers(html);
+}
+
+async function generateLetterPdfFile({ docNumber, subject, recipientBlock, bodyHtml, senderName, senderTitle, templateKey, dateLine }) {
+  const safeKey = String(templateKey || 'letter').replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 30);
+  const filename = `${docNumber}_${safeKey}.pdf`;
+  ensureDir();
+  const html = buildLetterHtml({
+    subject, recipientBlock,
+    dateLine: dateLine || new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
+    refNo: docNumber,
+    bodyHtml, senderName, senderTitle,
+  });
+  const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+  return { file_path: pdfPath, filename };
+}
+
 module.exports = {
   DOCUMENTS_DIR,
+  renderTemplate,
+  applyPrintStyles,
+  DOC_STYLE_PH,
+  DOC_STYLE_PAY,
+  DOC_STYLE_MODE,
+  DOC_STYLE_NUM,
+  DOC_STYLE_WARN,
+  escDocText,
+  styleDocValue,
   buildReceiptHtml,
   generateAndStoreReceipt,
+  generateResolutionReceipt,
   storeGeneratedPdf,
   buildTenantStatementHtml,
   generateAndStoreTenantStatement,
@@ -1616,4 +2011,9 @@ module.exports = {
   generateAndStoreEmployeeRentInvoice,
   buildWaterInvoiceHtml,
   generateAndStoreWaterInvoice,
+  buildWaterBillReportHtml,
+  generateWaterBillReportPdf,
+  buildLetterHtml,
+  generateLetterPdfFile,
+  applyWatermark,
 };

@@ -17,6 +17,8 @@ const store = require('./storage/store');
 const { healthDetailedAuth } = require('./middleware/healthGate');
 
 const authRoutes = require('./routes/auth');
+const settingsRoutes = require('./routes/settings');
+const arrangementRoutes = require('./routes/paymentArrangements');
 const userRoutes = require('./routes/users');
 const tenantRoutes = require('./routes/tenants');
 const paymentRoutes = require('./routes/payments');
@@ -39,9 +41,10 @@ const pendingOverpaymentRoutes = require('./routes/pendingOverpayments');
 const invoiceRegisterRoutes = require('./routes/invoiceRegister');
 const monthlyReportRoutes = require('./routes/monthlyReports');
 const whatsappRoutes = require('./routes/whatsapp');
+const smsRoutes = require('./routes/sms');
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3001;
+const PORT = Number(process.env.PORT) || 3003;
 const HOST = process.env.HOST || '0.0.0.0';
 
 assertProductionSecrets();
@@ -55,6 +58,8 @@ app.use(express.json({ limit: '256kb' }));
 app.disable('x-powered-by');
 
 app.use('/api/auth', authRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/arrangements', arrangementRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/payments', paymentRoutes);
@@ -83,9 +88,13 @@ app.use('/api/invoice-register', invoiceRegisterRoutes);
 app.use('/api/monthly-reports', monthlyReportRoutes);
 app.use('/api/deposit-refunds', require('./routes/depositRefunds'));
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/sms', smsRoutes);
 app.use('/api/future-tenancies', require('./routes/futureTenancies'));
 app.use('/api/house-charges', require('./routes/houseCharges'));
 app.use('/api/water-invoices', require('./routes/waterInvoices'));
+app.use('/api/sync', require('./routes/sync'));
+app.use('/api/inspections', require('./routes/inspections'));
+app.use('/api/commissions', require('./routes/commissions'));
 
 app.get('/api/health', healthDetailedAuth, (req, res) => {
   const payload = { ok: true, timestamp: new Date().toISOString() };
@@ -139,6 +148,13 @@ async function bootstrap() {
     console.error('[WhatsApp Module]', err?.message || err);
   }
 
+  try {
+    const { ensureSmsSchema } = require('./services/smsBytewave');
+    await ensureSmsSchema();
+  } catch (err) {
+    console.error('[SMS Module]', err?.message || err);
+  }
+
   startScheduler();
 
   function tryListen(port) {
@@ -147,12 +163,8 @@ async function bootstrap() {
       console.log(`[Server] Rental Messaging (${isProduction() ? 'production' : 'dev'}) http://${HOST}:${port}`);
     });
     srv.on('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.warn(`[Server] Port ${port} in use, trying ${port + 1}...`);
-        tryListen(port + 1);
-      } else {
-        throw err;
-      }
+      console.error(`[Server] Failed to start on port ${port}: ${err.message}`);
+      process.exit(1);
     });
   }
   tryListen(PORT);

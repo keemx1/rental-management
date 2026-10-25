@@ -75,6 +75,9 @@ router.post('/', async (req, res) => {
 
     res.status(201).json({ future_tenancy: tenancy });
   } catch (err) {
+    if (err && err.code === 'RESERVED_CONFLICT') {
+      return res.status(409).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Failed to create future tenancy' });
   }
 });
@@ -197,6 +200,15 @@ router.post('/:id/activate', async (req, res) => {
       other_paid: result.otherPaid,
     });
   } catch (err) {
+    if (err && err.code === 'UNIT_OCCUPIED') {
+      return res.status(409).json({ error: err.message });
+    }
+    if (err && /not found/i.test(err.message || '')) {
+      return res.status(404).json({ error: err.message });
+    }
+    if (err && /not in RESERVED status/i.test(err.message || '')) {
+      return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: err.message || 'Failed to activate future tenancy' });
   }
 });

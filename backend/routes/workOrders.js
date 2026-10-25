@@ -33,7 +33,7 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { items, status, priority } = req.body;
+    const { items, status, priority, client_txn_id } = req.body;
     if (!items || !items.length) {
       return res.status(400).json({ error: 'At least one work item is required' });
     }
@@ -43,7 +43,15 @@ router.post('/', async (req, res) => {
     if (priority && !VALID_PRIORITIES.includes(priority)) {
       return res.status(400).json({ error: `priority must be one of: ${VALID_PRIORITIES.join(', ')}` });
     }
+    // Idempotent replay of an already-uploaded offline work order.
+    if (client_txn_id) {
+      const replay = await store.findRecordByClientTxnId('work_orders', client_txn_id);
+      if (replay) return res.json({ order: replay, already_synced: true });
+    }
     const order = await store.createWorkOrder(req.body);
+    if (order._idempotentReplay) {
+      return res.json({ order, already_synced: true });
+    }
     // Trigger QR-linked WhatsApp maintenance notification (non-blocking)
     try {
       const notifEngine = require('../whatsapp/NotificationEngine');
@@ -53,6 +61,13 @@ router.post('/', async (req, res) => {
     } catch (_) {}
     res.status(201).json({ order });
   } catch (err) {
+    // Race: parallel upload won — return the existing row idempotently.
+    if (err && err.code === '23505' && req.body?.client_txn_id) {
+      try {
+        const replay = await store.findRecordByClientTxnId('work_orders', req.body.client_txn_id);
+        if (replay) return res.json({ order: replay, already_synced: true });
+      } catch (_) {}
+    }
     res.status(500).json({ error: 'Failed to create work order: ' + err.message });
   }
 });
@@ -118,7 +133,8 @@ router.post('/:id/generate', async (req, res) => {
     if (!phone) return res.status(400).json({ error: 'phone_number is required for WhatsApp delivery' });
 
     try {
-      await whatsapp.sendMediaMessage(phone, doc.file_path, `Hello, please find attached work order ${doc.doc_number} for ${doc.property_name || 'the property'}.`);
+      const waResult = await whatsapp.sendDocumentSmart(phone, doc.file_path, `Hello, please find attached work order ${doc.doc_number} for ${doc.property_name || 'the property'}.`);
+      if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the document');
     } catch (err) {
       return res.status(500).json({ error: 'WhatsApp delivery failed: ' + err.message });
     }

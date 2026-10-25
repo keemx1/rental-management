@@ -6,39 +6,35 @@ const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
 const { getPuppeteerLaunchOptions } = require('../config/puppeteerChrome');
-const { getLogoBase64 } = require('../services/logo');
-const { storeGeneratedPdf } = require('../services/documentStore');
+const { storeGeneratedPdf, renderTemplate, applyPrintStyles } = require('../services/documentStore');
+const { applyStampWithFallback } = require('../services/officialStamp');
 const { generateAndStoreRentInvoice } = require('../services/documentStore');
 const { invoiceDocumentName, renameForDelivery } = require('../services/docNames');
 
 const router = express.Router();
 router.use(requireAuthActive);
 
-function readLogoBase64() {
-  return getLogoBase64();
-}
-
 async function generatePdf(html) {
   const browser = await puppeteer.launch(getPuppeteerLaunchOptions());
   const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: 'networkidle0' });
+  // Same finalized-PDF treatment as the central pipeline: official stamp
+  // markers resolve here (or vanish when no stamp is active), then the
+  // shared print rules (repeating table heads, rows never split, print-safe
+  // margins matching documentStore).
+  await page.setContent(applyPrintStyles(applyStampWithFallback(html)), { waitUntil: 'networkidle0' });
   const pdfPath = path.join(__dirname, `../../scratch/invoice_${Date.now()}_${Math.floor(Math.random() * 100000)}.pdf`);
   if (!fs.existsSync(path.dirname(pdfPath))) {
     fs.mkdirSync(path.dirname(pdfPath), { recursive: true });
   }
-  await page.pdf({ path: pdfPath, format: 'A4', printBackground: true, margin: { top: '0px', bottom: '0px' } });
+  await page.pdf({ path: pdfPath, format: 'A4', printBackground: true, margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' } });
   await browser.close();
   return pdfPath;
 }
 
-function renderTemplate(templateName, vars) {
-  const templatePath = path.join(__dirname, `../templates/${templateName}`);
-  let html = fs.readFileSync(templatePath, 'utf8');
-  html = html.replace('{{logo_base64}}', readLogoBase64());
-  for (const [key, value] of Object.entries(vars)) {
-    html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => String(value ?? ''));
-  }
-  return html;
+// Shared styled renderer (same placeholder/mode/details/number emphasis as
+// every other system PDF) — local values flow through documentStore.
+function renderTemplateLocal(templateName, vars) {
+  return renderTemplate(templateName, vars);
 }
 
 async function buildMaintenanceInvoiceHtml(tenant, house, invoiceNumber, date, items) {
@@ -62,7 +58,7 @@ async function buildMaintenanceInvoiceHtml(tenant, house, invoiceNumber, date, i
   }).join('');
   const grandTotal = subtotal + deductions;
   const paymentInstructions = house ? store.getPaymentInstructionsText(house, tenant.tenant_code) : '';
-  return renderTemplate('invoice.html', {
+  return renderTemplateLocal('invoice.html', {
     date,
     plot_name: house ? `${house.house_name} ${tenant.tenant_code}` : (tenant.property_name || ''),
     tenant_name: tenant.name,
@@ -111,7 +107,7 @@ async function buildExitInvoiceHtml(tenant, house, invoiceNumber, date, summary,
     paymentInstructions = house ? store.getPaymentInstructionsText(house, tenant.tenant_code) : 'Kindly settle the outstanding amount before vacating the unit.';
   }
 
-  return renderTemplate('exit_invoice.html', {
+  return renderTemplateLocal('exit_invoice.html', {
     date,
     plot_name: house ? `${house.house_name} ${tenant.tenant_code}` : (tenant.property_name || ''),
     tenant_name: tenant.name,
@@ -218,6 +214,7 @@ router.post('/send', async (req, res) => {
         filename: docName,
         doc_type: invoiceType === 'exit' ? 'exit_invoice' : 'invoice',
         doc_number: invoiceNumber,
+        reuse_invoice_doc: true,
         title: `${invoiceType === 'exit' ? 'Exit Invoice' : 'Invoice'} ${invoiceNumber}`,
         tenant,
         house,
@@ -257,7 +254,8 @@ router.post('/send', async (req, res) => {
 
     try {
       deliveredPath = renameForDelivery(pdfPath, docName);
-      await whatsapp.sendMediaMessage(tenant.phone_number, deliveredPath, buildWhatsAppCaption(tenant, invoiceType));
+      const waResult = await whatsapp.sendDocumentSmart(tenant.phone_number, deliveredPath, buildWhatsAppCaption(tenant, invoiceType));
+      if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the document');
       await store.logMessage({
         tenantId: tenant.id,
         messageType: 'Invoice',
@@ -308,7 +306,7 @@ router.post('/rent', async (req, res) => {
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
     const doc = await generateAndStoreRentInvoice(tenant.tenant_code, billingPeriod, req.user?.username);
-    if (!doc) return res.status(500).json({ error: 'Failed to generate rent invoice' });
+    if (!doc) return res.status(500).json({ error: 'Failed to generate rent invoice. Check server logs for details.' });
 
     const mark = (action) => {
       if (doc.register_id) store.markInvoiceRegister({ id: doc.register_id, action }).catch(() => {});
@@ -328,7 +326,8 @@ router.post('/rent', async (req, res) => {
     }
 
     try {
-      await whatsapp.sendMediaMessage(tenant.phone_number, doc.file_path, caption);
+      const waResult = await whatsapp.sendDocumentSmart(tenant.phone_number, doc.file_path, caption);
+      if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the document');
       await store.logMessage({
         tenantId: tenant.id,
         messageType: 'Invoice',

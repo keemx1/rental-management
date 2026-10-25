@@ -36,7 +36,7 @@ router.get('/status', async (req, res) => {
 
 router.post('/connect', async (req, res) => {
   try {
-    await sessionManager.connect();
+    await sessionManager.connect(true);
     res.json({ ok: true, state: sessionManager.getState().toLowerCase() });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Failed to connect WhatsApp' });
@@ -86,12 +86,17 @@ router.post('/send-test', async (req, res) => {
       return res.status(400).json({ error: 'Invalid phone number' });
     }
     const result = await sessionManager.sendText(normalized, message);
-    // Log the test message
+    // Log the test message (module log + app-wide message history)
     try {
       await pool.query(
         `INSERT INTO whatsapp_message_log (phone_number, direction, message_type, content, status, provider_message_id)
          VALUES ($1, 'outbound', 'text', $2, 'sent', $3)`,
         [normalized, message, result?.id || null]
+      );
+      await pool.query(
+        `INSERT INTO message_logs (message_type, message_body, status, whatsapp_message_id)
+         VALUES ('Test Message', $1, 'Sent', $2)`,
+        [message, result?.id || null]
       );
     } catch (_) {}
     res.json({ ok: true, result, message: 'Test message sent successfully' });
@@ -185,22 +190,31 @@ router.get('/messages', async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
     const offset = (page - 1) * limit;
 
+    // message_logs is the app-wide outbound history (confirmations, invoices,
+    // reminders, broadcasts, tests) — same source the stats cards count.
     const result = await pool.query(
-      `SELECT ml.id, ml.tenant_code, ml.phone_number, ml.direction, ml.message_type, ml.content, ml.status, ml.provider_message_id, ml.error_message, ml.created_at,
+      `SELECT ml.id, ml.tenant_code, t.phone_number, 'outbound' AS direction,
+              ml.message_type, ml.message_body AS content, ml.status,
+              ml.whatsapp_message_id AS provider_message_id,
+              ml.failure_reason AS error_message, ml.logged_at AS created_at,
               t.name as tenant_name, t.property_name
-       FROM whatsapp_message_log ml
+       FROM message_logs ml
        LEFT JOIN tenants t ON ml.tenant_code = t.tenant_code
-       ORDER BY ml.created_at DESC
+       WHERE ml.message_type NOT LIKE 'SMS%'
+       ORDER BY ml.logged_at DESC, ml.id DESC
        LIMIT $1 OFFSET $2`,
       [limit, offset]
     );
 
-    const countResult = await pool.query('SELECT COUNT(*) AS total FROM whatsapp_message_log');
+    const countResult = await pool.query(
+      `SELECT COUNT(*) AS total FROM message_logs WHERE message_type NOT LIKE 'SMS%'`
+    );
     const total = Number(countResult.rows[0].total);
 
     const data = {
       messages: result.rows.map(r => ({
         ...r,
+        phone_number: normalizePhone(r.phone_number) || r.phone_number,
         id: Number(r.id),
       })),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
@@ -218,16 +232,22 @@ router.get('/messages', async (req, res) => {
 
 router.get('/messages/stats', async (req, res) => {
   try {
+    // message_logs is the app-wide outbound message history (confirmations,
+    // invoices, reminders, broadcasts); the queue feeds the pending count.
     const result = await pool.query(
       `SELECT
-        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)::int as today,
-        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '7 days')::int as this_week,
-        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '30 days')::int as this_month,
-        COUNT(*) FILTER (WHERE status = 'sent')::int as sent_count,
-        COUNT(*) FILTER (WHERE status = 'failed')::int as failed_count,
-        COUNT(*) FILTER (WHERE status = 'delivered')::int as delivered_count,
-        COUNT(*)::int as total
-       FROM whatsapp_message_log`
+        (SELECT COUNT(*)::int FROM message_logs WHERE logged_at >= CURRENT_DATE) AS today,
+        (SELECT COUNT(*)::int FROM message_logs WHERE logged_at >= CURRENT_DATE - INTERVAL '7 days') AS this_week,
+        (SELECT COUNT(*)::int FROM message_logs WHERE logged_at >= CURRENT_DATE - INTERVAL '30 days') AS this_month,
+        (SELECT COUNT(*)::int FROM message_logs
+           WHERE status IN ('Sent','sent','Delivered','delivered','Read','read')) AS sent_count,
+        (SELECT COUNT(*)::int FROM message_logs
+           WHERE status IN ('Failed','failed')) AS failed_count,
+        (SELECT COUNT(*)::int FROM message_logs
+           WHERE status IN ('Delivered','delivered','Read','read')) AS delivered_count,
+        (SELECT COUNT(*)::int FROM whatsapp_message_queue
+           WHERE status IN ('queued','sending')) AS queued,
+        (SELECT COUNT(*)::int FROM message_logs WHERE message_type NOT LIKE 'SMS%') AS total`
     );
     res.json({ stats: result.rows[0] });
   } catch (err) {

@@ -102,32 +102,40 @@ function startScheduler() {
   // Monthly rent reminder on the 5th at 8:00 AM, with a same-day 1:00 PM
   // fallback, then a final forward to the 10th if the template is still
   // not approved. Retry chain: 5th 08:00 -> 5th 13:00 -> 10th 08:00.
-  monthlyReminderTask = cron.schedule(
-    '0 8 5 * *',
-    () => {
-      runMonthlyInitialReminderJob({ nextRetryLabel: 'at 13:00 today' }).catch((err) => console.error('[Cron Monthly 08:00]', err));
-    },
-    { scheduled: true, timezone: process.env.CRON_TZ || undefined }
-  );
-  console.log('[Cron] Monthly rent reminder scheduler registered (08:00 on the 5th).');
+  //
+  // DISABLED BY DEFAULT: bulk automated sends from an unofficial (Baileys)
+  // session risk a WhatsApp number ban. Set RENT_REMINDERS_ENABLED=true in
+  // .env to re-enable once on the official API — or send reminders manually.
+  if (String(process.env.RENT_REMINDERS_ENABLED || '').toLowerCase() === 'true') {
+    monthlyReminderTask = cron.schedule(
+      '0 8 5 * *',
+      () => {
+        runMonthlyInitialReminderJob({ nextRetryLabel: 'at 13:00 today' }).catch((err) => console.error('[Cron Monthly 08:00]', err));
+      },
+      { scheduled: true, timezone: process.env.CRON_TZ || undefined }
+    );
+    console.log('[Cron] Monthly rent reminder scheduler registered (08:00 on the 5th).');
 
-  cron.schedule(
-    '0 13 5 * *',
-    () => {
-      runMonthlyInitialReminderJob({ nextRetryLabel: 'on the 10th' }).catch((err) => console.error('[Cron Monthly 13:00]', err));
-    },
-    { scheduled: true, timezone: process.env.CRON_TZ || undefined }
-  );
-  console.log('[Cron] Monthly rent reminder fallback scheduler registered (13:00 on the 5th).');
+    cron.schedule(
+      '0 13 5 * *',
+      () => {
+        runMonthlyInitialReminderJob({ nextRetryLabel: 'on the 10th' }).catch((err) => console.error('[Cron Monthly 13:00]', err));
+      },
+      { scheduled: true, timezone: process.env.CRON_TZ || undefined }
+    );
+    console.log('[Cron] Monthly rent reminder fallback scheduler registered (13:00 on the 5th).');
 
-  cron.schedule(
-    '0 8 10 * *',
-    () => {
-      runMonthlyInitialReminderJob({ nextRetryLabel: 'next month' }).catch((err) => console.error('[Cron Monthly 10th]', err));
-    },
-    { scheduled: true, timezone: process.env.CRON_TZ || undefined }
-  );
-  console.log('[Cron] Monthly rent reminder 10th-forward scheduler registered (08:00 on the 10th).');
+    cron.schedule(
+      '0 8 10 * *',
+      () => {
+        runMonthlyInitialReminderJob({ nextRetryLabel: 'next month' }).catch((err) => console.error('[Cron Monthly 10th]', err));
+      },
+      { scheduled: true, timezone: process.env.CRON_TZ || undefined }
+    );
+    console.log('[Cron] Monthly rent reminder 10th-forward scheduler registered (08:00 on the 10th).');
+  } else {
+    console.log('[Cron] Monthly rent reminders DISABLED (RENT_REMINDERS_ENABLED is not "true") — no automatic WhatsApp blasts; manual sends still work.');
+  }
 }
 
 module.exports = { startScheduler, runMonthlyInitialReminderJob, runRolloverJob };

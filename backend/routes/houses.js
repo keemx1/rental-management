@@ -9,6 +9,7 @@ const store = require('../storage/store');
 const { streamWorkbook } = require('../services/excelStream');
 const { resolveLogoPath, getLogoExtension } = require('../services/logo');
 const { reportDocumentName, renameForDelivery } = require('../services/docNames');
+const { formatWorksheet } = require('../services/excelFormat');
 
 const router = express.Router();
 router.use(requireAuthActive);
@@ -47,28 +48,22 @@ router.get('/:id/dashboard', async (req, res) => {
 
     const buildingHouses = [selectedHouse];
     const buildingTenants = await store.listTenants({ house_id: selectedHouse.id, exclude_vacant: false });
-    const payments = await store.listPayments({ status: 'Approved' });
 
-    const currentMonth = new Date().toISOString().slice(0, 7);
-    const monthPayments = payments.filter((p) => String(p.payment_date || '').startsWith(currentMonth));
-
-    const tenantPaidTotals = {};
-    for (const p of monthPayments) {
-      const tid = String(p.tenant_id);
-      tenantPaidTotals[tid] = (tenantPaidTotals[tid] || 0) + Number(p.amount || 0);
-    }
-
+    // Payment state from the canonical rent-cycle counters (rent_paid_this_
+    // month / arrears), which approval, reconciliation and recalculation all
+    // maintain from complete approved payment history. Summing this calendar
+    // month's raw payments mis-labelled arrears/deposit settlements as rent
+    // and showed paid-up tenants (whose cycle rolled forward) as unpaid.
     const tenants = buildingTenants.map((t) => {
-      const tid = String(t.id);
-      const totalPaid = tenantPaidTotals[tid] || 0;
-      const rentDue = Number(t.rent_amount || 0);
+      const rentAmount = Number(t.rent_amount || 0);
+      const rentPaid = Number(t.rent_paid_this_month || 0);
       const arrears = Number(t.arrears || 0);
       let payment_state = 'Unpaid';
       if (arrears > 0) {
         payment_state = 'Arrears';
-      } else if (totalPaid >= rentDue && rentDue > 0) {
+      } else if (rentAmount > 0 && rentPaid >= rentAmount) {
         payment_state = 'Paid';
-      } else if (totalPaid > 0) {
+      } else if (rentPaid > 0) {
         payment_state = 'Partial';
       }
       return {
@@ -79,8 +74,25 @@ router.get('/:id/dashboard', async (req, res) => {
 
     const occupiedTenants = tenants.filter((t) => t.status !== 'Vacant');
     const totalUnits = selectedHouse.total_units || 1;
-    const vacantUnitsCount = Math.max(0, totalUnits - occupiedTenants.length);
-    const vacantUnitsList = tenants.filter((t) => t.status === 'Vacant');
+    // Units under a live RESERVED booking are unavailable — exclude them
+    // from the vacant count/list until cancelled or activated.
+    const { getReservedUnits } = require('../storage/futureTenancies');
+    const unitKeyOf = (t) => String(t.unit_label || t.tenant_code || t.id || '').trim().toLowerCase();
+    const occupiedKeys = new Set(occupiedTenants.map(unitKeyOf));
+    let reservedUnits = [];
+    try {
+      reservedUnits = await getReservedUnits(selectedHouse.paybill_number);
+    } catch (_) { reservedUnits = []; }
+    const isReservedUnit = (t) => reservedUnits.some((r) =>
+      String(r.unit_label || r.tenant_code || '').trim().toLowerCase() === unitKeyOf(t)
+    );
+    // Reserved units without any tenant row are inside the derived
+    // (total − occupied) count too — exclude each unoccupied one once.
+    const unoccupiedReserved = reservedUnits.filter((r) =>
+      !occupiedKeys.has(String(r.unit_label || r.tenant_code || '').trim().toLowerCase())
+    ).length;
+    const vacantUnitsCount = Math.max(0, totalUnits - occupiedTenants.length - unoccupiedReserved);
+    const vacantUnitsList = tenants.filter((t) => t.status === 'Vacant' && !isReservedUnit(t));
 
     // Maintenance charges for this property
     const { pool } = require('../config/database');
@@ -209,7 +221,8 @@ router.post('/send-vacant-report', async (req, res) => {
 
     worksheet.insertRow(1, []);
     worksheet.mergeCells('A1:E1');
-    worksheet.getRow(1).height = 140;
+    // Compact letterhead (70pt) so the frozen header stays usable.
+    worksheet.getRow(1).height = 70;
 
     const logoPath = resolveLogoPath();
     if (logoPath) {
@@ -219,7 +232,7 @@ router.post('/send-vacant-report', async (req, res) => {
       });
       worksheet.addImage(imageId, {
         tl: { col: 1.8, row: 0.1 },
-        ext: { width: 120, height: 120 }
+        ext: { width: 60, height: 60 }
       });
     }
 
@@ -227,7 +240,7 @@ router.post('/send-vacant-report', async (req, res) => {
     worksheet.mergeCells('A2:E2');
     worksheet.getCell('A2').font = { bold: true, size: 14 };
     worksheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getRow(2).height = 30;
+    worksheet.getRow(2).height = 24;
 
     worksheet.insertRow(3, []);
 
@@ -242,8 +255,25 @@ router.post('/send-vacant-report', async (req, res) => {
     for (const h of rawHouses) {
       const tenants = await store.listTenants({ house_id: h.id, exclude_vacant: false });
       const occupied = tenants.filter(t => t.status !== 'Vacant').length;
-      const vacantCount = Math.max(0, h.total_units - occupied);
-      const vacantTenants = tenants.filter(t => t.status === 'Vacant');
+      // Reserved units are unavailable — exclude from vacant rows/counts.
+      const { getReservedUnits } = require('../storage/futureTenancies');
+      let reservedUnits = [];
+      try {
+        reservedUnits = await getReservedUnits(h.paybill_number || h.id);
+      } catch (_) { reservedUnits = []; }
+      const occupiedKeys = new Set(
+        tenants.filter(t => t.status !== 'Vacant')
+          .map(t => String(t.unit_label || t.tenant_code || t.id || '').trim().toLowerCase())
+      );
+      const isReservedUnit = (t) => reservedUnits.some((r) =>
+        String(r.unit_label || r.tenant_code || '').trim().toLowerCase() ===
+        String(t.unit_label || t.tenant_code || t.id || '').trim().toLowerCase()
+      );
+      const unoccupiedReserved = reservedUnits.filter((r) =>
+        !occupiedKeys.has(String(r.unit_label || r.tenant_code || '').trim().toLowerCase())
+      ).length;
+      const vacantCount = Math.max(0, h.total_units - occupied - unoccupiedReserved);
+      const vacantTenants = tenants.filter(t => t.status === 'Vacant' && !isReservedUnit(t));
 
       if (vacantTenants.length > 0) {
         for (const vt of vacantTenants) {
@@ -279,7 +309,11 @@ router.post('/send-vacant-report', async (req, res) => {
       vacant: totalVacant
     });
     totalRow.font = { bold: true };
-    
+
+    // Auto-fit widths, wrap text, auto row heights, frozen header row,
+    // A4 print layout with repeating column headings.
+    formatWorksheet(worksheet, { dataStartRow: 4, headerRowNum: 4, printLandscape: false, repeatHeaderRows: [4] });
+
     const docName = reportDocumentName({ type: 'Vacancy_Report', houseName: rawHouses.length === 1 ? rawHouses[0].house_name : '', date: new Date() });
 
     if (mode === 'download') {
@@ -290,9 +324,9 @@ router.post('/send-vacant-report', async (req, res) => {
     await workbook.xlsx.writeFile(tempFilePath);
     const deliveryPath = renameForDelivery(tempFilePath, docName);
 
-    await whatsapp.sendMediaMessage(phone_number, deliveryPath, 'Here is the requested Excel vacancy report.');
-    
+    const waResult = await whatsapp.sendDocumentSmart(phone_number, deliveryPath, 'Here is the requested Excel vacancy report.');
     fs.unlinkSync(deliveryPath);
+    if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the report');
 
     res.json({ success: true });
   } catch (err) {

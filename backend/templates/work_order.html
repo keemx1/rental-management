@@ -77,8 +77,9 @@
     }
     .wo-no-bar {
       display: inline-block;
-      background: #1a4b8c;
-      color: white;
+      background: #e9f1fd;
+      border: 1px solid #bfd6f5;
+      color: #1e3a8a;
       font-weight: 700;
       font-size: 12px;
       padding: 5px 12px;
@@ -183,9 +184,13 @@
       font-weight: 700;
     }
     .totals-table tr.grand td:last-child {
-      background: #1a4b8c;
-      color: white;
+      background: #ffffff;
+      color: #cc0000;
       font-weight: 700;
+      border-top: 2px solid #cc0000;
+    }
+    .totals-table tr.grand td:last-child span {
+      color: #cc0000 !important;
     }
     .note-box {
       margin-top: 10px;
@@ -368,6 +373,12 @@
 
   <div class="note-box">
     {{payment_instructions}}
+  </div>
+
+  <div style="margin:6px 0;line-height:1.5;">
+    <div>For: GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</div>
+    <div>{{GEHM_STAMP_LINE}}</div>
+    <div>Date: {{date}}</div>
   </div>
 
   <div class="footer-bar"></div>

@@ -22,5 +22,13 @@
     "body": "Hello {{client_name}}, this is a security update for residents of {{house_name}} {{house_number}}. Please ensure your doors are locked and report suspicious activity immediately.",
     "created_at": "2026-06-02T10:22:29.141Z",
     "updated_at": "2026-06-02T10:22:29.141Z"
+  },
+  {
+    "id": 16,
+    "key": "rent_balance_reminder",
+    "name": "Rent Balance Reminder",
+    "body": "*GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS*\n_Find a home, leave the management to us._\n\n*RENT BALANCE REMINDER*\n\nDate: {{notice_date}}\nTenant Name: {{tenant_name}}\nProperty: {{property_name}}\nHouse/Unit Number: {{unit_number}}\n\nDear {{tenant_name}},\n\nThis is a friendly reminder that our records indicate an outstanding rent balance on your account as detailed below.\n\n*RENT BALANCE DETAILS*\n\n• Rent Balance Period: {{balance_period}}\n• Previous Arrears: KSh {{previous_arrears}}\n• Current Rent Due: KSh {{current_rent_due}}\n• Payments Received: KSh {{payments_received}}\n• *TOTAL OUTSTANDING BALANCE: KSh {{total_outstanding_balance}}*\n\nKindly arrange to clear the outstanding balance as soon as possible.\n\nIf you have already made the payment, please share your payment confirmation with management for verification and updating of your account.\n\nIf you believe the balance is incorrect, please contact management for clarification.\n\nThank you for your cooperation.\n\nYours faithfully,\n\n*Shadrack Kirwa Munubi*\nProperty Manager\n*For: GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS*\n\nTel: 0725 934 615 / 0702 705 321\nEmail: gutenbergelite@gmail.com",
+    "created_at": "2026-10-19T00:00:00.000Z",
+    "updated_at": "2026-10-19T00:00:00.000Z"
   }
 ]

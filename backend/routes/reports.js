@@ -7,7 +7,7 @@ const os = require('os');
 const store = require('../storage/store');
 const whatsapp = require('../config/whatsapp');
 const { requireAuthActive } = require('../middleware/auth');
-const { streamWorkbook } = require('../services/excelStream');
+const { streamWorkbook, sendExcelReport } = require('../services/excelStream');
 const { resolveLogoPath, getLogoExtension } = require('../services/logo');
 const { reportDocumentName, renameForDelivery } = require('../services/docNames');
 const { formatWorksheet, addReportHeader, addSummarySection, formatKes } = require('../services/excelFormat');
@@ -17,14 +17,16 @@ router.use(requireAuthActive);
 function addLogoAndTitle(workbook, worksheet, title, colSpan) {
   worksheet.insertRow(1, []);
   worksheet.mergeCells(`A1:${colSpan}1`);
-  worksheet.getRow(1).height = 140;
+  // Compact letterhead: large empty banners waste screen/sheet space and make
+  // frozen header panes unusable. 70pt matches addReportHeader everywhere.
+  worksheet.getRow(1).height = 70;
 
   const logoPath = resolveLogoPath();
   if (logoPath) {
     const imageId = workbook.addImage({ filename: logoPath, extension: getLogoExtension() });
     worksheet.addImage(imageId, {
       tl: { col: 1.8, row: 0.1 },
-      ext: { width: 120, height: 120 },
+      ext: { width: 60, height: 60 },
     });
   }
 
@@ -32,24 +34,18 @@ function addLogoAndTitle(workbook, worksheet, title, colSpan) {
   worksheet.mergeCells(`A2:${colSpan}2`);
   worksheet.getCell('A2').font = { bold: true, size: 14 };
   worksheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
-  worksheet.getRow(2).height = 30;
+  worksheet.getRow(2).height = 24;
 
   worksheet.insertRow(3, []);
 }
 
 function addHeaderRow(worksheet, rowNum, headers) {
   const row = worksheet.insertRow(rowNum, headers);
-  row.font = { bold: true };
+  row.font = { bold: true, size: 10 };
   row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD3D3D3' } };
+  row.alignment = { wrapText: true, vertical: 'middle' };
+  row.height = 20;
   return row;
-}
-
-async function sendExcelReport(phone_number, workbook, filename, caption) {
-  const tempFilePath = path.join(os.tmpdir(), `report_${Date.now()}.xlsx`);
-  await workbook.xlsx.writeFile(tempFilePath);
-  const deliveryPath = renameForDelivery(tempFilePath, filename);
-  await whatsapp.sendMediaMessage(phone_number, deliveryPath, caption);
-  fs.unlinkSync(deliveryPath);
 }
 
 router.post('/outstanding-balances', async (req, res) => {
@@ -71,26 +67,33 @@ router.post('/outstanding-balances', async (req, res) => {
       { key: 'house', width: 22 },
       { key: 'arrears', width: 16 },
       { key: 'penalties', width: 16 },
+      { key: 'rent_due', width: 16 },
       { key: 'garbage', width: 16 },
+      { key: 'water', width: 16 },
       { key: 'deposit_shortfall', width: 18 },
       { key: 'outstanding', width: 16 },
     ];
 
-    addLogoAndTitle(workbook, ws, 'OUTSTANDING BALANCES REPORT', 'H');
-    addHeaderRow(ws, 4, ['Unit Number', 'Tenant Name', 'Apartment', 'Arrears (KES)', 'Pending Invoices (KES)', 'Garbage Fee (KES)', 'Deposit Shortfall (KES)', 'Total Outstanding (KES)']);
+    addLogoAndTitle(workbook, ws, 'OUTSTANDING BALANCES REPORT', 'J');
+    addHeaderRow(ws, 4, ['Unit Number', 'Tenant Name', 'Apartment', 'Arrears (KES)', 'Pending Invoices (KES)', 'Rent Due (KES)', 'Garbage Fee (KES)', 'Water Charge (KES)', 'Deposit Shortfall (KES)', 'Total Outstanding (KES)']);
 
     let totalArrears = 0;
     let totalPenalties = 0;
+    let totalRentDue = 0;
     let totalGarbage = 0;
+    let totalWater = 0;
     let totalShortfall = 0;
     let totalOutstanding = 0;
 
     for (const r of rows) {
       const shortfall = Math.max(0, r.deposit_amount - r.deposit_paid);
       const garbage = Math.max(0, r.garbage_fee_amount - r.garbage_fee_paid);
+      const water = Math.max(0, r.water_charge_amount - r.water_charge_paid);
       totalArrears += r.arrears;
       totalPenalties += r.penalties_outstanding;
+      totalRentDue += r.rent_due || 0;
       totalGarbage += garbage;
+      totalWater += water;
       totalShortfall += shortfall;
       totalOutstanding += r.outstanding;
       ws.addRow({
@@ -99,7 +102,9 @@ router.post('/outstanding-balances', async (req, res) => {
         house: r.house_name || '',
         arrears: r.arrears,
         penalties: r.penalties_outstanding,
+        rent_due: r.rent_due || 0,
         garbage,
+        water,
         deposit_shortfall: shortfall,
         outstanding: r.outstanding,
       });
@@ -112,13 +117,15 @@ router.post('/outstanding-balances', async (req, res) => {
       house: '',
       arrears: totalArrears,
       penalties: totalPenalties,
+      rent_due: totalRentDue,
       garbage: totalGarbage,
+      water: totalWater,
       deposit_shortfall: totalShortfall,
       outstanding: totalOutstanding,
     });
     totalRow.font = { bold: true };
 
-    formatWorksheet(ws, { dataStartRow: 4, headerRowNum: 4, printLandscape: true, repeatHeaderRows: [4] });
+    formatWorksheet(ws, { dataStartRow: 4, headerRowNum: 4, printLandscape: true, repeatHeaderRows: [4], moneyCols: [4, 5, 6, 7, 8, 9, 10] });
 
     if (mode === 'download') {
       return streamWorkbook(res, workbook, 'Outstanding_Balances_Report', 'Outstanding_Balances_Report', docName);
@@ -174,7 +181,7 @@ router.post('/unpaid-units', async (req, res) => {
     });
     totalRow.font = { bold: true };
 
-    formatWorksheet(ws, { dataStartRow: 4, headerRowNum: 4, printLandscape: true, repeatHeaderRows: [4] });
+    formatWorksheet(ws, { dataStartRow: 4, headerRowNum: 4, printLandscape: true, repeatHeaderRows: [4], moneyCols: [4] });
 
     if (mode === 'download') {
       return streamWorkbook(res, workbook, 'Unpaid_Units_Report', 'Unpaid_Units_Report', docName);
@@ -271,6 +278,11 @@ router.post('/deposits-new-tenants', async (req, res) => {
         rowNum++;
       }
     }
+
+    // Professional layout: auto-fit widths, wrapping, row heights, frozen
+    // header, print setup. Section banners above are merged, so auto-fit
+    // skips them and only measures the table underneath.
+    formatWorksheet(ws, { dataStartRow: 4, headerRowNum: 4, printLandscape: true, repeatHeaderRows: [4], moneyCols: [5] });
 
     if (mode === 'download') {
       return streamWorkbook(res, workbook, 'Deposits_New_Tenants_Report', 'Deposits_New_Tenants_Report', docName);

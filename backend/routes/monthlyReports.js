@@ -4,9 +4,83 @@ const store = require('../storage/store');
 const ExcelJS = require('exceljs');
 const { streamWorkbook } = require('../services/excelStream');
 const { resolveLogoPath, getLogoExtension } = require('../services/logo');
+const { finishSheet } = require('../services/excelFormat');
 
 const router = express.Router();
 router.use(requireAuthActive);
+
+// ─── Water Bill Report (read-only reporting over recorded invoices) ───────
+// Never touches creation/approval flows — it only reads water_invoices.
+
+router.get('/water/report', async (req, res) => {
+  try {
+    const data = await store.buildWaterBillReport({
+      house_paybill: req.query.house_paybill,
+      billing_month: req.query.billing_month,
+      unit: req.query.unit || null,
+    });
+    res.json({ report: data });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Failed to build water bill report' });
+  }
+});
+
+router.post('/water/pdf', async (req, res) => {
+  try {
+    const { generateWaterBillReportPdf } = require('../services/documentStore');
+    const data = await store.buildWaterBillReport({
+      house_paybill: req.body?.house_paybill,
+      billing_month: req.body?.billing_month,
+      unit: req.body?.unit || null,
+    });
+    const pdf = await generateWaterBillReportPdf(data, req.user?.username);
+    if (!pdf) return res.status(500).json({ error: 'Failed to generate water bill report PDF' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${pdf.filename}"`);
+    return res.sendFile(pdf.file_path);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Failed to generate water bill report PDF' });
+  }
+});
+
+router.post('/water/send', async (req, res) => {
+  try {
+    const { house_paybill, billing_month, unit, phone } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'phone required' });
+    const { generateWaterBillReportPdf } = require('../services/documentStore');
+    const data = await store.buildWaterBillReport({ house_paybill, billing_month, unit: unit || null });
+    const pdf = await generateWaterBillReportPdf(data, req.user?.username);
+    if (!pdf) return res.status(500).json({ error: 'Failed to generate water bill report PDF' });
+
+    const caption = `Hello, please find attached the Water Bill Report for ${data.property_name} (${data.billing_month_label}).`;
+    let waStatus = 'Failed';
+    let waReason = null;
+    try {
+      const { sendDocumentSmart } = require('../config/whatsapp');
+      const r = await sendDocumentSmart(phone, pdf.file_path, caption);
+      waStatus = r.status;
+      waReason = r.failureReason || (r.status === 'Failed' ? 'provider could not deliver the PDF' : null);
+    } catch (err) {
+      waStatus = 'Failed';
+      waReason = err.message;
+    }
+    await store.logMessage({
+      tenantId: null,
+      messageType: 'Water Bill Report',
+      messageBody: waStatus === 'Sent'
+        ? `Water bill report sent successfully (${data.property_name}, ${data.billing_month_label})`
+        : `Failed to send water bill report: ${waReason || 'unknown error'}`,
+      status: waStatus,
+      failureReason: waReason,
+    });
+    if (waStatus !== 'Sent') {
+      return res.status(502).json({ error: 'WhatsApp delivery failed: ' + (waReason || 'could not deliver the PDF') });
+    }
+    res.json({ success: true, message: 'Water bill report sent via WhatsApp' });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Failed to send water bill report' });
+  }
+});
 
 // List all monthly reports
 router.get('/', async (req, res) => {
@@ -37,10 +111,25 @@ router.post('/:month/enhanced/excel', async (req, res) => {
     const { month } = req.params;
     const housePaybill = req.body?.house_paybill || null;
     const data = await store.buildEnhancedMonthlyReport(month, housePaybill);
+    // Landlord pack: read-only datasets for the additional sheets.
+    // Existing workflows and the sheet below are untouched.
+    const pack = await store.buildLandlordPack(month, housePaybill);
 
     const workbook = new ExcelJS.Workbook();
+
+    { // Sheet 1: Executive Summary (new — existing sheets below unchanged).
+      const LS = require('../services/landlordSheets');
+      const _mn = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const [_y, _m] = month.split('-');
+      LS.buildExecutiveSummarySheet(
+        workbook, data, pack,
+        `${_mn[parseInt(_m, 10) - 1]} ${_y}`,
+        data.property_name ? ` - ${data.property_name}` : ' - All Properties'
+      );
+    }
+
     const ws = workbook.addWorksheet('Enhanced Monthly Report', {
-      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '1:3' },
     });
 
     const lastCol = 'O';
@@ -64,7 +153,7 @@ router.post('/:month/enhanced/excel', async (req, res) => {
     const logoPath = resolveLogoPath();
     if (logoPath) {
       const imageId = workbook.addImage({ filename: logoPath, extension: getLogoExtension() });
-      ws.addImage(imageId, { tl: { col: 1.8, row: 0.1 }, ext: { width: 100, height: 100 } });
+      ws.addImage(imageId, { tl: { col: 7.4, row: 0.1 }, ext: { width: 100, height: 100 } });
     }
 
     // Title
@@ -132,7 +221,7 @@ router.post('/:month/enhanced/excel', async (req, res) => {
     totalsRow.font = { bold: true, size: 9 };
     for (let ci = 4; ci <= 10; ci++) totalsRow.getCell(ci).numFmt = '#,##0';
     totalsRow.getCell(14).numFmt = '#,##0';
-    ws.insertRow(1, []);
+    ws.addRow([]);
 
     // ─── SECTION 2: Work Done During the Month ───
     const workRow = ws.addRow([]);
@@ -163,7 +252,7 @@ router.post('/:month/enhanced/excel', async (req, res) => {
         ]);
       }
     }
-    ws.insertRow(1, []);
+    ws.addRow([]);
 
     // ─── SECTION 3: Invoices Issued During the Month ───
     const invTitleRow = ws.addRow(['INVOICES ISSUED DURING THE MONTH']);
@@ -194,7 +283,7 @@ router.post('/:month/enhanced/excel', async (req, res) => {
         ]);
       }
     }
-    ws.insertRow(1, []);
+    ws.addRow([]);
 
     // ─── SECTION 4: Monthly Summary ───
     const sumTitleRow = ws.addRow(['MONTHLY SUMMARY / TOTALS']);
@@ -211,7 +300,7 @@ router.post('/:month/enhanced/excel', async (req, res) => {
       ['Paid Units', s.paid_units, '', 'Penalties (Pending)', s.total_penalties],
       ['Partially Paid Units', s.partially_paid_units, '', 'Penalties (Paid)', s.total_penalties_paid || 0],
       ['Unpaid Units', s.unpaid_units, '', 'Total Outstanding Balance', s.total_outstanding],
-      ['Unpaid Units', s.unpaid_units, '', 'Total Advance/Overpayment', s.total_advance_overpayment],
+      ['', '', '', 'Total Advance/Overpayment', s.total_advance_overpayment],
       ['Overpayment Units', s.overpayment_units, '', 'Total Credit Balance', s.total_credit_balance],
       ['New Tenants', s.new_tenants, '', 'Total Tenant Recoveries', s.total_tenant_recoveries],
       ['Vacated Tenants', s.vacated_tenants, '', 'Total Mgmt Maintenance Cost', s.total_mgmt_maintenance_cost],
@@ -226,6 +315,32 @@ router.post('/:month/enhanced/excel', async (req, res) => {
       r.getCell(4).font = { bold: true, size: 10 };
       r.getCell(5).font = { size: 10 };
       r.getCell(5).numFmt = '#,##0';
+    }
+
+    // Professional layout pass: auto-fit widths to content, wrap long tenant
+    // names/notes, auto row heights, number formats on money columns, A4
+    // landscape print setup. Header style/colors set above are preserved;
+    // page titles repeat logo + report name + period on every printed page.
+    finishSheet(ws, {
+      headerRowNum: 6,
+      dataStartRow: 6,
+      landscape: true,
+      repeatHeaders: false,
+      moneyCols: [4, 5, 6, 7, 8, 9, 10, 11, 14],
+    });
+
+    { // Sheets 3–10: landlord detail sheets (new — existing sheet above unchanged).
+      const LS = require('../services/landlordSheets');
+      const fig = LS.deriveFigures(data, pack);
+      LS.buildRentPerformanceSheet(workbook, data, pack);
+      LS.buildCommissionSheet(workbook, pack);
+      LS.buildWaterSheet(workbook, pack, monthLabel);
+      LS.buildOccupiedSheet(workbook, data);
+      LS.buildVacantSheet(workbook, data, pack);
+      LS.buildWorkExpensesSheet(workbook, data, pack);
+      LS.buildArrearsSheet(workbook, data);
+      LS.buildDepositsSheet(workbook, pack);
+      LS.buildReconciliationSheet(workbook, data, pack, fig, monthLabel, propLabel);
     }
 
     // Save & stream
@@ -251,7 +366,7 @@ router.post('/:month/excel', async (req, res) => {
 
     const workbook = new ExcelJS.Workbook();
     const ws = workbook.addWorksheet('Monthly Report', {
-      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '1:3' },
     });
 
     const lastCol = 'I';
@@ -273,7 +388,7 @@ router.post('/:month/excel', async (req, res) => {
     const logoPath = resolveLogoPath();
     if (logoPath) {
       const imageId = workbook.addImage({ filename: logoPath, extension: getLogoExtension() });
-      ws.addImage(imageId, { tl: { col: 1.8, row: 0.1 }, ext: { width: 100, height: 100 } });
+      ws.addImage(imageId, { tl: { col: 3.5, row: 0.1 }, ext: { width: 100, height: 100 } });
     }
 
     ws.insertRow(2, [`GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS - MONTHLY REPORT${propLabel}`]);
@@ -298,7 +413,7 @@ router.post('/:month/excel', async (req, res) => {
     ws.getCell('A5').font = { bold: true, size: 12 };
     ws.addRow(['Revenue Collected', rev.total_collected || 0, '', 'Payments', rev.payment_count || 0]);
     ws.addRow(['Deposits Collected', rev.deposits_collected || 0, '', '', '']);
-    ws.insertRow(1, []);
+    ws.addRow([]);
 
     // ─── Occupancy ───
     const occ = rd.occupancy || {};
@@ -310,7 +425,7 @@ router.post('/:month/excel', async (req, res) => {
     ws.addRow(['Vacant', occ.vacant || 0, '', 'Partially Paid', occ.partial_count || 0]);
     ws.addRow(['New Tenants', occ.new_tenants || 0, '', 'Unpaid', occ.unpaid_count || 0]);
     ws.addRow(['Exiting', occ.exiting_tenants || 0, '', 'Collection %', `${occ.collection_pct || 0}%`]);
-    ws.insertRow(1, []);
+    ws.addRow([]);
 
     // ─── Management Expenses ───
     const mgmt = rd.management_expenses || [];
@@ -324,7 +439,7 @@ router.post('/:month/excel', async (req, res) => {
       ws.addRow([e.wo_number, e.issue_no, e.unit, e.problem, e.material_cost, e.labour_cost, e.total_cost, e.responsible_party, '']);
     }
     if (mgmt.length === 0) ws.addRow(['No management expenses this month', '', '', '', '', '', '', '', '']);
-    ws.insertRow(1, []);
+    ws.addRow([]);
 
     // ─── Tenant Recoveries ───
     const tenant = rd.tenant_recoveries || [];
@@ -338,7 +453,7 @@ router.post('/:month/excel', async (req, res) => {
       ws.addRow([e.wo_number, e.unit, e.tenant, e.problem, e.total_cost, e.amount_recovered, e.total_cost - e.amount_recovered, e.recovery_status, '']);
     }
     if (tenant.length === 0) ws.addRow(['No tenant recoveries this month', '', '', '', '', '', '', '', '']);
-    ws.insertRow(1, []);
+    ws.addRow([]);
 
     // ─── Penalties ───
     const penalties = rd.penalties || [];
@@ -352,7 +467,7 @@ router.post('/:month/excel', async (req, res) => {
       ws.addRow([p.tenant_name, p.description, p.category, p.amount, p.status, '', '', '', '']);
     }
     if (penalties.length === 0) ws.addRow(['No penalties this month', '', '', '', '', '', '', '', '']);
-    ws.insertRow(1, []);
+    ws.addRow([]);
 
     // ─── Exit Invoices ───
     const exits = rd.exit_invoices || [];
@@ -366,7 +481,7 @@ router.post('/:month/excel', async (req, res) => {
       ws.addRow([e.exit_number, e.tenant_name, e.unit_label, e.rent_treatment, e.deductions_total, e.deposit_refund, e.final_settlement, e.status, '']);
     }
     if (exits.length === 0) ws.addRow(['No exit invoices this month', '', '', '', '', '', '', '', '']);
-    ws.insertRow(1, []);
+    ws.addRow([]);
 
     // ─── Notices to Vacate ───
     const notices = rd.notices_to_vacate || [];
@@ -380,6 +495,15 @@ router.post('/:month/excel', async (req, res) => {
       ws.addRow([n.tenant_name, n.tenant_code, n.notice_date, n.expected_vacate, n.status, '', '', '', '']);
     }
     if (notices.length === 0) ws.addRow(['No notices to vacate this month', '', '', '', '', '', '', '', '']);
+
+    // Layout pass: auto-fit, wrapping, row heights, money number formats,
+    // A4 landscape with logo + report name + period repeated per page.
+    finishSheet(ws, {
+      dataStartRow: 5,
+      landscape: true,
+      repeatHeaders: false,
+      moneyCols: [2, 4, 5, 6, 7],
+    });
 
     const today = new Date().toISOString().slice(0, 10);
     const safeProp = (propertyName || 'All').replace(/[^A-Za-z0-9]/g, '_');

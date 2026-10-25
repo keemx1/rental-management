@@ -158,9 +158,8 @@ async function processNextJob() {
 
   if (!job) return;
 
+  let messageText = null;
   try {
-    let messageText;
-
     if (job.template_key) {
       messageText = renderTemplate(job.template_key, job.variables || {});
     } else if (job.raw_message) {
@@ -173,6 +172,14 @@ async function processNextJob() {
 
     if (result && result.success) {
       await markSent(job.id, result.id);
+      // Mirror into the app-wide message history so stats count queued sends.
+      try {
+        await pool.query(
+          `INSERT INTO message_logs (tenant_code, message_type, message_body, status, whatsapp_message_id)
+           VALUES ($1, $2, $3, 'Sent', $4)`,
+          [job.tenant_code || null, job.template_key || 'Queued Message', messageText, result.id || null]
+        );
+      } catch (_) {}
     } else {
       throw new Error('Send failed');
     }
@@ -190,6 +197,15 @@ async function processNextJob() {
         `UPDATE whatsapp_message_queue SET status = 'queued', updated_at = NOW() WHERE id = $1`,
         [job.id]
       );
+    } else {
+      // Retries exhausted — record the final failure in the app-wide history.
+      try {
+        await pool.query(
+          `INSERT INTO message_logs (tenant_code, message_type, message_body, status, failure_reason)
+           VALUES ($1, $2, $3, 'Failed', $4)`,
+          [job.tenant_code || null, job.template_key || 'Queued Message', messageText || job.raw_message || '', err.message]
+        );
+      } catch (_) {}
     }
   }
 }

@@ -58,6 +58,19 @@ async function createFutureTenancy(data) {
     national_id, tenant_code, allocated_month, rent_amount, deposit_amount, notes,
   } = data;
 
+  // A unit with a live reservation is unavailable until that reservation is
+  // cancelled or activated — refuse a second booking on the same unit.
+  const conflict = await findConflictingReservation(house_paybill, unit_label, tenant_code);
+  if (conflict) {
+    const err = new Error(
+      'Unit ' + (unit_label || tenant_code || '') + ' is already reserved by ' +
+      (conflict.tenant_name || 'another tenant') + ' (booking #' + conflict.id +
+      '). Cancel that reservation or activate it first.'
+    );
+    err.code = 'RESERVED_CONFLICT';
+    throw err;
+  }
+
   const result = await pool.query(
     `INSERT INTO future_tenancies
        (property_name, unit_label, house_paybill, tenant_name, phone_number,
@@ -148,74 +161,214 @@ async function cancelFuturePayment(id) {
   return result.rows[0] || null;
 }
 
+// ─── Reserved units (hide from available/vacant lists while awaiting
+// activation or cancellation) ───────────────────────────────────────────────
+
+async function getReservedUnits(housePaybill = null) {
+  const params = [];
+  let where = "WHERE status = 'RESERVED'";
+  if (housePaybill) {
+    where += ' AND house_paybill = $' + (params.length + 1);
+    params.push(housePaybill);
+  }
+  const res = await pool.query(
+    'SELECT id, house_paybill, unit_label, tenant_code, tenant_name, allocated_month ' +
+    'FROM future_tenancies ' + where,
+    params
+  );
+  return res.rows;
+}
+
+async function findConflictingReservation(housePaybill, unitLabel, tenantCode, excludeId = null) {
+  if (!housePaybill) return null;
+  const unit = String(unitLabel || tenantCode || '').trim().toLowerCase();
+  if (!unit) return null;
+  const params = [housePaybill, unit];
+  let q = "SELECT * FROM future_tenancies WHERE status = 'RESERVED' AND house_paybill = $1 " +
+    "AND (LOWER(COALESCE(unit_label, '')) = $2 OR LOWER(COALESCE(tenant_code, '')) = $2)";
+  if (excludeId != null) {
+    q += ' AND id <> $' + (params.length + 1);
+    params.push(excludeId);
+  }
+  q += ' LIMIT 1';
+  const res = await pool.query(q, params);
+  return res.rows[0] || null;
+}
+
 // ─── Activate Future Tenancy ───────────────────────────────────────────────
 // Converts RESERVED → ACTIVE by creating a real tenant record.
 // All approved future payments are carried forward.
 
 async function activateFutureTenancy(futureTenancyId, store) {
-  const ft = await getFutureTenancy(futureTenancyId);
-  if (!ft) throw new Error('Future tenancy not found');
-  if (ft.status !== 'RESERVED') throw new Error('Future tenancy is not in RESERVED status');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const run = (sql, params) => client.query(sql, params);
 
-  // Get approved payments
-  const payments = await pool.query(
-    `SELECT * FROM future_payments WHERE future_tenancy_id = $1 AND status = 'Approved' ORDER BY payment_date`,
-    [futureTenancyId]
-  );
-  const approvedPayments = payments.rows;
+    const ftRes = await run('SELECT * FROM future_tenancies WHERE id = $1 FOR UPDATE', [futureTenancyId]);
+    const ft = ftRes.rows[0];
+    if (!ft) throw new Error('Future tenancy not found');
+    if (ft.status !== 'RESERVED') throw new Error('Future tenancy is not in RESERVED status');
 
-  // Calculate totals by purpose
-  const depositPaid = approvedPayments
-    .filter(p => p.purpose === 'Deposit' || p.purpose === 'Down Payment')
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-  const rentPaid = approvedPayments
-    .filter(p => p.purpose === 'Rent')
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-  const otherPaid = approvedPayments
-    .filter(p => p.purpose === 'Other')
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-  const totalPaid = approvedPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+    const approvedRes = await run(
+      "SELECT * FROM future_payments WHERE future_tenancy_id = $1 AND status = 'Approved' ORDER BY payment_date",
+      [futureTenancyId]
+    );
+    const approvedPayments = approvedRes.rows;
 
-  // Create the tenant with carry-forward
-  const tenant = await store.createTenant({
-    name: ft.tenant_name,
-    phone_number: ft.phone_number,
-    national_id: ft.national_id,
-    tenant_code: ft.tenant_code,
-    property_name: ft.property_name,
-    unit_label: ft.unit_label,
-    house_id: ft.house_paybill,
-    rent_amount: ft.rent_amount,
-    deposit_amount: ft.deposit_amount,
-    deposit_paid: depositPaid,
-    status: 'Active',
-    move_in_date: new Date().toISOString().slice(0, 10),
-    rent_due_date: ft.allocated_month + '-05',
-  });
+    const depositPaid = approvedPayments
+      .filter(p => p.purpose === 'Deposit' || p.purpose === 'Down Payment')
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const rentPaid = approvedPayments
+      .filter(p => p.purpose === 'Rent')
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const otherPaid = approvedPayments
+      .filter(p => p.purpose !== 'Deposit' && p.purpose !== 'Down Payment' && p.purpose !== 'Rent')
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const totalPaid = approvedPayments.reduce((sum, p) => sum + Number(p.amount), 0);
 
-  // Record the future payments as regular payments against the new tenant
-  for (const fp of approvedPayments) {
-    const payment = await store.createPayment({
-      tenant_id: tenant.id,
-      amount: Number(fp.amount),
-      mpesa_reference: fp.mpesa_reference,
-      notes: `Future tenancy payment #${fp.id} — ${fp.purpose} for ${fp.allocated_month}`,
-      status: 'Pending',
-      payment_date: fp.payment_date,
-      payment_mode: fp.payment_mode,
-    });
-    await store.approvePayment(payment.id);
+    const today = new Date().toISOString().slice(0, 10);
+    const rentDueDate = ft.allocated_month ? ft.allocated_month + '-05' : today;
+
+    // Resolve the tenant row: convert an existing Vacant placeholder in place
+    // (no duplicate tenancy records); otherwise insert. An actively occupied
+    // unit is a hard conflict and is never overwritten.
+    const tenantCode = ft.tenant_code;
+    let tenantRow = null;
+    if (tenantCode) {
+      const exRes = await run('SELECT * FROM tenants WHERE tenant_code = $1 FOR UPDATE', [tenantCode]);
+      tenantRow = exRes.rows[0] || null;
+    }
+    if (tenantRow && String(tenantRow.status || '') !== 'Vacant') {
+      const err = new Error(
+        'Unit is already occupied by ' + (tenantRow.name || tenantRow.tenant_code) +
+        ' - cancel that tenancy or reservation first; activation refused to create a duplicate.'
+      );
+      err.code = 'UNIT_OCCUPIED';
+      throw err;
+    }
+
+    let finalTenantCode = tenantCode;
+    if (tenantRow) {
+      await run(
+        'UPDATE tenants SET name = $2, phone_number = $3, national_id = $4,' +
+        ' rent_amount = $5, deposit_amount = $6,' +
+        ' house_paybill_number = COALESCE($7, house_paybill_number),' +
+        ' property_name = COALESCE($8, property_name),' +
+        ' unit_label = COALESCE($9, unit_label),' +
+        " status = 'Active', move_in_date = $10, rent_due_date = $11," +
+        ' deposit_paid = COALESCE(deposit_paid, 0) + $12,' +
+        ' rent_paid_this_month = COALESCE(rent_paid_this_month, 0) + $13,' +
+        ' credit_balance = COALESCE(credit_balance, 0) + $14,' +
+        ' updated_at = NOW() WHERE tenant_code = $1',
+        [tenantRow.tenant_code, ft.tenant_name, ft.phone_number, ft.national_id || null,
+         Number(ft.rent_amount || 0), Number(ft.deposit_amount || 0),
+         ft.house_paybill || null, ft.property_name || null, ft.unit_label || null,
+         today, rentDueDate, depositPaid, rentPaid, otherPaid]
+      );
+      finalTenantCode = tenantRow.tenant_code;
+    } else {
+      // Mirror store.createTenant defaults (garbage/water from house_charges).
+      let garbageFeeAmount = 0;
+      let waterChargeAmount = 0;
+      let propertyName = ft.property_name || 'General';
+      if (ft.house_paybill) {
+        try {
+          const hRes = await run('SELECT house_name, garbage_fee_enabled FROM houses WHERE paybill_number = $1', [ft.house_paybill]);
+          const house = hRes.rows[0];
+          if (house) {
+            propertyName = house.house_name || propertyName;
+            if (house.garbage_fee_enabled === true || house.garbage_fee_enabled === 't') garbageFeeAmount = 2000;
+            try {
+              const chRes = await run('SELECT * FROM house_charges WHERE house_paybill = $1 AND enabled = TRUE ORDER BY sort_order, id', [ft.house_paybill]);
+              for (const hc of chRes.rows) {
+                const nm = String(hc.charge_name || '').toLowerCase();
+                if (nm.includes('garbage') && garbageFeeAmount === 0) garbageFeeAmount = Number(hc.amount) || 2000;
+                else if (nm.includes('water') && waterChargeAmount === 0) waterChargeAmount = Number(hc.amount) || 0;
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
+      await run(
+        'INSERT INTO tenants (tenant_code, name, phone_number, national_id, house_paybill_number, property_name,' +
+        ' rent_amount, deposit_amount, garbage_fee_amount, water_charge_amount,' +
+        " move_in_date, rent_due_date, rent_due_time, status, arrears, opening_advance_rent," +
+        ' agreement_charge, agreement_paid, agreement_outstanding,' +
+        ' deposit_paid, rent_paid_this_month, credit_balance)' +
+        " VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'23:59:00','Active',0,0,0,0,0,$13,$14,$15)",
+        [tenantCode, ft.tenant_name, ft.phone_number, ft.national_id || null,
+         ft.house_paybill ? String(ft.house_paybill) : null, propertyName,
+         Number(ft.rent_amount || 0), Number(ft.deposit_amount || 0),
+         garbageFeeAmount, waterChargeAmount, today, rentDueDate,
+         depositPaid, rentPaid, otherPaid]
+      );
+      finalTenantCode = tenantCode;
+    }
+
+    // Move approved booking payments verbatim: same dates, references,
+    // amounts and purposes. Never re-approved, so no new receipts, no
+    // re-allocation and no duplicate side-effects. Already-moved rows
+    // (same future_payment_id) are skipped, making retries idempotent.
+    const purposeToType = (purpose) => {
+      const p = String(purpose || '');
+      if (p === 'Deposit' || p === 'Down Payment') return 'deposit';
+      if (p === 'Rent') return 'rent';
+      return 'other';
+    };
+    let movedPayments = 0;
+    for (const fp of approvedPayments) {
+      const already = await run('SELECT id FROM payments WHERE future_payment_id = $1 LIMIT 1', [fp.id]);
+      if (already.rows[0]) continue;
+      // pg DATE columns arrive as local-midnight Date objects — use local
+      // fields (toISOString would shift the calendar day by timezone).
+      const fpDateStr = (fp.payment_date instanceof Date && !isNaN(fp.payment_date))
+        ? fp.payment_date.getFullYear() + '-' + String(fp.payment_date.getMonth() + 1).padStart(2, '0') + '-' + String(fp.payment_date.getDate()).padStart(2, '0')
+        : String(fp.payment_date || '').slice(0, 10);
+      const payDate = fpDateStr
+        ? new Date(fpDateStr + 'T' + (fp.payment_time || '12:00:00')).toISOString()
+        : new Date().toISOString();
+      const lineage = 'Moved from booking payment #' + fp.id + ' (' + (fp.purpose || 'Down Payment') +
+        (fp.allocated_month ? ' for ' + fp.allocated_month : '') + ')';
+      const notes = fp.notes ? fp.notes + ' - ' + lineage : lineage;
+      await run(
+        'INSERT INTO payments (tenant_code, amount, mpesa_reference, status, payment_date,' +
+        ' notes, payment_type, payment_mode, payment_datetime,' +
+        " approved_at, recorded_at, billing_period, receipt_number," +
+        " sync_status, synced_at, future_payment_id)" +
+        " VALUES ($1,$2,$3,'Approved',$4,$5,$6,$7,$8,$9,$10,$11,$12,'synced',NOW(),$13)",
+        [finalTenantCode, Number(fp.amount), fp.mpesa_reference || null,
+         fpDateStr || today, notes, purposeToType(fp.purpose),
+         fp.payment_mode || null, payDate,
+         fp.approved_at || new Date().toISOString(),
+         fp.created_at || new Date().toISOString(),
+         fp.allocated_month || null, fp.receipt_number || null, fp.id]
+      );
+      movedPayments++;
+    }
+
+    await run(
+      'UPDATE future_tenancies' +
+      ' SET status = ' + "'ACTIVE'" + ', activated_at = NOW(), activated_tenant_code = $1, updated_at = NOW()' +
+      ' WHERE id = $2',
+      [finalTenantCode, futureTenancyId]
+    );
+
+    await client.query('COMMIT');
+
+    let tenant = null;
+    try {
+      tenant = await store.getTenant(finalTenantCode);
+    } catch (_) {
+      tenant = { tenant_code: finalTenantCode, name: ft.tenant_name };
+    }
+    return { tenant: tenant, totalPaid: totalPaid, depositPaid: depositPaid, rentPaid: rentPaid, otherPaid: otherPaid, movedPayments: movedPayments };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
-
-  // Update future tenancy status
-  await pool.query(
-    `UPDATE future_tenancies
-     SET status = 'ACTIVE', activated_at = NOW(), activated_tenant_id = $1, updated_at = NOW()
-     WHERE id = $2`,
-    [tenant.id, futureTenancyId]
-  );
-
-  return { tenant, totalPaid, depositPaid, rentPaid, otherPaid };
 }
 
 // ─── Summary ───────────────────────────────────────────────────────────────
@@ -246,5 +399,6 @@ module.exports = {
   approveFuturePayment,
   cancelFuturePayment,
   activateFutureTenancy,
+  getReservedUnits,
   getFutureTenancySummary,
 };

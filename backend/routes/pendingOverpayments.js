@@ -2,6 +2,7 @@ const express = require('express');
 const { requireAuthActive } = require('../middleware/auth');
 const store = require('../storage/store');
 const { buildAdvanceRentConfirmation, buildCreditBalanceConfirmation } = require('../services/messages');
+const { generateResolutionReceipt } = require('../services/documentStore');
 
 const router = express.Router();
 router.use(requireAuthActive);
@@ -47,6 +48,22 @@ router.post('/:id/resolve', async (req, res) => {
       messageBody = buildCreditBalanceConfirmation(result.tenant, payment || {}, result.record.overpayment_amount, result.result);
     }
 
+    // The allocation is now SAVED — regenerate the payment's receipt PDF
+    // (same template, branding and receipt number) so the downloadable
+    // receipt confirms the advance billing periods or the credited amount.
+    // Only reached after a successful resolve: a pending allocation never
+    // produces a final receipt.
+    let receiptDoc = null;
+    if (payment) {
+      receiptDoc = await generateResolutionReceipt(
+        result.tenant,
+        payment,
+        choice === 'advance_rent'
+          ? { type: 'advance_rent', months: (result.result && result.result.allocation) || [] }
+          : { type: 'credit_balance', creditedAmount: Number(result.record.overpayment_amount || 0) }
+      );
+    }
+
     res.json({
       success: true,
       record: result.record,
@@ -54,6 +71,7 @@ router.post('/:id/resolve', async (req, res) => {
       tenant: result.tenant,
       payment: payment || null,
       messageBody,
+      receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to resolve pending overpayment: ' + err.message });

@@ -8,7 +8,7 @@ const store = require('../storage/store');
 const { generateAndStoreReceipt } = require('../services/documentStore');
 const { sendPaymentConfirmation, buildPaymentConfirmation, sendNewTenancyConfirmation, buildNewTenancyConfirmation, buildSkipOverpaymentConfirmation } = require('../services/messages');
 const whatsapp = require('../config/whatsapp');
-const { streamWorkbook } = require('../services/excelStream');
+const { streamWorkbook, sendExcelReport } = require('../services/excelStream');
 const { resolveLogoPath, getLogoExtension } = require('../services/logo');
 const { reportDocumentName, renameForDelivery } = require('../services/docNames');
 const { formatWorksheet, addReportHeader, addSummarySection, formatKes } = require('../services/excelFormat');
@@ -16,10 +16,87 @@ const { formatWorksheet, addReportHeader, addSummarySection, formatKes } = requi
 const router = express.Router();
 router.use(requireAuthActive);
 
-function queueReceiptGeneration(result) {
-  if (!result || !result.payment) return;
-  generateAndStoreReceipt(result.tenant, result.payment, result.allocation)
-    .catch(err => console.error(`[Documents] Receipt store failed for ${result.payment.id}:`, err.message));
+const RECEIPT_GEN_TIMEOUT_MS = 60000;
+
+// Receipt PDF permanence: every approval ensures exactly one linked receipt
+// PDF (reused when already generated — approvals may retry), built from the
+// FINAL approved payment/allocation data. Never recalculated separately.
+async function ensureReceiptPdf(tenant, payment, allocation) {
+  try {
+    const existing = await store.findReceiptDocument(payment.id);
+    if (existing && existing.file_path && fs.existsSync(existing.file_path)) return existing;
+    const doc = await Promise.race([
+      generateAndStoreReceipt(tenant, payment, allocation),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), RECEIPT_GEN_TIMEOUT_MS)),
+    ]);
+    if (!doc || doc === 'timeout') {
+      console.error(`[Documents] Receipt PDF not ready for payment ${payment.id} (timeout or failure)`);
+      return await store.findReceiptDocument(payment.id);
+    }
+    return doc;
+  } catch (err) {
+    console.error(`[Documents] Receipt ensure failed for payment ${payment.id}:`, err.message);
+    return null;
+  }
+}
+
+// Sends the receipt PDF together with the acknowledgement text. Honest,
+// per-channel status — a text failure never blocks the PDF attempt, and a
+// text fallback never counts as a delivered PDF.
+async function sendReceiptPdf(tenant, payment, doc) {
+  if (!doc || !doc.file_path || !fs.existsSync(doc.file_path)) {
+    return { status: 'Skipped', failureReason: 'no_pdf' };
+  }
+  const caption = `Payment receipt ${payment.receipt_number || ''} — KES ${Number(payment.amount || 0).toLocaleString('en-KE')} (${tenant.name || tenant.tenant_code || ''})`.trim();
+  const r = await whatsapp.sendDocumentSmart(tenant.phone_number, doc.file_path, caption);
+  if (r.status !== 'Sent') {
+    return { status: 'Failed', messageId: r.messageId || null, failureReason: r.failureReason || 'pdf_error' };
+  }
+  return { status: 'Sent', messageId: r.messageId || null };
+}
+
+// Send the payment receipt and report the HONEST delivery status.
+// Previous code fired the send without awaiting and always answered 'Sent',
+// so agents saw "sent" for messages that never left (e.g. WA disconnected).
+// This awaits the real result (bounded by SEND_TIMEOUT_MS); on timeout the
+// first attempt keeps running in the background and we answer 'Pending'.
+const SEND_TIMEOUT_MS = 10000;
+
+async function sendReceiptAndReport(tenant, payment, allocation, isOnboarding) {
+  const sender = isOnboarding ? sendNewTenancyConfirmation : sendPaymentConfirmation;
+  try {
+    const r = await Promise.race([
+      sender(tenant, payment, allocation),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('send_timeout')), SEND_TIMEOUT_MS)),
+    ]);
+    return { status: (r && r.status) || 'Sent', failureReason: (r && r.failureReason) || null };
+  } catch (err) {
+    if (err && err.message === 'send_timeout') {
+      return { status: 'Pending', failureReason: 'still sending in the background' };
+    }
+    return { status: 'Failed', failureReason: (err && err.message) || 'send failed' };
+  }
+}
+
+// ─── Offline-first idempotency ──────────────────────────────────────────────
+// Devices queue payments offline with a `client_txn_id` UUID. If the same
+// upload arrives twice (retry after timeout, double sync), the second call
+// must NOT create another payment. Returns a success payload for the
+// already-recorded payment so the device can mark it SYNCED.
+async function findReplayedOfflinePayment(clientTxnId) {
+  if (!clientTxnId) return null;
+  const existing = await store.findPaymentByClientTxnId(clientTxnId);
+  if (!existing) return null;
+  const tenant = await store.getTenant(existing.tenant_code);
+  return {
+    success: true,
+    parsed: { mpesa_reference: existing.mpesa_reference, amount: Number(existing.amount) },
+    payment: { ...existing, amount: Number(existing.amount), tenant_id: existing.tenant_code },
+    tenant,
+    whatsapp: { status: 'Already processed' },
+    already_synced: true,
+    payment_id: existing.id,
+  };
 }
 
 router.get('/', async (req, res) => {
@@ -27,13 +104,40 @@ router.get('/', async (req, res) => {
     const payments = await store.listPayments(req.query);
     res.json({ payments });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to list payments' });
+    res.status(500).json({ error: 'Failed to load payments' });
+  }
+});
+
+// Permanent payment <-> receipt-PDF link for Payment History View/Download.
+// Reuses the linked receipt; regenerates from the stored final allocation
+// when the file is missing. Never recalculates anything.
+router.get('/:id/receipt', async (req, res) => {
+  try {
+    const doc = await store.findReceiptDocument(req.params.id);
+    if (doc && doc.file_path && fs.existsSync(doc.file_path)) {
+      return res.json({ document: doc });
+    }
+    const prow = await store.findPaymentById(req.params.id);
+    if (!prow || prow.status !== 'Approved') {
+      return res.status(404).json({ error: 'No receipt available for this payment' });
+    }
+    const tenant = await store.getTenant(prow.tenant_code);
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+    let allocation = prow.allocation_breakdown || null;
+    try { if (typeof allocation === 'string') allocation = JSON.parse(allocation); } catch (_) { allocation = null; }
+    const regen = await ensureReceiptPdf(tenant, prow, allocation);
+    if (!regen || !regen.file_path || !fs.existsSync(regen.file_path)) {
+      return res.status(404).json({ error: 'Receipt PDF could not be produced for this payment' });
+    }
+    res.json({ document: regen, regenerated: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load receipt: ' + err.message });
   }
 });
 
 router.post('/', async (req, res) => {
   try {
-    const { tenant_id, amount, mpesa_reference, notes, payment_type, payment_mode, sender_account, receiver_account, cheque_number, payment_datetime } = req.body;
+    const { tenant_id, amount, mpesa_reference, notes, payment_type, payment_mode, sender_account, receiver_account, cheque_number, payment_datetime, client_txn_id } = req.body;
     if (!tenant_id || amount == null) {
       return res.status(400).json({ error: 'tenant_id and amount required' });
     }
@@ -53,6 +157,7 @@ router.post('/', async (req, res) => {
       receiver_account,
       cheque_number,
       payment_datetime,
+      client_txn_id: client_txn_id || null,
     });
     res.status(201).json({ payment });
   } catch (err) {
@@ -68,7 +173,9 @@ router.post('/:id/approve', async (req, res) => {
       return res.json({ success: true, payment: result.payment, tenant: result.tenant, whatsapp: { status: 'Skipped' }, alreadyApproved: true, sync: result.sync });
     }
 
-    queueReceiptGeneration(result);
+    // Receipt PDF permanence: generation starts immediately (from the final
+    // approved data) and runs alongside the text acknowledgement.
+    const receiptPromise = ensureReceiptPdf(result.tenant, result.payment, result.allocation);
 
     // Trigger QR-linked WhatsApp notification (non-blocking)
     try {
@@ -85,6 +192,7 @@ router.post('/:id/approve', async (req, res) => {
     const overpayment = result.allocation?.overpayment || 0;
 
     if (overpayment > 0) {
+      const receiptDoc = await receiptPromise;
       return res.json({
         success: true,
         payment: result.payment,
@@ -92,23 +200,25 @@ router.post('/:id/approve', async (req, res) => {
         allocation: result.allocation,
         overpayment,
         whatsapp: { status: 'Pending Overpayment Resolution' },
+        receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
         sync: result.sync,
       });
     }
 
     // New-tenancy onboarding message for the first payment after a fresh
     // occupancy while the deposit is still outstanding; otherwise the recurring
-    // monthly rent confirmation. Send asynchronously — don't block the response.
+    // monthly rent confirmation. Awaited (bounded) so the response carries
+    // the real delivery status instead of a blind 'Sent'.
     const isOnboarding = !!(result.allocation && result.allocation.onboarding);
-    if (isOnboarding) {
-      sendNewTenancyConfirmation(result.tenant, result.payment, result.allocation)
-        .catch(err => console.error(`[Payment] New tenancy WhatsApp send failed for ${result.payment.id}:`, err.message));
-    } else {
-      sendPaymentConfirmation(result.tenant, result.payment, result.allocation)
-        .catch(err => console.error(`[Payment] WhatsApp send failed for ${result.payment.id}:`, err.message));
-    }
+    const [wa, receiptDoc] = await Promise.all([
+      sendReceiptAndReport(result.tenant, result.payment, result.allocation, isOnboarding),
+      receiptPromise,
+    ]);
+    // The PDF travels together with the acknowledgement text (honest status
+    // for each channel; a text failure never blocks the PDF attempt).
+    const pdf = await sendReceiptPdf(result.tenant, result.payment, receiptDoc);
 
-    res.json({ success: true, payment: result.payment, tenant: result.tenant, whatsapp: { status: 'Sent' }, newTenancy: isOnboarding || null, sync: result.sync });
+    res.json({ success: true, payment: result.payment, tenant: result.tenant, allocation: result.allocation, whatsapp: wa, pdf, receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null, newTenancy: isOnboarding || null, sync: result.sync });
   } catch (err) {
     res.status(500).json({ error: 'Failed to approve payment: ' + err.message });
   }
@@ -253,6 +363,9 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
   const depositAmount = Number(tenant.deposit_amount || 0);
   const depositPaid = Number(tenant.deposit_paid || 0);
   const depositShortfall = Math.max(0, depositAmount - depositPaid);
+  const waterChargeAmount = Number(tenant.water_charge_amount || 0);
+  const waterChargePaid = Number(tenant.water_charge_paid || 0);
+  const waterChargeShortfall = Math.max(0, waterChargeAmount - waterChargePaid);
   const allPenalties = pendingPenalties || [];
   const penaltyTotal = allPenalties.filter(p => (p.category || 'penalty') === 'penalty').reduce((s, p) => s + Number(p.amount || 0), 0);
   const maintenanceTotal = allPenalties.filter(p => p.category === 'maintenance').reduce((s, p) => s + Number(p.amount || 0), 0);
@@ -301,9 +414,19 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
     remaining -= garbageFeeSettled;
   }
 
+  if (waterChargeShortfall > 0 && remaining > 0) {
+    waterSettled = Math.min(waterChargeShortfall, remaining);
+    remaining -= waterSettled;
+  }
+
   if (remainingRentForMonth > 0 && remaining > 0) {
     rentSettled = Math.min(remainingRentForMonth, remaining);
     remaining -= rentSettled;
+  }
+
+  if (depositShortfall > 0 && remaining > 0) {
+    depositSettled = Math.min(depositShortfall, remaining);
+    remaining -= depositSettled;
   }
 
   const futureAgreement = Math.max(0, agreementOutstanding - agreementSettled);
@@ -312,14 +435,34 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
   const futureMaintenance = Math.max(0, maintenanceTotal - maintenanceSettled);
   const futureOther = Math.max(0, otherTotal - otherSettled);
   const futureGarbage = Math.max(0, garbageFeeShortfall - garbageFeeSettled);
+  const futureWater = Math.max(0, waterChargeShortfall - waterSettled);
   const futureRent = Math.max(0, remainingRentForMonth - rentSettled);
-  const futureOutstanding = futureAgreement + futureArrears + futurePenalties + futureMaintenance + futureOther + futureGarbage + futureRent;
-  const totalDue = agreementOutstanding + currentArrears + totalPenalties + garbageFeeShortfall + remainingRentForMonth;
+  const futureDeposit = Math.max(0, depositShortfall - depositSettled);
+  const futureOutstanding = futureAgreement + futureArrears + futurePenalties + futureMaintenance + futureOther + futureGarbage + futureWater + futureRent + futureDeposit;
+  const totalDue = agreementOutstanding + depositShortfall + currentArrears + totalPenalties + garbageFeeShortfall + waterChargeShortfall + remainingRentForMonth;
 
-  const now = payment.payment_date ? new Date(payment.payment_date + 'T12:00:00') : new Date();
   const fullMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const fullMonth = fullMonths[now.getMonth()];
-  const fullYear = now.getFullYear();
+  let fullMonth, fullYear;
+  if (payment.billing_period) {
+    const [by, bm] = payment.billing_period.split('-').map(Number);
+    fullMonth = fullMonths[bm - 1] || 'Unknown';
+    fullYear = by || new Date().getFullYear();
+  } else {
+    // Fallback: derive from rent_due_date — billing period is always the month of rent_due_date
+    if (tenant.rent_due_date) {
+      const dueMonth = String(tenant.rent_due_date).slice(0, 7);
+      const [fy, fm] = dueMonth.split('-').map(Number);
+      fullMonth = fullMonths[fm - 1] || 'Unknown';
+      fullYear = fy || new Date().getFullYear();
+    } else {
+      const fallbackDate = payment.payment_date ? new Date(payment.payment_date + 'T12:00:00') : new Date();
+      fullMonth = fullMonths[fallbackDate.getMonth()];
+      fullYear = fallbackDate.getFullYear();
+    }
+  }
+  const now = fullMonths.indexOf(fullMonth) >= 0
+    ? new Date(fullYear, fullMonths.indexOf(fullMonth), 1)
+    : new Date();
   const nextDueMonth = new Date(now);
   nextDueMonth.setMonth(nextDueMonth.getMonth() + 1);
   const nextDue = `5th ${fullMonths[nextDueMonth.getMonth()]} ${nextDueMonth.getFullYear()}`;
@@ -331,21 +474,25 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
 
   const dueParts = [];
   if (agreementOutstanding > 0) dueParts.push(`Agreement Fee: KES ${agreementOutstanding.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+  if (depositShortfall > 0) dueParts.push(`Deposit: KES ${depositShortfall.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (currentArrears > 0) dueParts.push(`Arrears: KES ${currentArrears.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (penaltyTotal > 0) dueParts.push(`Penalties: KES ${penaltyTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (maintenanceTotal > 0) dueParts.push(`Maintenance Invoices: KES ${maintenanceTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (otherTotal > 0) dueParts.push(`Other Charges: KES ${otherTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (garbageFeeShortfall > 0) dueParts.push(`Garbage Fee: KES ${garbageFeeShortfall.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+  if (waterChargeShortfall > 0) dueParts.push(`Water Charges: KES ${waterChargeShortfall.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   dueParts.push(`Monthly Rent: KES ${remainingRentForMonth.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   msg += ` Rent Due for ${fullMonth} ${fullYear} was KES ${totalDue.toLocaleString('en-KE', { maximumFractionDigits: 0 })} (${dueParts.join(', ')}).`;
 
   const allocParts = [];
   if (agreementSettled > 0) allocParts.push(`Agreement Fee: KES ${agreementSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+  if (depositSettled > 0) allocParts.push(`Deposit: KES ${depositSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (arrearsSettled > 0) allocParts.push(`Arrears: KES ${arrearsSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (penaltySettled > 0) allocParts.push(`Penalties: KES ${penaltySettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (maintenanceSettled > 0) allocParts.push(`Maintenance Invoices: KES ${maintenanceSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (otherSettled > 0) allocParts.push(`Other Charges: KES ${otherSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (garbageFeeSettled > 0) allocParts.push(`Garbage Fee: KES ${garbageFeeSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+  if (waterSettled > 0) allocParts.push(`Water Charges: KES ${waterSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (rentSettled > 0) allocParts.push(`Monthly Rent: KES ${rentSettled.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (allocParts.length > 0) {
     msg += ` Your payment has been allocated as follows: ${allocParts.join(' and ')}.`;
@@ -354,11 +501,13 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
   if (futureOutstanding > 0) {
     const remParts = [];
     if (futureAgreement > 0) remParts.push(`Agreement Fee: KES ${futureAgreement.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+    if (futureDeposit > 0) remParts.push(`Deposit: KES ${futureDeposit.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     if (futureArrears > 0) remParts.push(`Arrears: KES ${futureArrears.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     if (futurePenalties > 0) remParts.push(`Penalties: KES ${futurePenalties.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     if (futureMaintenance > 0) remParts.push(`Maintenance Invoices: KES ${futureMaintenance.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     if (futureOther > 0) remParts.push(`Other Charges: KES ${futureOther.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     if (futureGarbage > 0) remParts.push(`Garbage Fee: KES ${futureGarbage.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+    if (futureWater > 0) remParts.push(`Water Charges: KES ${futureWater.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     if (futureRent > 0) remParts.push(`Monthly Rent: KES ${futureRent.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
     msg += ` Your remaining balance is KES ${futureOutstanding.toLocaleString('en-KE', { maximumFractionDigits: 0 })} (${remParts.join(', ')}).`;
   } else {
@@ -422,18 +571,21 @@ router.post('/parse-message', async (req, res) => {
     });
 
     const suggestedTenant = matches[0] || null;
+    const payDateStr = parsed.payment_date || new Date().toISOString().slice(0, 10);
     const previewPayment = {
       amount: parsed.amount,
       mpesa_reference: parsed.mpesa_reference,
-      payment_date: parsed.payment_date || new Date().toISOString().slice(0, 10),
+      payment_date: payDateStr,
     };
 
-    let previewTenant = suggestedTenant;
+    // Derive billing_period from tenant's rent_due_date.
+    // The billing period is always the month of rent_due_date — the payment date
+    // only determines whether it's early or late, not which month it covers.
     if (suggestedTenant && suggestedTenant.rent_due_date) {
-      const due = new Date(String(suggestedTenant.rent_due_date).slice(0, 10));
-      due.setMonth(due.getMonth() + 1);
-      previewTenant = { ...suggestedTenant, rent_due_date: due.toISOString().slice(0, 10) };
+      previewPayment.billing_period = String(suggestedTenant.rent_due_date).slice(0, 7);
     }
+
+    const previewTenant = suggestedTenant;
 
     const generated_message = previewTenant && parsed.amount
       ? await (async () => {
@@ -472,6 +624,9 @@ router.post('/parse-message', async (req, res) => {
       suggested_tenant: suggestedTenant,
       generated_message,
       duplicate,
+      outstanding_invoices: suggestedTenant
+        ? await store.listOutstandingRegisterInvoices(suggestedTenant.tenant_code).catch(() => [])
+        : [],
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to parse message' });
@@ -480,6 +635,12 @@ router.post('/parse-message', async (req, res) => {
 
 router.post('/approve-from-message', async (req, res) => {
   try {
+    const clientTxnId = req.body?.client_txn_id || null;
+    // Idempotent replay: this offline transaction was already uploaded.
+    if (clientTxnId) {
+      const replay = await findReplayedOfflinePayment(clientTxnId);
+      if (replay) return res.json(replay);
+    }
     const parsed = parseMpesaMessage(req.body?.raw_message);
     let tenantId = req.body?.tenant_id;
 
@@ -505,9 +666,36 @@ router.post('/approve-from-message', async (req, res) => {
       if (existing) {
         const plotName = existing.property_name || '—';
         const unitNo = existing.unit_label || existing.tenant_code || '—';
+        // Offline sync rejection → manager review queue (Phase 3). Online
+        // agents already see this 409 in the UI, so only offline uploads
+        // (which carry a client_txn_id) are recorded as conflicts.
+        if (clientTxnId) {
+          await store.recordSyncConflict({
+            clientTxnId,
+            opType: 'payment_mpesa',
+            tenantCode: existing.tenant_code,
+            summary: {
+              tenant_name: tenant?.name || null,
+              amount: parsed.amount,
+              mpesa_reference: parsed.mpesa_reference,
+              payment_date: req.body?.payment_date || parsed.payment_date || null,
+            },
+            reason: `M-Pesa Reference ${parsed.mpesa_reference} is already used by ${existing.tenant_name || 'another tenant'} (${plotName} ${unitNo}, KES ${Number(existing.amount || 0).toLocaleString()}).`,
+            existingRef: {
+              payment_id: existing.id,
+              tenant_name: existing.tenant_name,
+              property_name: plotName,
+              unit_number: unitNo,
+              amount: Number(existing.amount || 0),
+              payment_date: existing.payment_date,
+              receipt_number: existing.receipt_number || null,
+            },
+          }).catch(() => {});
+        }
         return res.status(409).json({
           error: 'Duplicate reference',
           message: `Approval Failed: M-Pesa Reference ${parsed.mpesa_reference} has already been used for an approved payment.`,
+          conflict: !!clientTxnId,
           duplicate: {
             tenant_name: existing.tenant_name,
             property_name: plotName,
@@ -538,14 +726,29 @@ router.post('/approve-from-message', async (req, res) => {
       payment_mode: 'M-Pesa',
       sender_account: parsed.phone_number || null,
       payment_datetime: parsed.payment_date ? new Date(parsed.payment_date + 'T12:00:00').toISOString() : null,
+      client_txn_id: clientTxnId,
     });
+    if (payment._idempotentReplay) {
+      const replayTenant = await store.getTenant(payment.tenant_code);
+      return res.json({
+        success: true,
+        parsed,
+        payment: { ...payment, tenant_id: payment.tenant_code },
+        tenant: replayTenant,
+        whatsapp: { status: 'Already processed' },
+        already_synced: true,
+        payment_id: payment.id,
+      });
+    }
 
     const approved = await store.approvePayment(payment.id);
     if (!approved) {
       return res.status(500).json({ error: 'Failed to approve payment after creating it' });
     }
 
-    queueReceiptGeneration(approved);
+    // Receipt PDF permanence: generation starts immediately (from the final
+    // approved data) and runs alongside the text acknowledgement.
+    const receiptPromise = ensureReceiptPdf(approved.tenant, approved.payment, approved.allocation);
 
     // Trigger QR-linked WhatsApp notification (non-blocking)
     try {
@@ -562,6 +765,7 @@ router.post('/approve-from-message', async (req, res) => {
     let whatsappResult = { status: 'Skipped' };
 
     if (approved.allocation && approved.allocation.overpayment > 0) {
+      const receiptDoc = await receiptPromise;
       res.json({
         success: true,
         parsed,
@@ -570,6 +774,7 @@ router.post('/approve-from-message', async (req, res) => {
         whatsapp: whatsappResult,
         overpayment: approved.allocation.overpayment,
         payment_id: approved.payment.id,
+        receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
       });
       return;
     }
@@ -579,31 +784,47 @@ router.post('/approve-from-message', async (req, res) => {
       ? buildNewTenancyConfirmation(approved.tenant, approved.payment, approved.allocation)
       : buildPaymentConfirmation(approved.tenant, approved.payment, approved.allocation);
 
-    // Send WhatsApp asynchronously — don't block the response
-    if (isOnboarding) {
-      sendNewTenancyConfirmation(approved.tenant, approved.payment, approved.allocation)
-        .catch(err => console.error(`[Payment] New tenancy WhatsApp send failed for ${approved.payment.id}:`, err.message));
-    } else {
-      sendPaymentConfirmation(approved.tenant, approved.payment, approved.allocation)
-        .catch(err => console.error(`[Payment] WhatsApp send failed for ${approved.payment.id}:`, err.message));
-    }
+    // Awaited (bounded) — the response carries the real delivery status.
+    const [waResult, receiptDoc] = await Promise.all([
+      sendReceiptAndReport(approved.tenant, approved.payment, approved.allocation, isOnboarding),
+      receiptPromise,
+    ]);
+    // The PDF travels together with the acknowledgement text.
+    const pdf = await sendReceiptPdf(approved.tenant, approved.payment, receiptDoc);
 
     res.json({
       success: true,
       parsed,
       payment: approved.payment,
       tenant: approved.tenant,
-      whatsapp: { status: 'Sent' },
+      allocation: approved.allocation,
+      whatsapp: waResult,
+      pdf,
+      receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
       generated_message,
       newTenancy: isOnboarding || null,
     });
   } catch (err) {
+    // Race: two simultaneous uploads with the same client_txn_id — the row
+    // was created by the parallel request. Return it idempotently.
+    if (err && err.code === '23505' && req.body?.client_txn_id) {
+      try {
+        const replay = await findReplayedOfflinePayment(req.body.client_txn_id);
+        if (replay) return res.json(replay);
+      } catch (_) {}
+    }
     res.status(500).json({ error: 'Failed to approve payment from message' });
   }
 });
 
 router.post('/approve-cash-pesalink', async (req, res) => {
   try {
+    const clientTxnId = req.body?.client_txn_id || null;
+    // Idempotent replay of an already-uploaded offline transaction.
+    if (clientTxnId) {
+      const replay = await findReplayedOfflinePayment(clientTxnId);
+      if (replay) return res.json(replay);
+    }
     const { payment_mode, amount, payment_date, payment_time, tenant_code, tenant_id } = req.body;
     if (!amount || Number(amount) <= 0) {
       return res.status(400).json({ error: 'Valid amount is required' });
@@ -638,14 +859,28 @@ router.post('/approve-cash-pesalink', async (req, res) => {
       payment_date: paymentDate,
       payment_mode,
       payment_datetime: paymentDateTime,
+      client_txn_id: clientTxnId,
     });
+    if (payment._idempotentReplay) {
+      const replayTenant = await store.getTenant(payment.tenant_code);
+      return res.json({
+        success: true,
+        payment: { ...payment, tenant_id: payment.tenant_code },
+        tenant: replayTenant,
+        whatsapp: { status: 'Already processed' },
+        already_synced: true,
+        payment_id: payment.id,
+      });
+    }
 
     const approved = await store.approvePayment(payment.id);
     if (!approved) {
       return res.status(500).json({ error: 'Failed to approve payment' });
     }
 
-    queueReceiptGeneration(approved);
+    // Receipt PDF permanence: generation starts immediately (from the final
+    // approved data) and runs alongside the text acknowledgement.
+    const receiptPromise = ensureReceiptPdf(approved.tenant, approved.payment, approved.allocation);
 
     // Trigger QR-linked WhatsApp notification (non-blocking)
     try {
@@ -660,6 +895,7 @@ router.post('/approve-cash-pesalink', async (req, res) => {
     } catch (_) {}
 
     if (approved.allocation && approved.allocation.overpayment > 0) {
+      const receiptDoc = await receiptPromise;
       return res.json({
         success: true,
         payment: approved.payment,
@@ -667,6 +903,7 @@ router.post('/approve-cash-pesalink', async (req, res) => {
         whatsapp: { status: 'Skipped' },
         overpayment: approved.allocation.overpayment,
         payment_id: approved.payment.id,
+        receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
       });
     }
 
@@ -675,23 +912,32 @@ router.post('/approve-cash-pesalink', async (req, res) => {
       ? buildNewTenancyConfirmation(approved.tenant, approved.payment, approved.allocation)
       : buildPaymentConfirmation(approved.tenant, approved.payment, approved.allocation);
 
-    if (isOnboarding) {
-      sendNewTenancyConfirmation(approved.tenant, approved.payment, approved.allocation)
-        .catch(() => {});
-    } else {
-      sendPaymentConfirmation(approved.tenant, approved.payment, approved.allocation)
-        .catch(() => {});
-    }
+    // Awaited (bounded) — the response carries the real delivery status.
+    const [waCash, receiptDoc] = await Promise.all([
+      sendReceiptAndReport(approved.tenant, approved.payment, approved.allocation, isOnboarding),
+      receiptPromise,
+    ]);
+    // The PDF travels together with the acknowledgement text.
+    const pdf = await sendReceiptPdf(approved.tenant, approved.payment, receiptDoc);
 
     res.json({
       success: true,
       payment: approved.payment,
       tenant: approved.tenant,
-      whatsapp: { status: 'Sent' },
+      allocation: approved.allocation,
+      whatsapp: waCash,
+      pdf,
+      receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
       generated_message,
       newTenancy: isOnboarding || null,
     });
   } catch (err) {
+    if (err && err.code === '23505' && req.body?.client_txn_id) {
+      try {
+        const replay = await findReplayedOfflinePayment(req.body.client_txn_id);
+        if (replay) return res.json(replay);
+      } catch (_) {}
+    }
     res.status(500).json({ error: 'Failed to approve cash/pesalink payment: ' + err.message });
   }
 });
@@ -699,8 +945,7 @@ router.post('/approve-cash-pesalink', async (req, res) => {
 router.post('/:id/resend-whatsapp', async (req, res) => {
   try {
     const paymentId = req.params.id;
-    const { payments } = await store.listPayments();
-    const payment = payments.find(p => p.id == paymentId);
+    const payment = await store.findPaymentById(paymentId);
     if (!payment) return res.status(404).json({ error: 'Payment not found' });
 
     const tenant = await store.getTenant(payment.tenant_id || payment.tenant_code);
@@ -778,11 +1023,11 @@ router.post('/:id/resend-whatsapp', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const success = await store.deletePayment(req.params.id);
-    if (!success) {
+    const result = await store.deletePayment(req.params.id, req.user?.username);
+    if (!result || !result.deleted) {
       return res.status(404).json({ error: 'Payment not found' });
     }
-    res.json({ success: true });
+    res.json({ success: true, reversed: !!result.reversed, fallback: !!result.fallback, warnings: result.warnings || [] });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete payment' });
   }
@@ -811,10 +1056,10 @@ router.post('/send-report', async (req, res) => {
       { key: 'date', width: 15 }
     ];
 
-    // Row 1 for Logo
+    // Row 1 for Logo (compact letterhead: 70pt keeps frozen headers usable)
     worksheet.insertRow(1, []);
-    worksheet.mergeCells('A1:E1');
-    worksheet.getRow(1).height = 140;
+    worksheet.mergeCells('A1:F1');
+    worksheet.getRow(1).height = 70;
 
     const logoPath = resolveLogoPath();
     if (logoPath) {
@@ -824,16 +1069,16 @@ router.post('/send-report', async (req, res) => {
       });
       worksheet.addImage(imageId, {
         tl: { col: 1.8, row: 0.1 },
-        ext: { width: 120, height: 120 }
+        ext: { width: 60, height: 60 }
       });
     }
 
     // Row 2 for Heading
     worksheet.insertRow(2, ['GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS PAYMENTS REPORT']);
-    worksheet.mergeCells('A2:E2');
+    worksheet.mergeCells('A2:F2');
     worksheet.getCell('A2').font = { bold: true, size: 14 };
     worksheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getRow(2).height = 30;
+    worksheet.getRow(2).height = 24;
 
     // Row 3 Spacing
     worksheet.insertRow(3, []);
@@ -859,7 +1104,10 @@ router.post('/send-report', async (req, res) => {
     worksheet.addRow([]);
     const totalRow = worksheet.addRow({ tenant: 'TOTAL PAID', house: '', amount: totalAmount, ref: '', receipt: '', date: '' });
     totalRow.font = { bold: true };
-    
+
+    // Auto-fit widths, wrapping, row heights, frozen header, A4 print setup.
+    formatWorksheet(worksheet, { dataStartRow: 4, headerRowNum: 4, printLandscape: true, repeatHeaderRows: [4], moneyCols: [3] });
+
     if (mode === 'download') {
       return streamWorkbook(res, workbook, 'Payment_Report', 'Payment_Report', docName);
     }
@@ -868,9 +1116,9 @@ router.post('/send-report', async (req, res) => {
     await workbook.xlsx.writeFile(tempFilePath);
     const deliveryPath = renameForDelivery(tempFilePath, docName);
 
-    await whatsapp.sendMediaMessage(phone_number, deliveryPath, 'Here is the requested Excel payment report.');
-    
+    const waResult = await whatsapp.sendDocumentSmart(phone_number, deliveryPath, 'Here is the requested Excel payment report.');
     fs.unlinkSync(deliveryPath);
+    if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the report');
 
     res.json({ success: true });
   } catch (err) {
@@ -1003,12 +1251,14 @@ router.all('/collection-report', async (req, res) => {
     ];
     rowNum = addSummarySection(ws1, rowNum, 'COLLECTION STATUS SUMMARY', statusEntries, 'M');
 
-    // Apply formatting
+    // Apply formatting: auto-fit, wrapping, frozen header, print titles,
+    // readable financial number formats.
     formatWorksheet(ws1, {
       dataStartRow: headerRowNum,
       headerRowNum,
       printLandscape: true,
       repeatHeaderRows: [headerRowNum],
+      moneyCols: [3, 4, 5, 6, 7, 8, 12],
     });
 
     // ===== SHEET 2: Payment Transactions =====
@@ -1051,7 +1301,7 @@ router.all('/collection-report', async (req, res) => {
       });
     }
 
-    formatWorksheet(ws2, { dataStartRow: 2, headerRowNum: 2, printLandscape: true, repeatHeaderRows: [2] });
+    formatWorksheet(ws2, { dataStartRow: 2, headerRowNum: 2, printLandscape: true, repeatHeaderRows: [2], moneyCols: [4] });
 
     if (mode === 'download') {
       return streamWorkbook(res, workbook, 'Collection_Report', 'Collection_Report', docName);

@@ -34,6 +34,22 @@ async function request(path, options = {}) {
   return data;
 }
 
+// Multipart (file upload): auth header only, browser sets the boundary.
+async function multipartRequest(path, formData) {
+  const headers = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: formData });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || res.statusText || 'Request failed');
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
 function filenameFromDisposition(disposition) {
   if (!disposition) return 'invoice.pdf';
   const match = disposition.match(/filename="?([^";]+)"?/i);
@@ -120,6 +136,9 @@ export const api = {
   metrics() {
     return request('/dashboard/metrics');
   },
+  dashboardDrill(kind) {
+    return request(`/dashboard/drilldown/${encodeURIComponent(kind)}`);
+  },
   whatsappStatus() {
     return request('/network/whatsapp-status');
   },
@@ -131,31 +150,45 @@ export const api = {
     return request(`/tenants${qs ? `?${qs}` : ''}`);
   },
   tenant(id) {
-    return request(`/tenants/${id}`);
+    return request(`/tenants/${encodeURIComponent(id)}`);
   },
   tenantProfile(id) {
-    return request(`/tenants/${id}/profile`);
+    return request(`/tenants/${encodeURIComponent(id)}/profile`);
   },
   createTenant(body) {
     return request('/tenants', { method: 'POST', body: JSON.stringify(body) });
   },
   updateTenant(id, body) {
-    return request(`/tenants/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    return request(`/tenants/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) });
   },
   toggleDeposit(id) {
-    return request(`/tenants/${id}/deposit`, { method: 'PATCH' });
+    return request(`/tenants/${encodeURIComponent(id)}/deposit`, { method: 'PATCH' });
   },
   deleteTenant(id) {
-    return request(`/tenants/${id}`, { method: 'DELETE' });
+    return request(`/tenants/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
   markUnitVacant(id, body = {}) {
-    return request(`/tenants/${id}/vacant`, { method: 'PATCH', body: JSON.stringify(body) });
+    return request(`/tenants/${encodeURIComponent(id)}/vacant`, { method: 'PATCH', body: JSON.stringify(body) });
   },
   recordNoticeToVacate(id, body) {
-    return request(`/tenants/${id}/notice-to-vacate`, { method: 'POST', body: JSON.stringify(body) });
+    return request(`/tenants/${encodeURIComponent(id)}/notice-to-vacate`, { method: 'POST', body: JSON.stringify(body) });
   },
   markOccupied(id, body) {
-    return request(`/tenants/${id}/occupy`, { method: 'POST', body: JSON.stringify(body) });
+    return request(`/tenants/${encodeURIComponent(id)}/occupy`, { method: 'POST', body: JSON.stringify(body) });
+  },
+  listAgreements(tenantId) {
+    return request(`/tenants/${encodeURIComponent(tenantId)}/agreements`);
+  },
+  uploadAgreement(tenantId, blob, filename) {
+    const form = new FormData();
+    form.append('file', blob, filename);
+    return multipartRequest(`/tenants/${encodeURIComponent(tenantId)}/agreements`, form);
+  },
+  previewAgreement(tenantId, agreementId) {
+    return request(`/tenants/${encodeURIComponent(tenantId)}/agreements/${agreementId}/preview`);
+  },
+  deleteAgreement(tenantId, agreementId) {
+    return request(`/tenants/${encodeURIComponent(tenantId)}/agreements/${agreementId}`, { method: 'DELETE' });
   },
   listExitInvoices(tenant_code = null) {
     const qs = tenant_code ? `?tenant_code=${encodeURIComponent(tenant_code)}` : '';
@@ -196,7 +229,7 @@ export const api = {
     return request(`/archive/occupancy/house/${encodeURIComponent(houseId)}`);
   },
   resolveOverpayment(tenantId, body) {
-    return request(`/tenants/${tenantId}/resolve-overpayment`, { method: 'POST', body: JSON.stringify(body) });
+    return request(`/tenants/${encodeURIComponent(tenantId)}/resolve-overpayment`, { method: 'POST', body: JSON.stringify(body) });
   },
   skipOverpayment(paymentId, overpayment) {
     return request(`/payments/${paymentId}/skip-overpayment`, { method: 'POST', body: JSON.stringify({ overpayment }) });
@@ -209,7 +242,7 @@ export const api = {
     return request(`/pending-overpayments/${id}/resolve`, { method: 'POST', body: JSON.stringify(body) });
   },
   applyCredit(tenantId, body) {
-    return request(`/tenants/${tenantId}/apply-credit`, { method: 'POST', body: JSON.stringify(body) });
+    return request(`/tenants/${encodeURIComponent(tenantId)}/apply-credit`, { method: 'POST', body: JSON.stringify(body) });
   },
   importTenants(file_base64, house_id = null) {
     return request('/tenants/import', { method: 'POST', body: JSON.stringify({ file_base64, house_id }) });
@@ -254,17 +287,37 @@ export const api = {
   parsePaymentMessage(raw_message) {
     return request('/payments/parse-message', { method: 'POST', body: JSON.stringify({ raw_message }) });
   },
-  approvePaymentFromMessage({ raw_message, tenant_id, payment_date }) {
+  approvePaymentFromMessage({ raw_message, tenant_id, payment_date, client_txn_id }) {
     return request('/payments/approve-from-message', {
       method: 'POST',
-      body: JSON.stringify({ raw_message, tenant_id, payment_date }),
+      body: JSON.stringify({ raw_message, tenant_id, payment_date, client_txn_id }),
     });
   },
-  approveCashPesaLink({ payment_mode, amount, payment_date, payment_time, tenant_code, tenant_id }) {
+  approveCashPesaLink({ payment_mode, amount, payment_date, payment_time, tenant_code, tenant_id, client_txn_id }) {
     return request('/payments/approve-cash-pesalink', {
       method: 'POST',
-      body: JSON.stringify({ payment_mode, amount, payment_date, payment_time, tenant_code, tenant_id }),
+      body: JSON.stringify({ payment_mode, amount, payment_date, payment_time, tenant_code, tenant_id, client_txn_id }),
     });
+  },
+  syncPull({ payments_days = 90, payments_limit = 5000 } = {}) {
+    const qs = new URLSearchParams({ payments_days: String(payments_days), payments_limit: String(payments_limit) }).toString();
+    return request(`/sync/pull?${qs}`);
+  },
+  listConflicts(status = 'pending') {
+    return request(`/sync/conflicts?status=${encodeURIComponent(status)}`);
+  },
+  resolveConflict(id, resolution) {
+    return request(`/sync/conflicts/${id}/resolve`, { method: 'POST', body: JSON.stringify({ resolution }) });
+  },
+  checkConflicts(client_txn_ids) {
+    return request('/sync/conflicts/check', { method: 'POST', body: JSON.stringify({ client_txn_ids }) });
+  },
+  commissionReport({ month, house_paybill } = {}) {
+    const qs = new URLSearchParams({ ...(month ? { month } : {}), ...(house_paybill ? { house_paybill } : {}) }).toString();
+    return request(`/commissions${qs ? `?${qs}` : ''}`);
+  },
+  setCommissionRate(house_paybill_number, rate_percent) {
+    return request('/commissions/rates', { method: 'PUT', body: JSON.stringify({ house_paybill_number, rate_percent }) });
   },
   houses(params = {}) {
     const qs = new URLSearchParams(params).toString();
@@ -330,8 +383,17 @@ export const api = {
   downloadDepositsReport(house_id, month) {
     return blobRequest('/reports/deposits-new-tenants', { mode: 'download', house_id, month });
   },
-  sendMessage(id, message) {
-    return request(`/tenants/${id}/send-message`, { method: 'POST', body: JSON.stringify({ message }) });
+  sendMessage(id, message, client_txn_id) {
+    return request(`/tenants/${encodeURIComponent(id)}/send-message`, { method: 'POST', body: JSON.stringify({ message, client_txn_id }) });
+  },
+  listInspections({ limit = 100 } = {}) {
+    return request(`/inspections?limit=${limit}`);
+  },
+  createInspection(body) {
+    return request('/inspections', { method: 'POST', body: JSON.stringify(body) });
+  },
+  uploadOfflineMedia(body) {
+    return request('/sync/media', { method: 'POST', body: JSON.stringify(body) });
   },
   users() {
     return request('/users');
@@ -346,7 +408,7 @@ export const api = {
     return request(`/users/${id}`, { method: 'DELETE' });
   },
   listPenalties(tenantCode) {
-    return request(`/penalties/${tenantCode}`);
+    return request(`/penalties/${encodeURIComponent(tenantCode)}`);
   },
   createPenalty(body) {
     return request('/penalties', { method: 'POST', body: JSON.stringify(body) });
@@ -378,6 +440,109 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ phone_number }),
     });
+  },
+  docTemplates() {
+    return request('/documents/templates');
+  },
+  stampStatus() {
+    return request('/settings/stamp');
+  },
+  async stampImageBlob() {
+    const headers = {};
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/settings/stamp/image`, { headers });
+    if (!res.ok) throw new Error('No stamp preview available');
+    return res.blob();
+  },
+  uploadStamp(formData) {
+    return multipartRequest('/settings/stamp', formData);
+  },
+  setStampActive(active) {
+    return request('/settings/stamp', { method: 'PATCH', body: JSON.stringify({ active }) });
+  },
+  deleteStamp() {
+    return request('/settings/stamp', { method: 'DELETE' });
+  },
+  signatureStatus() {
+    return request('/settings/signature');
+  },
+  async signatureImageBlob() {
+    const headers = {};
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/settings/signature/image`, { headers });
+    if (!res.ok) throw new Error('No signature preview available');
+    return res.blob();
+  },
+  uploadSignature(formData) {
+    return multipartRequest('/settings/signature', formData);
+  },
+  patchSignature(body) {
+    return request('/settings/signature', { method: 'PATCH', body: JSON.stringify(body || {}) });
+  },
+  deleteSignature() {
+    return request('/settings/signature', { method: 'DELETE' });
+  },
+  arrangements(tenantCode) {
+    return request(`/arrangements/tenant/${encodeURIComponent(tenantCode)}`);
+  },
+  createArrangement(body) {
+    return request('/arrangements', { method: 'POST', body: JSON.stringify(body) });
+  },
+  approveArrangement(id, body) {
+    return request(`/arrangements/${id}/approve`, { method: 'POST', body: JSON.stringify(body || {}) });
+  },
+  declineArrangement(id, body) {
+    return request(`/arrangements/${id}/decline`, { method: 'POST', body: JSON.stringify(body || {}) });
+  },
+  modifyArrangement(id, body) {
+    return request(`/arrangements/${id}`, { method: 'PATCH', body: JSON.stringify(body || {}) });
+  },
+  cancelArrangement(id, body) {
+    return request(`/arrangements/${id}/cancel`, { method: 'POST', body: JSON.stringify(body || {}) });
+  },
+  expireArrangement(id, body) {
+    return request(`/arrangements/${id}/expire`, { method: 'POST', body: JSON.stringify(body || {}) });
+  },
+  arrangementHistory(id) {
+    return request(`/arrangements/${id}/history`);
+  },
+  paymentReceipt(id) {
+    return request(`/payments/${id}/receipt`);
+  },
+  resolveLetter({ template_key, tenant_code, values }) {
+    return request('/documents/letters/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ template_key, tenant_code, values }),
+    });
+  },
+  placeholders(templateKey) {
+    return request(`/documents/letters/placeholders${templateKey ? `?template_key=${encodeURIComponent(templateKey)}` : ''}`);
+  },
+  createLetter(body) {
+    return request('/documents/letters', { method: 'POST', body: JSON.stringify(body) });
+  },
+  updateLetterDraft(id, body) {
+    return request(`/documents/letters/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  finalizeLetter(id) {
+    return request(`/documents/letters/${id}/finalize`, { method: 'POST' });
+  },
+  newVersionLetter(id) {
+    return request(`/documents/letters/${id}/new-version`, { method: 'POST' });
+  },
+  deleteDocument(id) {
+    return request(`/documents/${id}`, { method: 'DELETE' });
+  },
+  previewLetter(body) {
+    return request('/documents/letters/preview', { method: 'POST', body: JSON.stringify(body) });
+  },
+  batchLetters(body) {
+    return request('/documents/letters/batch', { method: 'POST', body: JSON.stringify(body) });
+  },
+  customNotice(body) {
+    return request('/documents/letters/custom-notice', { method: 'POST', body: JSON.stringify(body) });
   },
   generateStatement(tenant_id, mode) {
     return request('/statements/generate', {
@@ -569,6 +734,15 @@ export const api = {
       body: JSON.stringify({ phone_number }),
     });
   },
+  updateInvoiceRegister(id, body) {
+    return request(`/invoice-register/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body || {}),
+    });
+  },
+  deleteInvoiceRegister(id) {
+    return request(`/invoice-register/${id}`, { method: 'DELETE' });
+  },
   listMonthlyReports() {
     return request('/monthly-reports');
   },
@@ -586,16 +760,16 @@ export const api = {
     return blobRequest(`/monthly-reports/${encodeURIComponent(month)}/excel`, { house_paybill: housePaybill || null });
   },
   getDepositPreview(tenantId, billingPeriod) {
-    return request(`/tenants/${tenantId}/deposit-preview?billing_period=${encodeURIComponent(billingPeriod)}`);
+    return request(`/tenants/${encodeURIComponent(tenantId)}/deposit-preview?billing_period=${encodeURIComponent(billingPeriod)}`);
   },
   applyDepositToRent(tenantId, body) {
-    return request(`/tenants/${tenantId}/apply-deposit`, { method: 'POST', body: JSON.stringify(body) });
+    return request(`/tenants/${encodeURIComponent(tenantId)}/apply-deposit`, { method: 'POST', body: JSON.stringify(body) });
   },
   recordRentLoss(tenantId, body) {
-    return request(`/tenants/${tenantId}/record-loss`, { method: 'POST', body: JSON.stringify(body) });
+    return request(`/tenants/${encodeURIComponent(tenantId)}/record-loss`, { method: 'POST', body: JSON.stringify(body) });
   },
   getDepositApplications(tenantId) {
-    return request(`/tenants/${tenantId}/deposit-applications`);
+    return request(`/tenants/${encodeURIComponent(tenantId)}/deposit-applications`);
   },
   downloadCollectionReport(house_id, billing_month) {
     return getBlob('/payments/collection-report', { mode: 'download', house_id, billing_month });
@@ -776,6 +950,23 @@ export const api = {
   waTemplatePreview(key) {
     return request(`/whatsapp/templates/${key}/preview`, { method: 'POST' });
   },
+  // ─── SMS Module (Bytewave) ─────────────────────────────────────────────────
+  smsStatus() {
+    return request('/sms/status');
+  },
+  smsUpdateSettings(settings) {
+    return request('/sms/settings', { method: 'PUT', body: JSON.stringify(settings) });
+  },
+  smsBalance() {
+    return request('/sms/balance');
+  },
+  smsSendTest(phone, message) {
+    return request('/sms/send-test', { method: 'POST', body: JSON.stringify({ phone, message }) });
+  },
+  smsMessages(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/sms/messages${qs ? '?' + qs : ''}`);
+  },
   // ─── Future Tenancies ───────────────────────────────────────────────────
   futureTenancies(params = {}) {
     const qs = new URLSearchParams(params).toString();
@@ -831,6 +1022,16 @@ export const api = {
   },
   downloadEnhancedMonthlyReport(month, housePaybill) {
     return blobRequest(`/monthly-reports/${encodeURIComponent(month)}/enhanced/excel`, { house_paybill: housePaybill || null });
+  },
+  getWaterBillReport({ house_paybill, billing_month, unit } = {}) {
+    const qs = new URLSearchParams({ ...(house_paybill ? { house_paybill } : {}), ...(billing_month ? { billing_month } : {}), ...(unit ? { unit } : {}) }).toString();
+    return request(`/monthly-reports/water/report${qs ? `?${qs}` : ''}`);
+  },
+  downloadWaterBillReport({ house_paybill, billing_month, unit } = {}) {
+    return blobRequest('/monthly-reports/water/pdf', { house_paybill, billing_month, unit: unit || null });
+  },
+  sendWaterBillReport({ house_paybill, billing_month, unit, phone } = {}) {
+    return request('/monthly-reports/water/send', { method: 'POST', body: JSON.stringify({ house_paybill, billing_month, unit: unit || null, phone }) });
   },
 
   // ─── Water Invoices ─────────────────────────────────────────────────────

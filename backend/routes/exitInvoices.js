@@ -30,16 +30,30 @@ router.post('/', async (req, res) => {
   try {
     const { tenant_code, lines, move_out_date, reason, outstanding_balance,
       rent_treatment, rent_charged_amount, pro_rated_days, rent_treatment_reason,
+      water_charges, client_txn_id,
       deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason } = req.body || {};
     if (!tenant_code) {
       return res.status(400).json({ error: 'tenant_code required' });
+    }
+    // Idempotent replay of an already-uploaded offline move-out settlement.
+    if (client_txn_id) {
+      const replay = await store.findRecordByClientTxnId('exit_invoices', client_txn_id);
+      if (replay) {
+        const full = await store.getExitInvoice(replay.id);
+        return res.json({ exit_invoice: full || replay, already_synced: true });
+      }
     }
     const invoice = await store.createExitInvoice(tenant_code, {
       lines: Array.isArray(lines) ? lines : [],
       move_out_date, reason, outstanding_balance,
       rent_treatment, rent_charged_amount, pro_rated_days, rent_treatment_reason,
+      water_charges: water_charges != null ? Number(water_charges) : undefined,
+      client_txn_id: client_txn_id || null,
       deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason,
     });
+    if (invoice && invoice._idempotentReplay) {
+      return res.json({ exit_invoice: invoice, already_synced: true });
+    }
     if (!invoice) return res.status(404).json({ error: 'Tenant not found' });
     await store.logAudit({
       actor: req.user?.username,
@@ -58,11 +72,13 @@ router.put('/:id', async (req, res) => {
   try {
     const { lines, move_out_date, reason, outstanding_balance,
       rent_treatment, rent_charged_amount, pro_rated_days, rent_treatment_reason,
+      water_charges,
       deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason } = req.body || {};
     const patch = {
       lines: lines !== undefined ? lines : undefined,
       move_out_date, reason, outstanding_balance,
       rent_treatment, rent_charged_amount, pro_rated_days, rent_treatment_reason,
+      water_charges: water_charges != null ? Number(water_charges) : undefined,
       deposit_treatment, deposit_applied_to_rent, deposit_applied_to_deductions, settlement_decision_reason,
     };
     const invoice = await store.updateExitInvoice(req.params.id, patch);
@@ -135,7 +151,8 @@ router.post('/:id/send', async (req, res) => {
     }
 
     try {
-      await whatsapp.sendMediaMessage(tenant.phone_number, doc.file_path, caption);
+      const waResult = await whatsapp.sendDocumentSmart(tenant.phone_number, doc.file_path, caption);
+      if (waResult.status !== 'Sent') throw new Error(waResult.failureReason || 'provider could not deliver the document');
       await store.logMessage({
         tenantId: tenant.tenant_code,
         messageType: 'Exit Invoice',

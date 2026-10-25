@@ -16,7 +16,7 @@
     .inv-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .inv-title { font-size: 16px; font-weight: 700; color: #1a4b8c; }
     .inv-date { font-weight: 700; font-size: 12px; }
-    .inv-no-bar { display: inline-block; background: #1a4b8c; color: white; font-weight: 700; font-size: 12px; padding: 5px 12px; border-radius: 4px; margin-bottom: 10px; }
+    .inv-no-bar { display: inline-block; background: #fdecec; border: 1px solid #f3c0c0; color: #7f1d1d; font-weight: 700; font-size: 12px; padding: 5px 12px; border-radius: 4px; margin-bottom: 10px; }
     .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; font-size: 11px; }
     .info-box { border: 1px solid #dee2e6; border-radius: 6px; padding: 8px 10px; }
     .info-box .label { font-weight: 700; font-size: 9px; color: #666; text-transform: uppercase; margin-bottom: 2px; }
@@ -31,7 +31,10 @@
     .totals-table td { padding: 4px 10px; border: none; font-size: 11px; }
     .totals-table tr td:first-child { text-align: right; font-weight: 700; background: #f8f9fa; }
     .totals-table tr td:last-child { background: #e9ecef; text-align: right; font-weight: 700; }
-    .totals-table tr.grand td:last-child { background: #1a4b8c; color: white; font-weight: 700; }
+    .totals-table tr.grand td:last-child { background: #ffffff; color: #cc0000; font-weight: 700; border-top: 2px solid #cc0000; }
+    .totals-table tr.grand td:last-child span { color: #cc0000 !important; }
+    .info-box .value.total-hl span { color: #cc0000 !important; }
+    .info-box .value.paid-keep span { color: #059669 !important; }
     .note-box { margin-top: 10px; padding: 8px; border: 1px solid #6366f1; border-radius: 6px; background: #f0f0ff; font-size: 10px; color: #4338ca; text-align: center; }
     .footer-bar { height: 3px; background: #e31837; width: 100%; margin: 12px 0 6px 0; position: relative; }
     .footer-bar::after { content: ''; position: absolute; top: 3px; left: 30%; right: 0; height: 3px; background: #111; }
@@ -83,15 +86,15 @@
   <div class="info-grid">
     <div class="info-box">
       <div class="label">TOTAL AMOUNT</div>
-      <div class="value" style="color: #1a4b8c; font-weight: 700;">KES {{total_amount}}</div>
+      <div class="value total-hl" style="color: #1a4b8c; font-weight: 700;">KES {{total_amount}}</div>
     </div>
     <div class="info-box">
       <div class="label">AMOUNT PAID</div>
-      <div class="value" style="color: #059669;">KES {{total_paid}}</div>
+      <div class="value paid-keep" style="color: #059669;">KES {{total_paid}}</div>
     </div>
     <div class="info-box">
       <div class="label">OUTSTANDING</div>
-      <div class="value" style="color: #dc2626; font-weight: 700;">KES {{outstanding}}</div>
+      <div class="value total-hl" style="color: #dc2626; font-weight: 700;">KES {{outstanding}}</div>
     </div>
     <div class="info-box">
       <div class="label">PAYMENT STATUS</div>
@@ -105,6 +108,12 @@
 
   <div class="note-box">
     This is a management expense invoice. Payment status is updated as payments are recorded.
+  </div>
+
+  <div style="margin:6px 0;line-height:1.5;">
+    <div>For: GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS</div>
+    <div>{{GEHM_STAMP_LINE}}</div>
+    <div>Date: {{date}}</div>
   </div>
 
   <div class="footer-bar"></div>

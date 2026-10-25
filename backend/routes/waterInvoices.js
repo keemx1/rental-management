@@ -1,6 +1,8 @@
 const express = require('express');
+const fs = require('fs');
 const { requireAuthActive } = require('../middleware/auth');
 const store = require('../storage/store');
+const { detectWaterAnomaly } = require('../services/waterAnomaly');
 const whatsapp = require('../config/whatsapp');
 const { generateAndStoreWaterInvoice } = require('../services/documentStore');
 
@@ -30,12 +32,49 @@ router.post('/', async (req, res) => {
   try {
     const { tenant_code, billing_month, payment_month, previous_reading, current_reading,
             due_date, payment_terms, notes, rent_amount, garbage_fee,
-            rent_arrears, water_arrears, garbage_arrears, other_arrears } = req.body || {};
+            rent_arrears, water_arrears, garbage_arrears, other_arrears, client_txn_id } = req.body || {};
     if (!tenant_code) return res.status(400).json({ error: 'tenant_code required' });
     if (!billing_month) return res.status(400).json({ error: 'billing_month required' });
 
+    // Idempotent replay of an already-uploaded offline reading.
+    if (client_txn_id) {
+      const replay = await store.findRecordByClientTxnId('water_invoices', client_txn_id);
+      if (replay) return res.json({ water_invoice: replay, already_synced: true });
+    }
+
     const tenant = await store.getTenant(tenant_code);
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+
+    // Anomaly screen (Phase 3): negative consumption is rejected outright
+    // (409 + manager-queue conflict row); warnings post with a stored flag.
+    const history = await store.getRecentWaterUnits(tenant_code, 6).catch(() => []);
+    const anomaly = detectWaterAnomaly({
+      previous: Number(previous_reading || 0),
+      current: Number(current_reading || 0),
+      history,
+    });
+    if (anomaly.level === 'reject') {
+      if (client_txn_id) {
+        await store.recordSyncConflict({
+          clientTxnId: client_txn_id,
+          opType: 'water_create',
+          tenantCode: tenant_code,
+          summary: {
+            tenant_name: tenant.name, billing_month,
+            previous_reading: Number(previous_reading || 0),
+            current_reading: Number(current_reading || 0),
+          },
+          reason: anomaly.message,
+          existingRef: null,
+        }).catch(() => {});
+      }
+      return res.status(409).json({
+        error: 'Invalid reading',
+        message: anomaly.message,
+        anomaly,
+        conflict: !!client_txn_id,
+      });
+    }
 
     const housePaybill = tenant.house_id || tenant.house_paybill_number;
     let ratePerUnit = req.body.rate_per_unit != null ? Number(req.body.rate_per_unit) : null;
@@ -63,7 +102,14 @@ router.post('/', async (req, res) => {
       water_arrears: water_arrears != null ? Number(water_arrears) : 0,
       garbage_arrears: garbage_arrears != null ? Number(garbage_arrears) : 0,
       other_arrears: other_arrears != null ? Number(other_arrears) : 0,
+      client_txn_id: client_txn_id || null,
+      // Server-computed flags only — never trust client-supplied values.
+      anomaly_flag: anomaly.level === 'warn' ? anomaly.code : null,
+      anomaly_detail: anomaly.level === 'warn' ? anomaly.message : null,
     });
+    if (invoice._idempotentReplay) {
+      return res.json({ water_invoice: invoice, already_synced: true });
+    }
 
     await store.logAudit({
       actor: req.user?.username,
@@ -73,9 +119,15 @@ router.post('/', async (req, res) => {
       details: { tenant_code, billing_month, total_amount: invoice.total_amount },
     });
 
-    res.status(201).json({ water_invoice: invoice });
+    res.status(201).json({ water_invoice: invoice, anomaly: anomaly.level === 'warn' ? anomaly : null });
   } catch (err) {
     console.error('[Water Invoice] Create error:', err.message);
+    if (err && err.code === '23505' && req.body?.client_txn_id) {
+      try {
+        const replay = await store.findRecordByClientTxnId('water_invoices', req.body.client_txn_id);
+        if (replay) return res.json({ water_invoice: replay, already_synced: true });
+      } catch (_) {}
+    }
     res.status(500).json({ error: err.message || 'Failed to create water invoice' });
   }
 });
@@ -151,7 +203,9 @@ router.post('/:id/send', async (req, res) => {
     const mode = req.body.mode || 'download';
     const invoice = await store.getWaterInvoice(req.params.id);
     if (!invoice) return res.status(404).json({ error: 'Water invoice not found' });
-    if (invoice.status !== 'Finalized') {
+    // Repeatable: a finalized invoice can be downloaded/sent unlimited times.
+    // Only Draft/Paid/Void block the action.
+    if (!['Finalized', 'Sent', 'Downloaded'].includes(invoice.status)) {
       return res.status(400).json({ error: 'Water invoice must be finalized before downloading or sending.' });
     }
 
@@ -169,7 +223,9 @@ router.post('/:id/send', async (req, res) => {
 
     if (mode === 'download') {
       mark('download');
-      await store.updateWaterInvoice(req.params.id, { status: 'Downloaded' });
+      if (invoice.status === 'Finalized') {
+        await store.updateWaterInvoice(req.params.id, { status: 'Downloaded' });
+      }
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${doc.filename}"`);
       res.setHeader('X-Wtr-Number', invoice.wtr_number);
@@ -178,26 +234,40 @@ router.post('/:id/send', async (req, res) => {
       });
     }
 
+    // Send mode: deliver the actual PDF. Prefer the QR-linked Baileys session
+    // Linked Baileys session delivers local files from your own number.
+    // The result reports the HONEST delivery status.
+    let waStatus = 'Failed';
+    let waReason = null;
+    let waMessageId = null;
     try {
-      await whatsapp.sendMediaMessage(tenant.phone_number, doc.file_path, caption);
-      await store.logMessage({
-        tenantId: tenant.tenant_code,
-        messageType: 'Water Invoice',
-        messageBody: `Water bill invoice PDF sent successfully (${invoice.wtr_number})`,
-        status: 'Sent',
-      });
-      mark('send');
-      await store.updateWaterInvoice(req.params.id, { status: 'Sent' });
-      res.json({ success: true, message: 'Water invoice sent via WhatsApp' });
+      const { sendDocumentSmart } = require('../config/whatsapp');
+      const r = await sendDocumentSmart(tenant.phone_number, doc.file_path, caption);
+      waStatus = r.status;
+      waReason = r.failureReason || (r.status === 'Failed' ? 'provider could not deliver the PDF' : null);
+      waMessageId = r.messageId || null;
     } catch (err) {
-      await store.logMessage({
-        tenantId: tenant.tenant_code,
-        messageType: 'Water Invoice',
-        messageBody: `Failed to send water invoice: ${err.message}`,
-        status: 'Failed',
-      });
-      res.status(500).json({ error: 'Failed to send water invoice via WhatsApp' });
+      waStatus = 'Failed';
+      waReason = err.message;
     }
+    await store.logMessage({
+      tenantId: tenant.tenant_code,
+      messageType: 'Water Invoice',
+      messageBody: waStatus === 'Sent'
+        ? `Water bill invoice PDF sent successfully (${invoice.wtr_number})`
+        : `Failed to send water invoice: ${waReason || 'unknown error'}`,
+      status: waStatus,
+      whatsappMessageId: waMessageId,
+      failureReason: waReason,
+    });
+    if (waStatus !== 'Sent') {
+      return res.status(502).json({ error: 'WhatsApp delivery failed: ' + (waReason || 'could not deliver the PDF') });
+    }
+    mark('send');
+    if (invoice.status === 'Finalized') {
+      await store.updateWaterInvoice(req.params.id, { status: 'Sent' });
+    }
+    res.json({ success: true, message: 'Water invoice sent via WhatsApp' });
   } catch (err) {
     console.error('[Water Invoice] Send error:', err.message);
     res.status(500).json({ error: 'Failed to send water invoice' });

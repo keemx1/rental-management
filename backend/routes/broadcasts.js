@@ -49,9 +49,16 @@ router.post('/send', async (req, res) => {
       let error = null;
       let whatsappMessageId = null;
       try {
-        const result = await sessionManager.sendText(tenant.phone_number, renderedBody);
-        status = 'sent';
-        whatsappMessageId = result.id;
+        // Linked Baileys session delivers; honest per-recipient status either way.
+        try {
+          const result = await sessionManager.sendText(tenant.phone_number, renderedBody);
+          whatsappMessageId = result.id;
+        } catch (_) {
+          const fallback = require('../config/whatsapp');
+          const r = await fallback.sendTextMessage(tenant.phone_number, renderedBody);
+          if (r.status !== 'Sent') throw new Error(r.failureReason || 'provider could not deliver the message');
+          whatsappMessageId = r.messageId || null;
+        }
       } catch (err) {
         status = 'failed';
         error = err.message;

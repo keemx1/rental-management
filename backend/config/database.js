@@ -87,11 +87,13 @@ async function seedDefaultData() {
       `INSERT INTO message_templates (key, name, body) VALUES
        ($1, $2, $3),
        ($4, $5, $6),
-       ($7, $8, $9)`,
+       ($7, $8, $9),
+       ($10, $11, $12)`,
       [
         'gentle_reminder', 'Gentle Rent Reminder', 'Hello {{client_name}}, this is a gentle reminder from {{house_name}} {{house_number}} that your rent payment is due soon. Please reach out if you need support.',
         'maintenance_notice', 'Maintenance Notice', 'Hello {{client_name}}, kindly note there will be maintenance at {{house_name}} {{house_number}} tomorrow from 9:00 AM to 2:00 PM. Thank you for your cooperation.',
-        'security_update', 'Security Update', 'Hello {{client_name}}, this is a security update for residents of {{house_name}} {{house_number}}. Please ensure your doors are locked and report suspicious activity immediately.'
+        'security_update', 'Security Update', 'Hello {{client_name}}, this is a security update for residents of {{house_name}} {{house_number}}. Please ensure your doors are locked and report suspicious activity immediately.',
+        'rent_balance_reminder', 'Rent Balance Reminder', '*GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS*\n_Find a home, leave the management to us._\n\n*RENT BALANCE REMINDER*\n\nDate: {{notice_date}}\nTenant Name: {{tenant_name}}\nProperty: {{property_name}}\nHouse/Unit Number: {{unit_number}}\n\nDear {{tenant_name}},\n\nThis is a friendly reminder that our records indicate an outstanding rent balance on your account as detailed below.\n\n*RENT BALANCE DETAILS*\n\n• Rent Balance Period: {{balance_period}}\n• Previous Arrears: KSh {{previous_arrears}}\n• Current Rent Due: KSh {{current_rent_due}}\n• Payments Received: KSh {{payments_received}}\n• *TOTAL OUTSTANDING BALANCE: KSh {{total_outstanding_balance}}*\n\nKindly arrange to clear the outstanding balance as soon as possible.\n\nIf you have already made the payment, please share your payment confirmation with management for verification and updating of your account.\n\nIf you believe the balance is incorrect, please contact management for clarification.\n\nThank you for your cooperation.\n\nYours faithfully,\n\n*Shadrack Kirwa Munubi*\nProperty Manager\n*For: GUTENBERG ELITE HOME & PROPERTY MANAGEMENTS*\n\nTel: 0725 934 615 / 0702 705 321\nEmail: gutenbergelite@gmail.com'
       ]
     );
     console.log('[DB] Seeded demo message templates.');

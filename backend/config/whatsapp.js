@@ -1,135 +1,31 @@
 /**
- * WhatsApp messaging abstraction.
- * Supports two backends selected by WHATSAPP_PROVIDER env var:
- *   - "twilio"  → Twilio WhatsApp API (default, recommended)
- *   - "meta"    → Meta Cloud API (legacy)
+ * WhatsApp messaging — Tabana-style QR-linked Baileys session ONLY.
  *
- * Twilio requires:
- *   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER
- *
- * Meta requires:
- *   WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN
- *
- * Both require a pre-approved template named WHATSAPP_TEMPLATE_NAME
- * with a single body variable {{1}} that receives the full message text.
+ * This is the single WhatsApp integration. All sends go through the linked
+ * session (your own number, no trial limits, real media delivery). When the
+ * session is not connected, every send reports an honest failure — nothing
+ * ever claims success without transmitting. Reconnect by scanning the QR
+ * code in the WhatsApp view.
  */
 
-const fs = require('fs');
 const path = require('path');
 
 const SEND_DELAY_MS = Number(process.env.WHATSAPP_SEND_DELAY_MS) || 2500;
-const PROVIDER = (process.env.WHATSAPP_PROVIDER || 'twilio').toLowerCase();
-
-let gatewayStatus = 'offline';
-let initPromise = null;
-let latestError = null;
 
 // ---------------------------------------------------------------------------
-// Provider detection
+// Provider identity (single integration)
 // ---------------------------------------------------------------------------
 
 function isTwilio() {
-  return PROVIDER === 'twilio';
+  return false;
 }
 
 function isMeta() {
-  return PROVIDER === 'meta';
+  return false;
 }
 
-// ---------------------------------------------------------------------------
-// Twilio helpers
-// ---------------------------------------------------------------------------
-
-let twilioClient = null;
-
-function getTwilioClient() {
-  if (twilioClient) return twilioClient;
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  if (!accountSid || !authToken) throw new Error('TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN required');
-  const twilio = require('twilio');
-  twilioClient = twilio(accountSid, authToken);
-  return twilioClient;
-}
-
-function getTwilioWhatsAppNumber() {
-  return process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+14155238886';
-}
-
-// ---------------------------------------------------------------------------
-// Meta Cloud API helpers
-// ---------------------------------------------------------------------------
-
-const META_API_VERSION = 'v22.0';
-
-function getPhoneNumberId() {
-  return process.env.WHATSAPP_PHONE_NUMBER_ID;
-}
-
-function getAccessToken() {
-  return process.env.WHATSAPP_ACCESS_TOKEN;
-}
-
-function metaGraphUrl(pathSuffix) {
-  return `https://graph.facebook.com/${META_API_VERSION}/${pathSuffix.replace(/^\//, '')}`;
-}
-
-async function metaGraphPost(pathSuffix, body) {
-  const url = metaGraphUrl(pathSuffix);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${getAccessToken()}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    const msg = data?.error?.message || data?.error?.error_user_title || `HTTP ${res.status}`;
-    throw new Error(`Meta API: ${msg}`);
-  }
-  return data;
-}
-
-async function metaGraphGet(pathSuffix) {
-  const url = metaGraphUrl(pathSuffix);
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${getAccessToken()}` },
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(`Meta API: ${data?.error?.message || `HTTP ${res.status}`}`);
-  }
-  return data;
-}
-
-// ---------------------------------------------------------------------------
-// Template name (shared)
-// ---------------------------------------------------------------------------
-
-function getTemplateName() {
-  return process.env.WHATSAPP_TEMPLATE_NAME || 'rental_payment_notice';
-}
-
-function getTemplateLanguage() {
-  return process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en';
-}
-
-async function getTemplateStatus(templateName = getTemplateName()) {
-  if (!isMeta()) return null;
-  const waba = process.env.WHATSAPP_WABA_ID;
-  if (!waba) return null;
-  try {
-    const data = await metaGraphGet(
-      `${waba}/message_templates?fields=name,status&name=${encodeURIComponent(templateName)}`
-    );
-    const row = (data?.data || []).find((t) => t.name === templateName);
-    return row ? row.status : null;
-  } catch (err) {
-    console.error('[WhatsApp] getTemplateStatus failed:', err.message);
-    return null;
-  }
+function isBaileys() {
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,174 +46,76 @@ function normalizePhoneToChatId(phone) {
   return normalizePhone(phone);
 }
 
-// ---------------------------------------------------------------------------
-// Sending — Twilio
-// ---------------------------------------------------------------------------
-
-async function sendTextMessageTwilio(phoneNumber, body) {
-  const chatId = normalizePhone(phoneNumber);
-  try {
-    const client = getTwilioClient();
-    const message = await client.messages.create({
-      from: getTwilioWhatsAppNumber(),
-      to: `whatsapp:+${chatId}`,
-      contentSid: process.env.TWILIO_TEMPLATE_CONTENT_SID || undefined,
-      contentVariables: process.env.TWILIO_TEMPLATE_CONTENT_SID ? JSON.stringify({ '1': body }) : undefined,
-      body: process.env.TWILIO_TEMPLATE_CONTENT_SID ? undefined : body,
-    });
-    return {
-      messageId: message.sid,
-      ack: 1,
-      status: 'Sent',
-      chatId,
-    };
-  } catch (err) {
-    return {
-      messageId: null,
-      ack: -1,
-      status: 'Failed',
-      chatId,
-      failureReason: err.message,
-    };
-  }
+function sessionManager() {
+  return require('../whatsapp/session-manager');
 }
 
-async function sendMediaMessageTwilio(phoneNumber, filePath, caption = '') {
-  const chatId = normalizePhone(phoneNumber);
+function connected() {
   try {
-    const client = getTwilioClient();
-    const message = await client.messages.create({
-      from: getTwilioWhatsAppNumber(),
-      to: `whatsapp:+${chatId}`,
-      body: caption || 'Your document has been generated.',
-      mediaUrl: [filePath],
-    });
-    return {
-      messageId: message.sid,
-      ack: 1,
-      status: 'Sent',
-      chatId,
-    };
-  } catch (err) {
-    return sendTextMessageTwilio(phoneNumber, caption
-      ? `${caption}\n\n(Open dashboard to view/download the document.)`
-      : 'Your document has been generated. Please check your dashboard to view/download it.');
+    const sm = sessionManager();
+    return sm && typeof sm.getState === 'function' && sm.getState() === 'CONNECTED';
+  } catch (_) {
+    return false;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Sending — Meta Cloud API
+// Sending — Baileys linked session only
 // ---------------------------------------------------------------------------
 
-async function sendTextMessageMeta(phoneNumber, body) {
-  const chatId = normalizePhone(phoneNumber);
+async function sendTextMessage(phoneNumber, body) {
+  let chatId = null;
   try {
-    const payload = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: chatId,
-      type: 'template',
-      template: {
-        name: getTemplateName(),
-        language: { code: getTemplateLanguage() },
-        components: [
-          { type: 'body', parameters: [{ type: 'text', text: body }] },
-        ],
-      },
-    };
-    const data = await metaGraphPost(`${getPhoneNumberId()}/messages`, payload);
-    const messageId = data?.messages?.[0]?.id || null;
-    return { messageId, ack: 1, status: 'Sent', chatId };
+    chatId = normalizePhone(phoneNumber);
+  } catch (err) {
+    return { messageId: null, ack: -1, status: 'Failed', chatId: phoneNumber, failureReason: err.message };
+  }
+  if (!connected()) {
+    return { messageId: null, ack: -1, status: 'Failed', chatId, failureReason: 'WhatsApp session not connected — scan the QR code in the WhatsApp view to reconnect' };
+  }
+  try {
+    const sent = await sessionManager().sendText(chatId, body);
+    return { messageId: (sent && sent.id) || null, ack: 1, status: 'Sent', chatId };
   } catch (err) {
     return { messageId: null, ack: -1, status: 'Failed', chatId, failureReason: err.message };
   }
 }
 
-async function sendMediaMessageMeta(phoneNumber, filePath, caption = '') {
-  const chatId = normalizePhone(phoneNumber);
+async function sendMediaMessage(phoneNumber, filePath, caption = '') {
+  let chatId = null;
   try {
-    const docTemplate = process.env.WHATSAPP_DOCUMENT_TEMPLATE_NAME || 'rental_document';
-    const mediaId = await uploadMediaMeta(filePath);
-    const fileName = path.basename(filePath);
-    const payload = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: chatId,
-      type: 'template',
-      template: {
-        name: docTemplate,
-        language: { code: getTemplateLanguage() },
-        components: [
-          { type: 'header', parameters: [{ type: 'document', document: { id: mediaId, filename: fileName } }] },
-          { type: 'body', parameters: [{ type: 'text', text: caption || 'Please find the attached document.' }] },
-        ],
-      },
-    };
-    const data = await metaGraphPost(`${getPhoneNumberId()}/messages`, payload);
-    return { messageId: data?.messages?.[0]?.id || null, ack: 1, status: 'Sent', chatId };
+    chatId = normalizePhone(phoneNumber);
   } catch (err) {
-    return sendTextMessageMeta(phoneNumber, caption
-      ? `${caption}\n\n(Open dashboard to view/download the document.)`
-      : 'Your document has been generated. Please check your dashboard to view/download it.');
+    return { messageId: null, ack: -1, status: 'Failed', chatId: phoneNumber, failureReason: err.message, channel: 'baileys', mediaDelivered: false };
+  }
+  if (!connected()) {
+    return { messageId: null, ack: -1, status: 'Failed', chatId, channel: 'baileys', mediaDelivered: false, failureReason: 'WhatsApp session not connected — scan the QR code in the WhatsApp view to reconnect' };
+  }
+  try {
+    const fs = require('fs');
+    const buf = fs.readFileSync(filePath);
+    const ext = String(filePath || '').toLowerCase();
+    const mimetype = ext.endsWith('.png') ? 'image/png'
+      : /\.jpe?g$/.test(ext) ? 'image/jpeg' : 'application/pdf';
+    const sent = await sessionManager().sendDocument(chatId, buf, mimetype, path.basename(filePath) || 'document.pdf');
+    return { messageId: (sent && sent.id) || null, ack: 1, status: 'Sent', chatId, channel: 'baileys', mediaDelivered: true };
+  } catch (err) {
+    return { messageId: null, ack: -1, status: 'Failed', chatId, channel: 'baileys', mediaDelivered: false, failureReason: err.message };
   }
 }
 
-async function uploadMediaMeta(filePath) {
-  const stat = fs.statSync(filePath);
-  const fileName = path.basename(filePath);
-  const ext = path.extname(filePath).toLowerCase();
-  const mimeMap = {
-    '.pdf': 'application/pdf',
-    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    '.xls': 'application/vnd.ms-excel',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  };
-  const mimeType = mimeMap[ext] || 'application/octet-stream';
-  const boundary = `----FormBoundary${Date.now()}`;
-  let body = '';
-  body += `--${boundary}\r\n`;
-  body += `Content-Disposition: form-data; name="messaging_product"\r\n\r\n`;
-  body += `whatsapp\r\n`;
-  body += `--${boundary}\r\n`;
-  body += `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`;
-  body += `Content-Type: ${mimeType}\r\n\r\n`;
-  const bodyBuffer = Buffer.from(body, 'utf-8');
-  const fileBuffer = fs.readFileSync(filePath);
-  const footer = `\r\n--${boundary}--\r\n`;
-  const footerBuffer = Buffer.from(footer, 'utf-8');
-  const fullBody = Buffer.concat([bodyBuffer, fileBuffer, footerBuffer]);
-  const url = metaGraphUrl(`${getPhoneNumberId()}/media`);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${getAccessToken()}`,
-      'Content-Type': `multipart/form-data; boundary=${boundary}`,
-      'Content-Length': String(fullBody.length),
-    },
-    body: fullBody,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`Media upload failed: ${data?.error?.message || `HTTP ${res.status}`}`);
-  return data.id;
-}
-
 // ---------------------------------------------------------------------------
-// Sending — unified interface
+// Smart document delivery — the Baileys session IS the delivery channel.
+// Unified honest result: 'Sent' always means the document itself went out.
+// Never throws — check result.status / mediaDelivered instead.
 // ---------------------------------------------------------------------------
 
-async function sendTextMessage(phoneNumber, body, options = {}) {
-  await waitUntilReady();
-  if (isTwilio()) return sendTextMessageTwilio(phoneNumber, body);
-  return sendTextMessageMeta(phoneNumber, body, options);
-}
-
-async function sendMediaMessage(phoneNumber, filePath, caption = '') {
-  await waitUntilReady();
-  if (isTwilio()) return sendMediaMessageTwilio(phoneNumber, filePath, caption);
-  return sendMediaMessageMeta(phoneNumber, filePath, caption);
+async function sendDocumentSmart(phoneNumber, filePath, caption = '') {
+  const r = await sendMediaMessage(phoneNumber, filePath, caption);
+  if (!r || r.status !== 'Sent') {
+    return { status: 'Failed', channel: 'baileys', mediaDelivered: false, messageId: (r && r.messageId) || null, failureReason: (r && r.failureReason) || 'WhatsApp session not connected' };
+  }
+  return { status: 'Sent', channel: 'baileys', mediaDelivered: true, messageId: r.messageId || null, failureReason: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +123,6 @@ async function sendMediaMessage(phoneNumber, filePath, caption = '') {
 // ---------------------------------------------------------------------------
 
 async function sendSequentialMessages(targets, body, onEach) {
-  await waitUntilReady();
   const results = [];
   for (let i = 0; i < targets.length; i++) {
     const { phone, clientId } = targets[i];
@@ -344,98 +141,42 @@ async function sendSequentialMessages(targets, body, onEach) {
 }
 
 // ---------------------------------------------------------------------------
-// Gateway lifecycle
+// Gateway lifecycle (session-owned; this module only reports it)
 // ---------------------------------------------------------------------------
 
-function initializeWhatsApp() {
-  if (process.env.MOCK_WHATSAPP === 'true') {
-    gatewayStatus = 'ready';
-    initPromise = Promise.resolve();
-    return initPromise;
-  }
-
-  if (initPromise) return initPromise;
-  gatewayStatus = 'syncing';
-  latestError = null;
-
-  initPromise = (async () => {
-    try {
-      if (isTwilio()) {
-        const accountSid = process.env.TWILIO_ACCOUNT_SID;
-        const authToken = process.env.TWILIO_AUTH_TOKEN;
-        if (!accountSid || !authToken) throw new Error('TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN required');
-        getTwilioClient();
-        // Validate by fetching account info
-        const account = await getTwilioClient().api.accounts(accountSid).fetch();
-        gatewayStatus = 'ready';
-        latestError = null;
-        console.log(`[WhatsApp] Twilio connected — account: ${account.friendlyName}`);
-      } else {
-        const pid = getPhoneNumberId();
-        if (!pid) throw new Error('WHATSAPP_PHONE_NUMBER_ID not set');
-        const token = getAccessToken();
-        if (!token) throw new Error('WHATSAPP_ACCESS_TOKEN not set');
-        await metaGraphGet(`${pid}`);
-        gatewayStatus = 'ready';
-        latestError = null;
-        console.log('[WhatsApp] Meta Cloud API connected');
-      }
-    } catch (err) {
-      gatewayStatus = 'offline';
-      latestError = err.message;
-      console.error(`[WhatsApp] Init failed: ${err.message}`);
-    }
-  })();
-
-  return initPromise;
-}
-
-function clearInitState() {
-  initPromise = null;
-  gatewayStatus = 'offline';
-  latestError = null;
-}
-
-async function resetSession() {
-  clearInitState();
-  twilioClient = null;
-  initializeWhatsApp();
-  try { await initPromise; } catch (_) { /* handled */ }
-}
-
 function getGatewayStatus() {
-  return gatewayStatus;
+  try {
+    return sessionManager().getState() === 'CONNECTED' ? 'ready' : 'offline';
+  } catch (_) {
+    return 'offline';
+  }
 }
 
 function getGatewayState() {
+  const ready = getGatewayStatus() === 'ready';
   return {
-    status: gatewayStatus,
+    status: ready ? 'ready' : 'offline',
     qr: null,
-    needsScan: gatewayStatus !== 'ready',
-    message: latestError
-      ? `${PROVIDER.toUpperCase()}: ${latestError}`
-      : gatewayStatus === 'ready'
-        ? `WhatsApp (${PROVIDER}) is connected and ready.`
-        : gatewayStatus === 'syncing'
-          ? `Validating ${PROVIDER} credentials…`
-          : `WhatsApp not configured. Set ${PROVIDER === 'twilio' ? 'TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN' : 'WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN'} in .env`,
+    needsScan: !ready,
+    message: ready
+      ? 'WhatsApp (linked session) is connected and ready.'
+      : 'WhatsApp session not connected. Open the WhatsApp view and scan the QR code to connect.',
     canReset: true,
-    provider: PROVIDER,
+    provider: 'baileys',
   };
 }
 
-async function waitUntilReady(timeoutMs = 120000) {
-  if (gatewayStatus === 'ready') return true;
-  await initializeWhatsApp();
-  if (gatewayStatus === 'ready') return true;
+async function initializeWhatsApp() {
+  return getGatewayStatus();
+}
 
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (gatewayStatus === 'ready') return true;
-    await new Promise((r) => setTimeout(r, 500));
-  }
+async function resetSession() {
+  return getGatewayStatus();
+}
 
-  throw new Error(latestError || `WhatsApp (${PROVIDER}) not ready. Check .env configuration.`);
+async function waitUntilReady(timeoutMs = 5000) {
+  if (getGatewayStatus() === 'ready') return true;
+  throw new Error('WhatsApp session not connected — scan the QR code in the WhatsApp view to reconnect');
 }
 
 function sleep(ms) {
@@ -457,12 +198,22 @@ function ackToStatus(ack) {
 }
 
 function setOnAckCallback(_cb) {
-  // Both Twilio and Meta deliver status via webhooks — stub for now.
+  // Delivery receipts arrive via Baileys events — stub for now.
+}
+
+// Deprecated template hooks (kept so older callers keep loading; the
+// Meta/Twilio template integration has been removed).
+function getTemplateName() {
+  return null;
+}
+
+async function getTemplateStatus() {
+  return null;
 }
 
 const dummyClient = {
   destroy: async () => {
-    console.log(`[WhatsApp] No-op destroy (${PROVIDER}).`);
+    console.log('[WhatsApp] No-op destroy (baileys).');
   },
 };
 
@@ -478,9 +229,11 @@ module.exports = {
   getGatewayStatus,
   getGatewayState,
   waitUntilReady,
+  normalizePhone,
   normalizePhoneToChatId,
   sendTextMessage,
   sendMediaMessage,
+  sendDocumentSmart,
   sendSequentialMessages,
   getTemplateName,
   getTemplateStatus,
@@ -488,6 +241,7 @@ module.exports = {
   setOnAckCallback,
   isTwilio,
   isMeta,
+  isBaileys,
 
   AUTH_ROOT: null,
 };

@@ -1,9 +1,31 @@
 const express = require('express');
+const multer = require('multer');
 const ExcelJS = require('exceljs');
 const { requireAuthActive } = require('../middleware/auth');
 const store = require('../storage/store');
 const { buildAdvanceRentConfirmation, buildCreditBalanceConfirmation } = require('../services/messages');
+const { generateResolutionReceipt } = require('../services/documentStore');
 const whatsapp = require('../config/whatsapp');
+const agreements = require('../services/tenantAgreements');
+const { query } = require('../config/database');
+
+// Agreement uploads land in memory (compressed client-side first),
+// then stream straight to the private Supabase bucket.
+const agreementUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 12 * 1024 * 1024, files: 1 },
+});
+
+async function getAgreementOwned(tenantCode, agreementId) {
+  const res = await query('SELECT * FROM tenancy_agreements WHERE id = $1', [agreementId]);
+  const row = res.rows[0] || null;
+  if (!row) return { error: 'Agreement not found', status: 404 };
+  if (row.tenant_code !== tenantCode) {
+    // Tenant A can never reach tenant B's files, even with a guessed id.
+    return { error: 'Agreement does not belong to this tenant', status: 403 };
+  }
+  return { row };
+}
 
 const router = express.Router();
 router.use(requireAuthActive);
@@ -115,6 +137,10 @@ router.put('/:id', async (req, res) => {
       'rent_amount',
       'deposit_amount',
       'deposit_paid',
+      'guardian_name',
+      'guardian_id',
+      'guardian_phone',
+      'guardian_relationship',
       'arrears',
       'arrears_manually_set',
       'garbage_fee_amount',
@@ -236,6 +262,45 @@ router.post('/:id/occupy', async (req, res) => {
     } = req.body || {};
     if (!name || !phone_number || !rent_due_date || rent_amount == null) {
       return res.status(400).json({ error: 'name, phone_number, rent_amount, rent_due_date required' });
+    }
+    const clientTxnId = req.body?.client_txn_id || null;
+    const moveInDate = move_in_date || new Date().toISOString().slice(0, 10);
+    // Offline move-in safety (Phase 3) — checked BEFORE the destructive reset:
+    // - same move-in uploaded twice → idempotent success (already applied).
+    // - unit now actively occupied by someone else → 409 + manager conflict.
+    // Online calls (no client_txn_id) keep the existing overwrite behaviour.
+    if (clientTxnId) {
+      const current = await store.getTenant(req.params.id);
+      if (!current) return res.status(404).json({ error: 'Tenant not found' });
+      const sameIdentity =
+        current.status === 'Active' &&
+        String(current.name || '') === String(name || '') &&
+        String(current.phone_number || '') === String(phone_number || '') &&
+        String(current.move_in_date || '') === String(moveInDate);
+      if (sameIdentity) {
+        return res.status(201).json({ tenant: current, already_synced: true });
+      }
+      if (current.status === 'Active' && (current.name || current.phone_number)) {
+        await store.recordSyncConflict({
+          clientTxnId,
+          opType: 'tenant_occupy',
+          tenantCode: current.tenant_code,
+          summary: { name, phone_number, move_in_date: moveInDate, rent_amount: Number(rent_amount) || 0 },
+          reason: `Unit is already actively occupied by ${current.name || 'another tenant'} (moved in ${current.move_in_date || 'unknown date'}). The offline move-in for ${name} was NOT applied.`,
+          existingRef: {
+            tenant_name: current.name,
+            phone_number: current.phone_number,
+            move_in_date: current.move_in_date,
+            status: current.status,
+          },
+        }).catch(() => {});
+        return res.status(409).json({
+          error: 'Unit already occupied',
+          message: `Move-in rejected: unit is already occupied by ${current.name || 'another tenant'}. A manager must review this conflict.`,
+          conflict: true,
+          existing_ref: { tenant_name: current.name, move_in_date: current.move_in_date },
+        });
+      }
     }
     const tenant = await store.resetTenancyFinancials(req.params.id);
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
@@ -534,9 +599,16 @@ router.get('/:id/profile', async (req, res) => {
 
 router.post('/:id/send-message', async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, client_txn_id } = req.body;
     if (!message) {
       return res.status(400).json({ error: 'message required' });
+    }
+    // Idempotent replay: an offline notice already delivered on sync.
+    if (client_txn_id) {
+      const replay = await store.findMessageByClientTxnId(client_txn_id);
+      if (replay) {
+        return res.json({ success: true, whatsapp: { status: replay.status || 'Sent' }, already_synced: true });
+      }
     }
     const tenant = await store.getTenant(req.params.id);
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
@@ -562,10 +634,19 @@ router.post('/:id/send-message', async (req, res) => {
       status,
       whatsappMessageId,
       failureReason,
+      clientTxnId: client_txn_id || null,
     });
 
     res.json({ success: true, whatsapp: { status, failureReason } });
   } catch (err) {
+    if (err && err.code === '23505' && req.body?.client_txn_id) {
+      try {
+        const replay = await store.findMessageByClientTxnId(req.body.client_txn_id);
+        if (replay) {
+          return res.json({ success: true, whatsapp: { status: replay.status || 'Sent' }, already_synced: true });
+        }
+      } catch (_) {}
+    }
     res.status(500).json({ error: 'Failed to send message: ' + err.message });
   }
 });
@@ -609,7 +690,35 @@ router.post('/:id/resolve-overpayment', async (req, res) => {
     });
 
     const updatedTenant = await store.getTenant(tenant.tenant_code);
-    res.json({ success: true, tenant: updatedTenant, choice, result, messageBody });
+
+    // Allocation saved → regenerate the payment's receipt PDF in place (same
+    // template, branding and receipt number) so the downloadable receipt
+    // confirms the future billing periods credited, or the credit balance.
+    const receiptDoc = await generateResolutionReceipt(
+      updatedTenant,
+      payment,
+      choice === 'advance_rent'
+        ? { type: 'advance_rent', months: (result && result.allocation) || [] }
+        : { type: 'credit_balance', creditedAmount: numOverpayment }
+    );
+
+    // Actually SEND the resolution confirmation (previously it was only
+    // built and returned — the tenant never received anything).
+    const { sendCustomText } = require('../services/messages');
+    const wa = await sendCustomText(
+      updatedTenant,
+      messageBody,
+      choice === 'advance_rent' ? 'Advance Rent Confirmation' : 'Credit Balance Confirmation'
+    );
+    res.json({
+      success: true,
+      tenant: updatedTenant,
+      choice,
+      result,
+      messageBody,
+      whatsapp: wa,
+      receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to resolve overpayment: ' + err.message });
   }
@@ -696,6 +805,92 @@ router.get('/:id/deposit-applications', async (req, res) => {
     res.json({ applications: apps });
   } catch (err) {
     res.status(500).json({ error: 'Failed to list applications: ' + err.message });
+  }
+});
+
+// ─── Signed tenancy agreements (Supabase Storage, per-tenant isolated) ─────
+
+router.get('/:id/agreements', async (req, res) => {
+  try {
+    const tenant = await store.getTenant(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+    const result = await query(
+      `SELECT id, tenant_code, filename, mimetype, size_bytes, uploaded_by, created_at
+       FROM tenancy_agreements WHERE tenant_code = $1 ORDER BY created_at DESC`,
+      [tenant.tenant_code]
+    );
+    res.json({ agreements: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list agreements' });
+  }
+});
+
+router.post('/:id/agreements', (req, res) => {
+  agreementUpload.single('file')(req, res, async (uploadErr) => {
+    try {
+      if (uploadErr) {
+        const tooBig = uploadErr.code === 'LIMIT_FILE_SIZE';
+        return res.status(tooBig ? 413 : 400).json({
+          error: tooBig ? 'File exceeds the 12 MB limit' : 'Upload failed: ' + uploadErr.message,
+        });
+      }
+      const tenant = await store.getTenant(req.params.id);
+      if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+      if (!req.file || !req.file.buffer) {
+        return res.status(400).json({ error: 'Attach a PDF, JPG or PNG file' });
+      }
+      const stored = await agreements.uploadAgreement({
+        tenantCode: tenant.tenant_code,
+        buffer: req.file.buffer,
+        mimetype: req.file.mimetype,
+        originalName: req.file.originalname,
+      });
+      const saved = await query(
+        `INSERT INTO tenancy_agreements (tenant_code, file_path, filename, mimetype, size_bytes, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, tenant_code, filename, mimetype, size_bytes, uploaded_by, created_at`,
+        [
+          tenant.tenant_code, stored.path,
+          String(req.file.originalname || 'agreement').slice(0, 255),
+          stored.mimetype, stored.size,
+          req.user?.username || null,
+        ]
+      );
+      res.status(201).json({ agreement: saved.rows[0] });
+    } catch (err) {
+      res.status(400).json({ error: err.message || 'Failed to upload agreement' });
+    }
+  });
+});
+
+router.get('/:id/agreements/:agreementId/preview', async (req, res) => {
+  try {
+    const tenant = await store.getTenant(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+    const { row, error, status } = await getAgreementOwned(tenant.tenant_code, req.params.agreementId);
+    if (error) return res.status(status).json({ error });
+    const url = await agreements.signedPreviewUrl(row.file_path);
+    res.json({ url, filename: row.filename, mimetype: row.mimetype, expires_in: agreements.PREVIEW_TTL_SECONDS });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create preview link' });
+  }
+});
+
+router.delete('/:id/agreements/:agreementId', async (req, res) => {
+  try {
+    const tenant = await store.getTenant(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+    const { row, error, status } = await getAgreementOwned(tenant.tenant_code, req.params.agreementId);
+    if (error) return res.status(status).json({ error });
+    try {
+      await agreements.deleteAgreementFile(row.file_path);
+    } catch (storageErr) {
+      console.error('[Agreements] bucket delete failed:', storageErr.message);
+    }
+    await query('DELETE FROM tenancy_agreements WHERE id = $1', [row.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete agreement' });
   }
 });
 

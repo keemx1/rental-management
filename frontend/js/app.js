@@ -1,8 +1,369 @@
 import { api } from './api.js';
+import { offlineDb } from './offline-db.js';
+import { parseMpesaMessage as parseMpesaOffline, matchTenantsOffline } from './mpesa-parse.js';
+import {
+  initSyncEngine, syncNow, pullSnapshot, isOffline as syncIsOffline,
+  queueOutboxOp, subscribe as subscribeSync, getStatus as getSyncStatus,
+} from './sync-engine.js';
+import {
+  stampSession, clearSessionStamp, hasUsableOfflineSession,
+  offlineSessionDaysLeft, requireOnline, OFFLINE_SESSION_DAYS,
+} from './offline-session.js';
+import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js';
+import { detectWaterAnomaly } from './water-anomaly.js';
+import { prepareAgreementFiles } from './agreement-scan.js';
+
+const GEHM_VERSION = 'v62';
+try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
+try {
+  const vEl = document.getElementById('gehm-version');
+  if (vEl) vEl.textContent = `app ${GEHM_VERSION} · diagnostics`;
+} catch (_) {}
+
+// ─── Client diagnostics + error collector ────────────────────────────────
+// Records recent JS errors so a failing device can report exactly what broke
+// (open via the version stamp in the sidebar).
+const _gehmErrors = [];
+function _gehmNoteError(source, message) {
+  try {
+    _gehmErrors.push({ at: new Date().toISOString(), source, message: String(message || '').slice(0, 500) });
+    if (_gehmErrors.length > 30) _gehmErrors.splice(0, _gehmErrors.length - 30);
+  } catch (_) {}
+}
+window.addEventListener('error', (e) => _gehmNoteError('error', (e && e.message) || 'window.onerror'));
+window.addEventListener('unhandledrejection', (e) => _gehmNoteError('promise', (e && e.reason && (e.reason.message || e.reason)) || 'unhandled rejection'));
+
+// ─── Desktop PWA install ─────────────────────────────────────────────────
+let _deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  try { e.preventDefault(); } catch (_) {}
+  _deferredInstallPrompt = e;
+  document.getElementById('btn-install-app')?.classList.remove('hidden');
+});
+window.addEventListener('appinstalled', () => {
+  _deferredInstallPrompt = null;
+  document.getElementById('btn-install-app')?.classList.add('hidden');
+  try { showToast('GEHPM installed — find it in your Start menu / apps.'); } catch (_) {}
+});
+async function installGehmApp() {
+  if (!_deferredInstallPrompt) {
+    try { showToast('Install is not offered here — open GEHPM via localhost or https, then retry.', 'error'); } catch (_) { alert('Install is not offered by this browser on this address.'); }
+    return;
+  }
+  try {
+    _deferredInstallPrompt.prompt();
+    await _deferredInstallPrompt.userChoice.catch(() => {});
+  } catch (_) {}
+  _deferredInstallPrompt = null;
+}
+
+// ─── Diagnostics report ──────────────────────────────────────────────────
+// Builds a plain-text report about THIS device (version, service worker,
+// connectivity, per-view API reachability, recent JS errors) so support can
+// see exactly why a menu shows blank. Opened via the version stamp.
+
+async function probeEndpoint(path) {
+  try {
+    const headers = {};
+    const token = api.getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(path, { headers, cache: 'no-store' });
+    return `${res.status} ${res.statusText || ''}`.trim();
+  } catch (err) {
+    return `NETWORK-FAIL (${String((err && err.message) || err).slice(0, 80)})`;
+  }
+}
+
+async function collectDiagnostics() {
+  // Reload counter: increments on every full page load in this tab session.
+  // If this climbs on its own, something (SW churn / proxy-mutated files)
+  // is reload-looping the tab — which alone explains flashing blank views.
+  let loads = 1;
+  try {
+    loads = (Number(sessionStorage.getItem('gehm_loads') || 0) || 0) + 1;
+    sessionStorage.setItem('gehm_loads', String(loads));
+  } catch (_) {}
+  const report = {
+    page_loads_this_session: loads,
+    app_version: GEHM_VERSION,
+    origin: location.origin,
+    pathname: location.pathname,
+    user_agent: navigator.userAgent.slice(0, 120),
+    online: navigator.onLine,
+    has_token: !!api.getToken(),
+    service_worker: 'unsupported',
+    idb: {},
+    probes: {},
+    js_errors: _gehmErrors.slice(-15),
+  };
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) report.service_worker = 'no registration';
+      else {
+        const active = reg.active ? reg.active.scriptURL : null;
+        report.service_worker = `registered (scope=${reg.scope}, active=${active || 'none'}, waiting=${!!reg.waiting}, installing=${!!reg.installing})`;
+      }
+      if (navigator.serviceWorker.controller) {
+        report.service_worker += ` | controller=${navigator.serviceWorker.controller.scriptURL}`;
+      } else {
+        report.service_worker += ' | controller=NONE (page not SW-controlled)';
+      }
+    }
+  } catch (err) {
+    report.service_worker = 'check failed: ' + String((err && err.message) || err).slice(0, 100);
+  }
+  try {
+    await offlineDb.openDb();
+    for (const s of ['tenants', 'houses', 'payments', 'outbox']) {
+      try {
+        const all = await offlineDb.getAll(s);
+        report.idb[s] = (all || []).length;
+      } catch (_) { report.idb[s] = 'ERR'; }
+    }
+  } catch (_) {
+    report.idb = 'IndexedDB unavailable';
+  }
+  const endpoints = {
+    'auth/me': '/api/auth/me',
+    'invoice-register': '/api/invoice-register',
+    'pending-overpayments': '/api/pending-overpayments',
+    'deposit-refunds': '/api/deposit-refunds',
+    documents: '/api/documents',
+    archive: '/api/archive',
+    'wa-templates': '/api/whatsapp/templates',
+    'water-invoices': '/api/water-invoices',
+  };
+  for (const [name, url] of Object.entries(endpoints)) {
+    report.probes[name] = await probeEndpoint(url);
+  }
+  // View state: for each menu view, is the section present, hidden, and
+  // does it contain any text/rows? Distinguishes "empty data" from
+  // "section never unhidden" from "section missing from DOM".
+  report.views = {};
+  try {
+    const views = [...document.querySelectorAll('[data-view]')].map((el) => el.dataset.view);
+    for (const v of views) {
+      const sec = document.querySelector(`[data-view="${v}"]`);
+      if (!sec) { report.views[v] = 'MISSING-FROM-DOM'; continue; }
+      const hidden = sec.classList.contains('hidden');
+      const textLen = ((sec.innerText || '').trim().length);
+      const rows = sec.querySelectorAll('tbody tr').length;
+      report.views[v] = `${hidden ? 'hidden' : 'VISIBLE'} text=${textLen} rows=${rows}`;
+    }
+  } catch (err) {
+    report.views = 'check failed: ' + String((err && err.message) || err).slice(0, 100);
+  }
+  // Styling sanity: blank-white pages often mean CSS failed to apply.
+  try {
+    const probe = document.createElement('div');
+    probe.className = 'hidden';
+    probe.style.display = '';
+    document.body.appendChild(probe);
+    const hiddenWorks = getComputedStyle(probe).display === 'none';
+    probe.remove();
+    report.css = `body_bg=${getComputedStyle(document.body).backgroundColor} hidden_class_works=${hiddenWorks} tailwind=${typeof window.tailwind !== 'undefined' ? 'yes' : 'NO'} viewport=${window.innerWidth}x${window.innerHeight}`;
+  } catch (err) {
+    report.css = 'check failed: ' + String((err && err.message) || err).slice(0, 100);
+  }
+  // Which view does the app THINK is active + recent showView calls.
+  // If a menu click never appears here, the click never reached showView.
+  try {
+    if (window.GEHM_DEBUG) {
+      report.current_view = window.GEHM_DEBUG.view();
+      report.view_log = window.GEHM_DEBUG.viewLog();
+    }
+  } catch (_) {}
+  // Screen truth: what is ACTUALLY visible on screen right now (not just DOM).
+  // Catches: all-sections-hidden, off-screen sections, white-on-white text,
+  // and overlay elements covering the content.
+  try {
+    report.screen = {};
+    const vis = [...document.querySelectorAll('[data-view]')].find((el) => !el.classList.contains('hidden'));
+    if (!vis) {
+      report.screen.visible_section = 'NONE — every view is hidden!';
+    } else {
+      const cs = getComputedStyle(vis);
+      const r = vis.getBoundingClientRect();
+      report.screen.visible_section = vis.dataset.view;
+      report.screen.rect = `x=${Math.round(r.x)} y=${Math.round(r.y)} w=${Math.round(r.width)} h=${Math.round(r.height)}`;
+      report.screen.style = `display=${cs.display} visibility=${cs.visibility} opacity=${cs.opacity}`;
+      const cx = Math.round(window.innerWidth / 2);
+      const cy = Math.round(window.innerHeight / 2);
+      const top = document.elementFromPoint(cx, cy);
+      if (top) {
+        const cls = typeof top.className === 'string' ? top.className.split(/\s+/).slice(0, 4).join('.') : '';
+        report.screen.center_top = `${top.tagName.toLowerCase()}${top.id ? '#' + top.id : ''}${cls ? '.' + cls : ''}`;
+      } else {
+        report.screen.center_top = 'none';
+      }
+      const cell = vis.querySelector('tbody td, td, p, h1, h2, h3, button, span');
+      if (cell) {
+        const ccs = getComputedStyle(cell);
+        report.screen.sample_text = `${cell.tagName} color=${ccs.color} text=${(cell.innerText || '').trim().slice(0, 60)}`;
+      }
+      // Ancestor walk: a 0x0 section means a hidden ancestor — find it.
+      const chain = [];
+      let node = vis.parentElement;
+      for (let i = 0; i < 6 && node && node !== document.body; i++) {
+        const cs = getComputedStyle(node);
+        const r = node.getBoundingClientRect();
+        const cls = typeof node.className === 'string' ? node.className.split(/\s+/).slice(0, 4).join('.') : '';
+        chain.push(`${node.tagName.toLowerCase()}${node.id ? '#' + node.id : ''}${cls ? '.' + cls : ''} display=${cs.display} ${Math.round(r.width)}x${Math.round(r.height)}`);
+        node = node.parentElement;
+      }
+      report.screen.ancestors = chain;
+    }
+    // Any fixed overlay that could be covering the content?
+    const fixed = [...document.querySelectorAll('body *')].filter((el) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const cs = getComputedStyle(el);
+      return (cs.position === 'fixed' || cs.position === 'sticky') && cs.display !== 'none' && el.id !== 'gehm-sync-bar';
+    }).slice(0, 12).map((el) => {
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      const cls = typeof el.className === 'string' ? el.className.split(/\s+/).slice(0, 3).join('.') : '';
+      return `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}${cls ? '.' + cls : ''} z=${cs.zIndex} ${Math.round(r.width)}x${Math.round(r.height)}`;
+    });
+    report.screen.fixed_layers = fixed;
+  } catch (err) {
+    report.screen = 'check failed: ' + String((err && err.message) || err).slice(0, 100);
+  }
+  return report;
+}
+
+function renderDiagnosticsReport(r) {
+  const L = [];
+  L.push(`GEHPM diagnostics — ${new Date().toISOString()}`);
+  L.push(`app_version: ${r.app_version}`);
+  L.push(`origin: ${r.origin}${r.pathname}`);
+  L.push(`browser: ${r.user_agent}`);
+  L.push(`online: ${r.online} | logged_in_token: ${r.has_token}`);
+  L.push(`page_loads_this_session: ${r.page_loads_this_session ?? 'n/a'} (keeps climbing = tab is reload-looping)`);
+  L.push(`service_worker: ${r.service_worker}`);
+  L.push(`local_cache: ${typeof r.idb === 'string' ? r.idb : Object.entries(r.idb).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+  L.push('api_probes:');
+  for (const [k, v] of Object.entries(r.probes)) L.push(`  ${k}: ${v}`);
+  L.push(`css: ${r.css || 'n/a'}`);
+  if (r.screen && typeof r.screen === 'object') {
+    L.push(`screen_visible: ${r.screen.visible_section || 'n/a'}`);
+    if (r.screen.rect) L.push(`screen_rect: ${r.screen.rect}`);
+    if (r.screen.style) L.push(`screen_style: ${r.screen.style}`);
+    if (r.screen.center_top) L.push(`screen_center_top: ${r.screen.center_top}`);
+    if (r.screen.sample_text) L.push(`screen_sample: ${r.screen.sample_text}`);
+    if (Array.isArray(r.screen.ancestors)) {
+      L.push('screen_ancestors (section -> body):');
+      for (const a of r.screen.ancestors) L.push(`  ${a}`);
+    }
+    if (Array.isArray(r.screen.fixed_layers)) {
+      L.push('fixed_layers:');
+      for (const f of r.screen.fixed_layers) L.push(`  ${f}`);
+    }
+  } else if (r.screen) {
+    L.push(`screen: ${r.screen}`);
+  }
+  L.push(`current_view: ${r.current_view || 'n/a'}`);
+  L.push('recent_view_clicks (latest last):');
+  if (Array.isArray(r.view_log) && r.view_log.length) {
+    for (const v of r.view_log.slice(-10)) L.push(`  [${v.at}] -> ${v.view}`);
+  } else {
+    L.push('  (none recorded)');
+  }
+  L.push('views (open a blank menu FIRST, then open this report):');
+  if (r.views && typeof r.views === 'object') {
+    for (const [k, v] of Object.entries(r.views)) L.push(`  ${k}: ${v}`);
+  } else {
+    L.push(`  ${r.views}`);
+  }
+  L.push(`js_errors (${(r.js_errors || []).length}):`);
+  for (const e of (r.js_errors || [])) L.push(`  [${e.at}] ${e.source}: ${e.message}`);
+  return L.join('\n');
+}
+
+async function openDiagnostics() {
+  const modal = document.getElementById('diagnostics-modal');
+  const pre = document.getElementById('diagnostics-report');
+  if (!modal || !pre) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  pre.textContent = 'Collecting…';
+  try {
+    const report = await collectDiagnostics();
+    pre.textContent = renderDiagnosticsReport(report);
+    modal.dataset.report = pre.textContent;
+  } catch (err) {
+    pre.textContent = 'Failed to collect diagnostics: ' + ((err && err.message) || err);
+  }
+}
+
+function closeDiagnostics() {
+  const modal = document.getElementById('diagnostics-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function copyDiagnostics() {
+  const txt = document.getElementById('diagnostics-modal')?.dataset.report || document.getElementById('diagnostics-report')?.textContent || '';
+  try {
+    await navigator.clipboard.writeText(txt);
+    showToast('Diagnostics copied — paste it back to support.');
+  } catch (_) {
+    alert('Copy failed. Long-press / select the text and copy manually.');
+  }
+}
+
+// Self-test: programmatically switch through the suspect menus and record
+// whether each view actually becomes visible. Distinguishes broken physical
+// clicks (this passes) from a broken view switch (this fails the same way).
+async function testNavSwitching() {
+  const btn = document.getElementById('btn-navtest');
+  const pre = document.getElementById('diagnostics-report');
+  if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+  const views = ['invoice-register', 'mgmt-expenses-report', 'deposit-refunds', 'reports',
+    'monthly-reports', 'documents', 'archive', 'pending-overpayments', 'work-orders', 'users'];
+  const lines = [];
+  lines.push('');
+  lines.push('menu_switch_test (programmatic showView per menu):');
+  let original = 'dashboard';
+  try { original = (window.GEHM_DEBUG && window.GEHM_DEBUG.view()) || 'dashboard'; } catch (_) {}
+  for (const v of views) {
+    try {
+      showView(v);
+      await new Promise((r) => setTimeout(r, 900));
+      const sec = document.querySelector(`[data-view="${v}"]`);
+      const visible = sec ? !sec.classList.contains('hidden') : false;
+      const textLen = sec ? (sec.innerText || '').trim().length : 0;
+      let current = '?';
+      try { current = window.GEHM_DEBUG.view(); } catch (_) {}
+      lines.push(`  ${v}: section_${visible ? 'VISIBLE' : 'HIDDEN'} current=${current} text=${textLen} ${visible && textLen > 100 ? 'OK' : 'FAIL'}`);
+    } catch (err) {
+      lines.push(`  ${v}: ERROR ${String((err && err.message) || err).slice(0, 120)}`);
+    }
+  }
+  try { showView(original); } catch (_) {}
+  lines.push(`  (restored to ${original})`);
+  if (pre) {
+    pre.textContent += '\n' + lines.join('\n');
+    const modal = document.getElementById('diagnostics-modal');
+    if (modal) modal.dataset.report = pre.textContent;
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Test menu switching'; }
+}
+
+document.getElementById('gehm-version')?.addEventListener('click', openDiagnostics);
+document.getElementById('btn-install-app')?.addEventListener('click', installGehmApp);
+document.getElementById('btn-diagnostics-close')?.addEventListener('click', closeDiagnostics);
+document.getElementById('btn-diagnostics-ok')?.addEventListener('click', closeDiagnostics);
+document.getElementById('btn-diagnostics-copy')?.addEventListener('click', copyDiagnostics);
+document.getElementById('btn-navtest')?.addEventListener('click', testNavSwitching);
 
 let currentView = 'login';
 let metricsPoll = null;
 let waPoll = null;
+let _waPolling = null;
+let _waQrPolling = null;
+const _gehmViewLog = [];
 let housesCache = [];
 let templatesCache = [];
 let activeHouseId = null;
@@ -36,6 +397,135 @@ function debounce(fn, ms) {
   return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
 }
 
+// ─── Offline-first (Phase 1): sync banner, badges, helpers ────────────────
+// Statuses shown to agents:
+//   🟢 SYNCED — saved on the main server
+//   🟠 PENDING SYNC — saved on this device, waiting for internet
+//   🔄 SYNCING — currently uploading to the server
+//   🔴 SYNC FAILED — could not synchronize; retry required
+
+function isNetworkError(err) {
+  if (!err) return false;
+  if (err.status === 0 || err.status === undefined) return true;
+  return /network|fetch|failed to fetch|load failed|abort|offline|timeout/i.test(String(err.message || ''));
+}
+
+function effectiveOffline() {
+  try {
+    if (syncIsOffline()) return true;
+  } catch (_) {}
+  return !navigator.onLine;
+}
+
+function ensureSyncBanner() {
+  let bar = document.getElementById('gehm-sync-bar');
+  if (bar) return bar;
+  bar = document.createElement('div');
+  bar.id = 'gehm-sync-bar';
+  bar.style.cssText = 'position:sticky;top:0;z-index:9000;display:none;align-items:center;gap:10px;padding:8px 14px;font-size:13px;font-weight:600;';
+  document.body.prepend(bar);
+  return bar;
+}
+
+function renderSyncBanner(status) {
+  const bar = ensureSyncBanner();
+  const s = status || getSyncStatus();
+  const parts = [];
+  let bg = '#065f46'; // green — synced & online
+  let fg = '#ecfdf5';
+
+  if (!s.online) {
+    bg = '#7c2d12'; fg = '#ffedd5';
+    parts.push('📴 OFFLINE — working from last synced data');
+  } else if (s.syncState === 'syncing') {
+    bg = '#1e40af'; fg = '#dbeafe';
+    parts.push('🔄 SYNCING…');
+  } else if (s.syncState === 'failed') {
+    bg = '#991b1b'; fg = '#fee2e2';
+    parts.push('🔴 SYNC FAILED — retry required');
+  } else if (s.pending > 0) {
+    bg = '#9a3412'; fg = '#ffedd5';
+    parts.push(`🟠 ${s.pending} PENDING SYNC`);
+  } else {
+    parts.push('🟢 SYNCED');
+  }
+  if (s.lastPull) {
+    try {
+      parts.push(`<span style="font-weight:400;opacity:.85">Last sync: ${new Date(s.lastPull).toLocaleString()}</span>`);
+    } catch (_) {}
+  }
+  bar.style.background = bg;
+  bar.style.color = fg;
+  bar.style.display = 'flex';
+  bar.innerHTML = `<span>${parts.join(' &nbsp;·&nbsp; ')}</span>
+    <span style="flex:1"></span>
+    ${s.online && s.pending >= 0 ? `<button id="gehm-sync-now" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:3px 12px;color:inherit;font-weight:700;cursor:pointer">Sync now</button>` : ''}`;
+  const btn = document.getElementById('gehm-sync-now');
+  if (btn) btn.onclick = () => { btn.disabled = true; syncNow().catch(() => {}).finally(() => { btn.disabled = false; }); };
+}
+
+/** Badge HTML for an offline-cached payment row. */
+function offlineSyncBadge(sync) {
+  if (sync === 'pending') return `<span class="status-badge badge-pending" title="Saved on this device. Will upload automatically when internet returns."><span class="status-dot"></span>🟠 PENDING SYNC</span>`;
+  if (sync === 'failed') return `<span class="status-badge badge-suspended" title="Server rejected this upload. A manager can review it in Sync Conflicts."><span class="status-dot"></span>🔴 SYNC FAILED</span>`;
+  if (sync === 'dismissed') return `<span class="status-badge" title="A manager reviewed this upload and kept the server record."><span class="status-dot"></span>⚪ DISMISSED</span>`;
+  return `<span class="status-badge badge-active"><span class="status-dot"></span>🟢 SYNCED</span>`;
+}
+
+function offlinePaymentRow(p) {
+  return `
+      <tr style="opacity:.92">
+        <td class="font-mono text-xs text-slate-500">—</td>
+        <td class="text-white">${escapeHtml(p.tenant_name || '—')} <span class="text-slate-500 font-mono text-xs">${escapeHtml(p.tenant_code || '')}</span></td>
+        <td class="font-mono text-green-400">KES ${Number(p.amount || 0).toLocaleString()}</td>
+        <td class="font-mono text-xs">${p.mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.mode)}</span> ` : ''}${escapeHtml(p.mpesa_reference || '—')}</td>
+        <td class="font-mono text-sm text-slate-400">${escapeHtml(p.payment_date || '—')}</td>
+        <td>${offlineSyncBadge(p.sync)}<div class="text-[10px] text-slate-500 font-mono mt-1">Receipt: ${p.receipt === 'sent' ? 'sent' : 'PENDING WHATSAPP SEND'}</div></td>
+        <td><span class="text-xs text-slate-500">Offline record</span></td>
+      </tr>`;
+}
+
+let _offlineBooted = false;
+let _swUpdateNotified = false;
+
+/** Reveal the app once the session check has decided login vs dashboard. */
+function finishBoot() {
+  try { document.body.classList.add('boot-done'); } catch (_) {}
+}
+
+function bootOffline() {
+  if (_offlineBooted) return;
+  _offlineBooted = true;
+  renderSyncBanner();
+  subscribeSync(renderSyncBanner);
+  // A new service worker took over: reload only when safe (no pending
+  // uploads, no open modal), otherwise tell the agent an update is ready.
+  // The SW itself never force-reloads tabs anymore.
+  try {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('controllerchange', async () => {
+        if (_swUpdateNotified) return;
+        _swUpdateNotified = true;
+        let pending = 0;
+        try { pending = await offlineDb.pendingCount(); } catch (_) {}
+        const modalOpen = !!document.querySelector('.fixed.inset-0:not(.hidden)');
+        if (pending === 0 && !modalOpen) {
+          window.location.reload();
+        } else {
+          try { showToast('New GEHPM version ready — refresh when convenient.', 'error'); } catch (_) {}
+        }
+      });
+    }
+  } catch (_) {}
+  initSyncEngine()
+    .then(() => {
+      renderSyncBanner();
+      // Opportunistic snapshot refresh while online (after login too).
+      if (!effectiveOffline()) pullSnapshot().catch(() => {});
+    })
+    .catch(() => renderSyncBanner());
+}
+
 function setTextEl(id, val) {
   const el = document.getElementById(id);
   if (el) el.textContent = val;
@@ -57,6 +547,10 @@ function isAdmin() {
 }
 
 function showView(name) {
+  try {
+    _gehmViewLog.push({ at: new Date().toISOString(), view: name });
+    if (_gehmViewLog.length > 20) _gehmViewLog.splice(0, _gehmViewLog.length - 20);
+  } catch (_) {}
   currentView = name;
   document.querySelectorAll('[data-view]').forEach((el) => {
     el.classList.toggle('hidden', el.dataset.view !== name);
@@ -90,8 +584,13 @@ function showView(name) {
     waStopPolling();
     waStopQrPolling();
   }
+  if (name === 'sms') {
+    smsLoadStatus();
+    smsLoadBalance();
+    smsLoadMessages();
+  }
   if (name === 'invoices') loadInvoicesCenter();
-  if (name === 'work-orders') loadWorkOrders();
+  if (name === 'work-orders') { loadWorkOrders(); loadInspections(); }
   if (name === 'documents') loadDocuments();
   if (name === 'invoice-register') loadInvoiceRegister();
   if (name === 'monthly-reports') loadMonthlyReports();
@@ -106,6 +605,9 @@ function showView(name) {
   if (name === 'deposit-refunds') loadDepositRefunds();
   if (name === 'future-tenancies') loadFutureTenancies();
   if (name === 'users') loadUsers();
+  if (name === 'settings') { loadStampSettings(); loadSignatureSettings(); }
+  if (name === 'sync-conflicts') loadConflicts();
+  if (name === 'commissions') loadCommissions();
   if (name === 'reports') {
     document.getElementById('report-phone').value = '';
     refreshHouseOptions();
@@ -116,16 +618,25 @@ function showView(name) {
 }
 
 function setHash(hash) {
-  if (window.location.hash === hash) return;
-  window.location.hash = hash;
+  // Encode tenant/house identifiers so codes containing '/', spaces, etc.
+  // survive the round trip through location.hash (parseRoute decodes).
+  let out = String(hash || '');
+  const m = out.match(/^#(tenant|house)\/(.+)$/);
+  if (m) out = `#${m[1]}/${encodeURIComponent(m[2])}`;
+  if (window.location.hash === out) return;
+  window.location.hash = out;
 }
 
 function parseRoute() {
   const raw = (window.location.hash || '').replace(/^#/, '');
   if (!raw) return { view: null };
-  const [head, id] = raw.split('/');
-  if (head === 'house' && id) return { view: 'house-dashboard', houseId: id };
-  if (head === 'tenant' && id) return { view: 'tenant-dashboard', tenantCode: id };
+  // Take the FULL remainder (not just the next segment) so tenant codes
+  // containing '/' (e.g. 102/104) resolve to the real tenant record.
+  const head = raw.split('/')[0];
+  const rest = raw.slice(head.length + 1);
+  const decode = (s) => { try { return decodeURIComponent(s); } catch (_) { return s; } };
+  if (head === 'house' && rest) return { view: 'house-dashboard', houseId: decode(rest) };
+  if (head === 'tenant' && rest) return { view: 'tenant-dashboard', tenantCode: decode(rest) };
   return { view: null };
 }
 
@@ -147,6 +658,51 @@ function applyRoute() {
 async function loadTenantDashboard(code) {
   if (!code) return;
 
+  // Guardian / emergency contact line (name · ID · phone · relationship).
+  function guardianDisplay(t) {
+    if (!t) return '—';
+    const parts = [t.guardian_name, t.guardian_id ? `ID ${t.guardian_id}` : '', t.guardian_phone, t.guardian_relationship ? `(${t.guardian_relationship})` : ''].filter(Boolean);
+    return parts.length ? parts.join(' · ') : '—';
+  }
+  // Water charge (refundable deposit): amount / paid / balance / status.
+  function waterPaidDisplay(t) {
+    if (!t) return '—';
+    const amt = Number(t.water_charge_amount || 0);
+    if (!(amt > 0)) return '—';
+    const paid = Number(t.water_charge_paid || 0);
+    const bal = Math.max(0, amt - paid);
+    const status = bal <= 0 ? 'PAID' : (paid > 0 ? 'PARTIALLY PAID' : 'UNPAID');
+    return `KES ${paid.toLocaleString()} paid / KES ${bal.toLocaleString()} bal · ${status}`;
+  }
+
+  // ─── Signed tenancy agreements (private per-tenant Supabase storage) ───
+  async function loadTenantAgreements(tenantCode) {
+    const tbody = document.getElementById('td-agreements-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-6 text-slate-500">Loading…</td></tr>';
+    try {
+      const { agreements } = await api.listAgreements(tenantCode);
+      if (!agreements.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-6 text-slate-500">No signed agreement on file.</td></tr>';
+        return;
+      }
+      const kb = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+      const when = (ts) => { try { return new Date(ts).toLocaleDateString(); } catch (_) { return '—'; } };
+      tbody.innerHTML = agreements.map((a) => `
+        <tr>
+          <td class="font-mono text-xs">${escapeHtml(a.filename || 'agreement.pdf')}</td>
+          <td class="font-mono text-xs">${kb(Number(a.size_bytes || 0))}</td>
+          <td class="text-xs text-slate-400">${when(a.created_at)}${a.uploaded_by ? ` · ${escapeHtml(a.uploaded_by)}` : ''}</td>
+          <td class="text-right whitespace-nowrap">
+            <button type="button" class="action-btn !py-1 !px-2 text-xs" data-ag-preview="${a.id}">Preview</button>
+            <button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-ag-delete="${a.id}">Delete</button>
+          </td>
+        </tr>`).join('');
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
   // Reset fields to loading state
   const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   setText('td-title', 'Loading…');
@@ -155,6 +711,7 @@ async function loadTenantDashboard(code) {
   setText('td-info-code', '…');
   setText('td-info-phone', '…');
   setText('td-info-national-id', '…');
+  setText('td-info-guardian', '…');
   setText('td-info-rent', '…');
   setText('td-info-due', '…');
   setText('td-info-water', '…');
@@ -163,6 +720,12 @@ async function loadTenantDashboard(code) {
   setText('td-house-units', '…');
   const tbody = document.getElementById('td-payments-tbody');
   if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-slate-500">Loading…</td></tr>';
+
+  // Signed tenancy agreements (private per-tenant storage)
+  loadTenantAgreements(code).catch(() => {});
+
+  // Payment arrangement (management-only internal control)
+  loadTenantArrangements(code).catch(() => {});
 
   try {
     const { tenant, house, payments, totalPaid, pendingAmount, summary, maintenanceCharges } = await api.tenantProfile(code);
@@ -177,6 +740,7 @@ async function loadTenantDashboard(code) {
     setText('td-info-code', tenant.tenant_code || '—');
     setText('td-info-phone', tenant.phone_number || '—');
     setText('td-info-national-id', tenant.national_id || '—');
+    setText('td-info-guardian', guardianDisplay(tenant));
     setText('td-info-rent', `KES ${Number(tenant.rent_amount || 0).toLocaleString()}`);
 
     // Format next rent due date dynamically — always 5th of next month
@@ -187,7 +751,8 @@ async function loadTenantDashboard(code) {
     const suffix = day === 1 || day === 21 || day === 31 ? 'st' : day === 2 || day === 22 ? 'nd' : day === 3 || day === 23 ? 'rd' : 'th';
     setText('td-info-due', `${day}${suffix} ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`);
     setText('td-info-movein', tenant.move_in_date || '—');
-    setText('td-info-water', tenant.water_charge_amount ? `KES ${Number(tenant.water_charge_amount).toLocaleString()} / month` : '—');
+    setText('td-info-water', tenant.water_charge_amount ? `KES ${Number(tenant.water_charge_amount).toLocaleString()}` : '—');
+    setText('td-info-water-paid', waterPaidDisplay(tenant));
 
     // House info
     setText('td-house-name', house ? house.house_name : '—');
@@ -376,7 +941,7 @@ async function loadTenantDashboard(code) {
             <td class="font-mono text-xs">${p.payment_mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.payment_mode)}</span> ` : ''}${escapeHtml(p.mpesa_reference || p.cheque_number || '—')}</td>
             <td class="text-slate-400 text-xs">${p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '—'}</td>
             <td>${statusBadge(p.status)}</td>
-            <td><button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-td-delete-payment="${p.id}">Delete</button></td>
+            <td><div class="flex items-center gap-2">${p.status === 'Approved' ? `<button type="button" class="action-btn !py-1 !px-2 text-xs" data-td-view-receipt="${p.id}">Receipt</button><button type="button" class="action-btn !py-1 !px-2 text-xs" data-td-download-receipt="${p.id}">PDF</button>` : ''}<button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-td-delete-payment="${p.id}">Delete</button></div></td>
           </tr>`).join('');
       }
     }
@@ -764,7 +1329,7 @@ document.getElementById('btn-advance-months-confirm')?.addEventListener('click',
     const pmApproveBtn = document.getElementById('btn-approve-from-message');
     if (pmHint) pmHint.textContent = 'Overpayment resolved successfully.';
     if (pmApproveBtn) pmApproveBtn.disabled = false;
-    showOverpaymentReview(result.messageBody, tenantId);
+    showOverpaymentReview(result.messageBody, tenantId, result.whatsapp);
   } catch (err) {
     hint.textContent = err.message;
   }
@@ -842,7 +1407,7 @@ document.getElementById('btn-overpayment-credit')?.addEventListener('click', asy
     const pmApproveBtn = document.getElementById('btn-approve-from-message');
     if (pmHint) pmHint.textContent = 'Overpayment resolved successfully.';
     if (pmApproveBtn) pmApproveBtn.disabled = false;
-    showOverpaymentReview(result.messageBody, tenantId);
+    showOverpaymentReview(result.messageBody, tenantId, result.whatsapp);
   } catch (err) {
     hint.textContent = err.message;
   }
@@ -882,19 +1447,39 @@ document.getElementById('btn-skip-overpayment-confirm')?.addEventListener('click
     if (pmApproveBtn) pmApproveBtn.disabled = false;
     if (tenantId) {
       loadTenantDashboard(tenantId);
-      showOverpaymentReview(result.messageBody, tenantId);
+      showOverpaymentReview(result.messageBody, tenantId, result.whatsapp);
     }
   } catch (err) {
     hint.textContent = err.message;
   }
 });
 
-function showOverpaymentReview(messageBody, tenantId) {
+function showOverpaymentReview(messageBody, tenantId, whatsapp) {
   const modal = document.getElementById('overpayment-review-modal');
   if (!modal) return;
   document.getElementById('overpayment-review-body').textContent = messageBody || '(No message generated)';
   document.getElementById('overpayment-review-tenant-id').value = tenantId;
-  document.getElementById('overpayment-review-hint').textContent = '';
+  const hint = document.getElementById('overpayment-review-hint');
+  const sendBtn = document.getElementById('btn-overpayment-review-send');
+  if (whatsapp) {
+    if (whatsapp.status === 'Sent') {
+      if (hint) {
+        hint.textContent = '✓ Confirmation sent to tenant via WhatsApp automatically.';
+        hint.style.color = '#16a34a';
+      }
+      // Already delivered — hide manual send to prevent duplicates.
+      if (sendBtn) sendBtn.style.display = 'none';
+    } else {
+      if (hint) {
+        hint.textContent = `⚠ Automatic send ${whatsapp.status || 'failed'}${whatsapp.failureReason ? ': ' + whatsapp.failureReason : ''}. Press Send to retry.`;
+        hint.style.color = '#dc2626';
+      }
+      if (sendBtn) sendBtn.style.display = '';
+    }
+  } else {
+    if (hint) { hint.textContent = ''; hint.style.color = ''; }
+    if (sendBtn) sendBtn.style.display = '';
+  }
   modal.style.display = 'flex';
 }
 
@@ -1053,7 +1638,7 @@ async function refreshWhatsappBeacon() {
 }
 
 async function handleWhatsappReset() {
-  if (!confirm('Re-validate Meta Cloud API connection?')) return;
+  if (!confirm('Re-validate WhatsApp session connection?')) return;
   try {
     const result = await api.resetWhatsapp();
     const el = document.getElementById('wa-beacon-slot');
@@ -1068,6 +1653,7 @@ async function loadDashboard() {
     const data = await api.metrics();
     const t = data.tenants || {};
     const r = data.revenue || {};
+    const c = data.collection || {};
     document.getElementById('metric-total').textContent = t.total_tenants ?? 0;
     document.getElementById('metric-vacant').textContent = t.vacant_units ?? 0;
     document.getElementById('metric-overdue').textContent = t.overdue_tenants ?? 0;
@@ -1075,8 +1661,169 @@ async function loadDashboard() {
     document.getElementById('metric-pending').textContent = r.pending_count ?? 0;
     document.getElementById('metric-revenue').textContent = `KES ${Number(r.revenue_mtd || 0).toLocaleString()}`;
     document.getElementById('metric-arrears').textContent = `KES ${Number(r.total_arrears || 0).toLocaleString()}`;
+    // Collection Progress panel — expected / collected / outstanding / percent
+    const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    setTxt('cp-period', c.period_label || '—');
+    setTxt('cp-expected', `KES ${Number(c.expected || 0).toLocaleString()}`);
+    setTxt('cp-collected', `KES ${Number(c.collected || 0).toLocaleString()}`);
+    setTxt('cp-outstanding', `KES ${Number(c.outstanding || 0).toLocaleString()}`);
+    const pct = Number(c.percent || 0);
+    setTxt('cp-pct', `${pct.toFixed(1)}%`);
+    const bar = document.getElementById('cp-bar');
+    if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
   } catch (err) {
     console.error(err);
+  }
+}
+
+/* ---------------- DASHBOARD DRILLDOWNS ----------------
+ * Every metric card opens the records behind its figure via
+ * GET /api/dashboard/drilldown/:kind. The backend builds those lists from
+ * the SAME predicates as the card counts, so a card always equals its list
+ * (and the row sums always equal the money figures). */
+
+const ksh = (v) => `KES ${Number(v || 0).toLocaleString()}`;
+const dashDate = (iso) => {
+  if (!iso) return '—';
+  try {
+    return new Date(String(iso).slice(0, 10) + 'T12:00:00Z')
+      .toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  } catch (_) {
+    return String(iso).slice(0, 10);
+  }
+};
+const dashTenantCell = (name, code) => code
+  ? `<a href="#tenant/${encodeURIComponent(code)}" class="text-sky-600 hover:underline" data-tenant-link>${escapeHtml(name || code)}</a>`
+  : escapeHtml(name || '—');
+const dashCell = (v) => escapeHtml(v || '—');
+
+const DASH_DRILLS = {
+  vacant: {
+    title: 'Vacant Units',
+    cols: ['Property / House', 'Unit'],
+    row: (r) => [dashCell(r.property_name), dashCell(r.unit_display)],
+    totals: (s) => `${s.units} vacant unit(s) · live occupancy status`,
+    empty: 'No vacant units right now.',
+  },
+  overdue: {
+    title: 'Overdue Units',
+    cols: ['Property', 'Unit', 'Tenant', 'Outstanding Balance', 'Overdue Period'],
+    row: (r) => [
+      dashCell(r.property_name),
+      dashCell(r.unit_display),
+      dashTenantCell(r.name, r.tenant_code),
+      ksh(r.outstanding_balance),
+      `${Number(r.overdue_days || 0)} day(s) · since ${dashDate(r.overdue_since)}`,
+    ],
+    totals: (s) => `${s.units} unit(s) · overdue rent ${ksh(s.overdue_rent)} · total outstanding ${ksh(s.outstanding)}`,
+    empty: 'No overdue units — every rent balance is up to date.',
+  },
+  due7: {
+    title: 'Rent Due in 7 Days',
+    cols: ['Property', 'Unit', 'Tenant', 'Rent Due Date', 'Amount Due'],
+    row: (r) => [
+      dashCell(r.property_name),
+      dashCell(r.unit_display),
+      dashTenantCell(r.name, r.tenant_code),
+      dashDate(r.rent_due_date),
+      ksh(r.amount_due),
+    ],
+    totals: (s) => `${s.units} unit(s) · ${ksh(s.amount_due)} due within 7 days`,
+    empty: 'No rent falls due in the next 7 days (fully paid rent is excluded).',
+  },
+  pending: {
+    title: 'Pending Payments',
+    cols: ['Property', 'Unit', 'Tenant', 'Expected', 'Amount Paid', 'Remaining'],
+    row: (r) => [
+      dashCell(r.property_name),
+      dashCell(r.unit_display),
+      dashTenantCell(r.name, r.tenant_code),
+      ksh(r.expected_amount),
+      ksh(r.paid_amount),
+      ksh(r.remaining_balance),
+    ],
+    totals: (s) => `${s.records} record(s) · ${ksh(s.pending_amount)} awaiting approval · unpaid rent obligations appear under Total Arrears`,
+    empty: 'No pending payment records. Unpaid rent obligations appear under Total Arrears.',
+  },
+  arrears: {
+    title: 'Total Arrears & Outstanding Balances',
+    cols: ['Property', 'Unit', 'Tenant', 'Arrears B/F', 'Rent Unpaid', 'Charges', 'Total Outstanding'],
+    row: (r) => [
+      dashCell(r.property_name),
+      dashCell(r.unit_display),
+      dashTenantCell(r.name, r.tenant_code),
+      ksh(r.arrears_bf),
+      ksh(r.unpaid_rent),
+      ksh(Number(r.penalties_pending || 0) + Number(r.garbage_due || 0) + Number(r.water_due || 0)),
+      ksh(r.outstanding_balance),
+    ],
+    totals: (s) => `${s.units} unit(s) with a balance · total ${ksh(s.outstanding)} = arrears ${ksh(s.arrears_bf)} + unpaid rent ${ksh(s.unpaid_rent)} + charges ${ksh(Number(s.penalties || 0) + Number(s.garbage || 0) + Number(s.water || 0))}`,
+    empty: 'No outstanding balances — every tenant account is clear.',
+  },
+  revenue: {
+    title: 'Collected Rent — This Month',
+    cols: ['Date', 'Property', 'Unit', 'Tenant', 'Amount', 'Reference'],
+    row: (r) => [
+      dashDate(r.payment_date),
+      dashCell(r.property_name),
+      dashCell(r.unit_display),
+      dashTenantCell(r.tenant_name, r.tenant_code),
+      ksh(r.amount),
+      dashCell(r.mpesa_reference || r.receipt_number),
+    ],
+    totals: (s) => `${s.records} approved payment(s) · ${ksh(s.total)} received this month (matches the Collected MTD card)`,
+    empty: 'No approved payments recorded this month.',
+  },
+  progress: {
+    title: 'Collection Progress',
+    cols: ['Property', 'Unit', 'Tenant', 'Expected', 'Collected', 'Outstanding'],
+    row: (r) => [
+      dashCell(r.property_name),
+      dashCell(r.unit_display),
+      dashTenantCell(r.name, r.tenant_code),
+      ksh(r.expected),
+      ksh(r.collected),
+      ksh(r.outstanding),
+    ],
+    totals: (s) => `${s.units} unit(s) · ${ksh(s.collected)} of ${ksh(s.expected)} collected · ${ksh(s.outstanding)} outstanding · ${Number(s.percent || 0)}%`,
+    empty: 'No occupied units.',
+  },
+};
+
+async function openDashDrill(kind) {
+  const conf = DASH_DRILLS[kind];
+  const modal = document.getElementById('dash-drill-modal');
+  if (!conf || !modal) return;
+  const title = document.getElementById('dash-drill-title');
+  const sub = document.getElementById('dash-drill-sub');
+  const body = document.getElementById('dash-drill-body');
+  title.textContent = conf.title;
+  sub.textContent = 'Loading…';
+  body.innerHTML = '<p class="text-slate-400">Loading records…</p>';
+  modal.classList.remove('hidden');
+  try {
+    const data = await api.dashboardDrill(kind);
+    const rows = data.rows || [];
+    sub.textContent = conf.totals(data.totals || {});
+    if (!rows.length) {
+      body.innerHTML = `<p class="text-slate-500">${escapeHtml(conf.empty)}</p>`;
+      return;
+    }
+    const head = conf.cols.map((c) => `<th>${escapeHtml(c)}</th>`).join('');
+    const bodyRows = rows
+      .map((r) => `<tr>${conf.row(r).map((cell) => `<td>${cell}</td>`).join('')}</tr>`)
+      .join('');
+    body.innerHTML = `
+      <div class="glass-panel overflow-x-auto">
+        <table class="data-grid w-full min-w-[720px]">
+          <thead><tr>${head}</tr></thead>
+          <tbody>${bodyRows}</tbody>
+        </table>
+      </div>
+      <p class="text-slate-400 text-xs font-mono mt-2">Updated ${new Date(data.generated_at).toLocaleTimeString()} · click a tenant name to open their account</p>`;
+  } catch (err) {
+    sub.textContent = '—';
+    body.innerHTML = `<p class="text-rose-500">${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -1116,7 +1863,39 @@ async function loadTenants() {
       )
       .join('');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="9" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
+    if (!isNetworkError(err)) {
+      tbody.innerHTML = `<tr><td colspan="9" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
+      return;
+    }
+    // Offline — tenants from the last synced snapshot (read-only).
+    const q = (document.getElementById('tenant-search')?.value?.trim() || '').toLowerCase();
+    const cached = await offlineDb.getAll('tenants').catch(() => []);
+    const filtered = (cached || []).filter((t) => !q || `${t.name || ''} ${t.tenant_code || ''} ${t.phone_number || ''}`.toLowerCase().includes(q));
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500">Offline — no synced tenant data on this device yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-2 text-amber-500 text-xs font-mono">📴 Offline — showing last synced data (read-only)</td></tr>` + filtered
+      .map(
+        (t) => `
+      <tr style="opacity:.92">
+        <td class="font-mono text-purple-300">
+          <a href="#tenant/${t.tenant_code}" class="hover:underline text-purple-300 font-semibold">${escapeHtml(t.tenant_code)}</a>
+        </td>
+        <td class="text-white">${escapeHtml(t.name)}</td>
+        <td class="font-mono text-sm">${escapeHtml(t.phone_number)}</td>
+        <td class="text-slate-400">${escapeHtml(t.property_name)}</td>
+        <td class="font-mono text-green-400">${Number(t.rent_amount).toLocaleString()}</td>
+        <td class="font-mono text-sm">${t.agreement_outstanding > 0 ? `<span class="text-amber-400 font-semibold">KES ${Number(t.agreement_outstanding).toLocaleString()}</span>` : `<span class="text-emerald-400">✓</span>`}</td>
+        <td class="font-mono text-sm text-slate-400">${escapeHtml(formatExpiryDisplay(t))}</td>
+        <td>${statusBadge(t.status)}</td>
+        <td class="space-x-1">
+          <button type="button" class="action-btn" data-tenant-profile="${t.id}">Profile</button>
+          <button type="button" class="action-btn action-btn-wa" data-message-tenant="${t.id}">💬 Msg</button>
+        </td>
+      </tr>`
+      )
+      .join('');
   }
 }
 
@@ -1125,13 +1904,19 @@ async function loadPayments() {
   if (!tbody) return;
   const filter = document.getElementById('payment-filter')?.value;
   tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">Loading...</td></tr>`;
+  // Locally-pending offline payments always show first with their sync badge.
+  const cachedPending = await offlineDb
+    .getAll('payments')
+    .then((all) => (all || []).filter((p) => p && (p.sync === 'pending' || p.sync === 'failed')))
+    .catch(() => []);
+  const pendingRows = cachedPending.map(offlinePaymentRow).join('');
   try {
     const { payments } = await api.payments(filter || undefined);
-    if (!payments.length) {
+    if (!payments.length && !cachedPending.length) {
       tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">No payments</td></tr>`;
       return;
     }
-    tbody.innerHTML = payments
+    tbody.innerHTML = pendingRows + payments
       .map(
         (p) => `
       <tr>
@@ -1144,6 +1929,7 @@ async function loadPayments() {
         <td>
           <div class="flex items-center gap-2">
             ${p.status === 'Pending' ? `<button type="button" class="qc-btn qc-btn-primary !py-1 !px-2 text-xs" data-approve-payment="${p.id}">Approve</button>` : ''}
+            ${p.status === 'Approved' ? `<button type="button" class="action-btn !py-1 !px-2 text-xs" data-view-receipt="${p.id}">Receipt</button><button type="button" class="action-btn !py-1 !px-2 text-xs" data-download-receipt="${p.id}">PDF</button>` : ''}
             <button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-delete-payment="${p.id}">Delete</button>
           </div>
         </td>
@@ -1151,7 +1937,19 @@ async function loadPayments() {
       )
       .join('');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
+    if (!isNetworkError(err)) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
+      return;
+    }
+    // Fully offline — render the on-device cache (pending first).
+    const cached = await offlineDb.getAll('payments').catch(() => []);
+    if (!cached.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">Offline — no synced payment data on this device yet.</td></tr>`;
+      return;
+    }
+    const sorted = [...cached].sort((a, b) => (a.sync === b.sync ? 0 : a.sync === 'pending' ? -1 : 1));
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-2 text-amber-500 text-xs font-mono">📴 Offline — showing last synced data${cachedPending.length ? ` + ${cachedPending.length} pending` : ''}</td></tr>`
+      + sorted.map(offlinePaymentRow).join('');
   }
 }
 
@@ -1221,6 +2019,7 @@ async function openTenantModal(id = null) {
       form.deposit_paid.value = t.deposit_paid || 0;
       form.garbage_fee_amount.value = t.garbage_fee_amount || 0;
       form.water_charge_amount.value = t.water_charge_amount || 0;
+      form.water_charge_paid.value = t.water_charge_paid || 0;
       form.arrears.value = t.arrears || 0;
       document.getElementById('arrears-manual-badge')?.classList.toggle('hidden', !t.arrears_manually_set);
       form.agreement_charge.value = t.agreement_charge || 0;
@@ -1352,6 +2151,7 @@ function recalcEiTotals() {
   const lines = collectEiLines();
   const deductions = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
   const depositPaid = Number(document.getElementById('ei-deposit-paid')?.textContent.replace(/[^0-9]/g, '') || 0);
+  const waterCharges = Number(document.getElementById('ei-water-charges')?.textContent.replace(/[^0-9]/g, '') || 0);
   const rentAmount = Number(document.getElementById('ei-rent')?.textContent.replace(/[^0-9]/g, '') || 0);
   const arrears = Number(document.getElementById('ei-outstanding')?.textContent.replace(/[^0-9]/g, '') || 0);
 
@@ -1367,33 +2167,17 @@ function recalcEiTotals() {
     rentCharged = 0;
   }
 
-  // Total obligations = arrears + rent charged + deductions
-  const totalObligations = arrears + rentCharged + deductions;
+  // 1. Refundable amount = deposit paid + water charges
+  const refundableAmount = depositPaid + waterCharges;
+  // 2. Total deductions = outstanding (arrears + rent + penalties) + user deduction lines
+  const totalDeductions = arrears + rentCharged + deductions;
+  // 3. Net refund = refundable - deductions
+  const netRefund = refundableAmount - totalDeductions;
 
-  // Get deposit treatment
-  const depositTreatment = document.querySelector('input[name="ei-deposit-treatment"]:checked')?.value || 'apply_to_deductions';
-  let depToRent = 0;
-  let depToDed = 0;
-  if (depositTreatment === 'apply_to_rent') {
-    depToRent = Math.min(depositPaid, rentCharged);
-  } else if (depositTreatment === 'apply_to_deductions') {
-    depToDed = Math.min(depositPaid, deductions);
-  } else if (depositTreatment === 'apply_to_both') {
-    depToRent = Math.min(depositPaid, rentCharged);
-    const remaining = depositPaid - depToRent;
-    depToDed = Math.min(remaining, deductions);
-  } else if (depositTreatment === 'refund') {
-    depToRent = 0;
-    depToDed = 0;
-  }
-
-  const totalCredits = depToRent + depToDed;
-  const depositRefund = Math.max(0, depositPaid - depToRent - depToDed);
-  const finalSettlement = totalCredits - totalObligations;
-
-  setTextEl('ei-total-deductions', `KES ${deductions.toLocaleString()}`);
-  setTextEl('ei-deposit-refund', `KES ${depositRefund.toLocaleString()}`);
-  setTextEl('ei-final-settlement', `KES ${finalSettlement.toLocaleString()}`);
+  setTextEl('ei-total-refundable', `KES ${refundableAmount.toLocaleString()}`);
+  setTextEl('ei-total-refundable-val', `KES ${refundableAmount.toLocaleString()}`);
+  setTextEl('ei-total-deductions', `KES ${totalDeductions.toLocaleString()}`);
+  setTextEl('ei-final-settlement', `KES ${netRefund.toLocaleString()}`);
 }
 
 function renderEiActions(invoice) {
@@ -1487,9 +2271,11 @@ async function openExitInvoiceModal(tenantCode) {
   } catch (_) { existing = null; }
 
   const depPaid = existing ? existing.deposit_paid : (summary ? summary.deposit.paid : 0);
+  const waterCharges = existing ? existing.water_charges : (summary ? Number(summary.tenant.water_charge_amount || 0) : 0);
   const rent = summary ? summary.tenant.rent_amount : 0;
 
   setTextEl('ei-deposit-paid', `KES ${Number(depPaid).toLocaleString()}`);
+  setTextEl('ei-water-charges', `KES ${Number(waterCharges).toLocaleString()}`);
   setTextEl('ei-rent', `KES ${Number(rent).toLocaleString()}`);
   setTextEl('ei-tenant-name', summary ? summary.tenant.name : tenantCode);
   setTextEl('ei-tenant-unit', summary ? `${summary.tenant.unit_label || tenantCode} — ${summary.tenant.property_name || ''}` : tenantCode);
@@ -1504,10 +2290,6 @@ async function openExitInvoiceModal(tenantCode) {
     if (existing.rent_treatment) {
       const rt = document.querySelector(`input[name="ei-rent-treatment"][value="${existing.rent_treatment}"]`);
       if (rt) { rt.checked = true; rt.dispatchEvent(new Event('change')); }
-    }
-    if (existing.deposit_treatment) {
-      const dt = document.querySelector(`input[name="ei-deposit-treatment"][value="${existing.deposit_treatment}"]`);
-      if (dt) { dt.checked = true; dt.dispatchEvent(new Event('change')); }
     }
     if (existing.pro_rated_days) {
       const prd = document.getElementById('ei-pro-rated-days');
@@ -1544,7 +2326,6 @@ async function saveEiDraft() {
 
   // Management decisions
   const rentTreatment = document.querySelector('input[name="ei-rent-treatment"]:checked')?.value || 'full_month';
-  const depositTreatment = document.querySelector('input[name="ei-deposit-treatment"]:checked')?.value || 'apply_to_deductions';
   const proRatedDays = rentTreatment === 'pro_rated' ? Number(document.getElementById('ei-pro-rated-days')?.value || 0) : null;
   const rentTreatmentReason = document.getElementById('ei-rent-treatment-reason')?.value.trim() || null;
   const settlementReason = document.getElementById('ei-settlement-reason')?.value.trim() || null;
@@ -1557,18 +2338,6 @@ async function saveEiDraft() {
     rentCharged = 0;
   }
 
-  // Compute deposit application
-  let depToRent = 0;
-  let depToDed = 0;
-  if (depositTreatment === 'apply_to_rent') {
-    depToRent = Math.min(depositPaid, rentCharged);
-  } else if (depositTreatment === 'apply_to_deductions') {
-    depToDed = Math.min(depositPaid, deductions);
-  } else if (depositTreatment === 'apply_to_both') {
-    depToRent = Math.min(depositPaid, rentCharged);
-    depToDed = Math.min(depositPaid - depToRent, deductions);
-  }
-
   const body = {
     tenant_code: tenantCode,
     lines,
@@ -1578,11 +2347,21 @@ async function saveEiDraft() {
     rent_charged_amount: rentCharged,
     pro_rated_days: proRatedDays,
     rent_treatment_reason: rentTreatmentReason,
-    deposit_treatment: depositTreatment,
-    deposit_applied_to_rent: depToRent,
-    deposit_applied_to_deductions: depToDed,
-    settlement_decision_reason: settlementReason,
+    water_charges: Number(document.getElementById('ei-water-charges')?.textContent.replace(/[^0-9]/g, '') || 0),
   };
+  // Offline move-out: queue the settlement draft (PENDING SYNC). Editing an
+  // existing server draft stays online-only to avoid blind overwrites.
+  if (effectiveOffline()) {
+    if (id) {
+      setEiStatusMsg('Editing a synced exit invoice requires internet (conflict protection).');
+      return null;
+    }
+    const clientTxnId = offlineDb.newClientTxnId();
+    await queueOutboxOp({ type: 'exit_create', payload: { ...body, client_txn_id: clientTxnId } });
+    setEiStatusMsg('🟠 Move-out settlement saved offline — PENDING SYNC. Will upload when internet returns.');
+    showToast('Exit settlement saved offline (PENDING SYNC)');
+    return { offline: true, client_txn_id: clientTxnId };
+  }
   let invoice;
   if (id) {
     delete body.tenant_code;
@@ -1708,10 +2487,8 @@ async function saveFinalizedEi() {
   const id = document.getElementById('ei-id').value;
   if (!id) return setEiStatusMsg('No exit invoice to save.');
   const lines = collectEiLines();
-  const depositPaid = Number(document.getElementById('ei-deposit-paid')?.textContent.replace(/[^0-9]/g, '') || 0);
   const rentAmount = Number(document.getElementById('ei-rent')?.textContent.replace(/[^0-9]/g, '') || 0);
   const rentTreatment = document.querySelector('input[name="ei-rent-treatment"]:checked')?.value || 'full_month';
-  const depositTreatment = document.querySelector('input[name="ei-deposit-treatment"]:checked')?.value || 'apply_to_deductions';
   const proRatedDays = rentTreatment === 'pro_rated' ? Number(document.getElementById('ei-pro-rated-days')?.value || 0) : null;
   const rentTreatmentReason = document.getElementById('ei-rent-treatment-reason')?.value.trim() || null;
   const settlementReason = document.getElementById('ei-settlement-reason')?.value.trim() || null;
@@ -1721,15 +2498,6 @@ async function saveFinalizedEi() {
   } else if (rentTreatment === 'waived') {
     rentCharged = 0;
   }
-  let depToRent = 0, depToDed = 0;
-  if (depositTreatment === 'apply_to_rent') {
-    depToRent = Math.min(depositPaid, rentCharged);
-  } else if (depositTreatment === 'apply_to_deductions') {
-    depToDed = Math.min(depositPaid, lines.reduce((s, l) => s + Number(l.amount || 0), 0));
-  } else if (depositTreatment === 'apply_to_both') {
-    depToRent = Math.min(depositPaid, rentCharged);
-    depToDed = Math.min(depositPaid - depToRent, lines.reduce((s, l) => s + Number(l.amount || 0), 0));
-  }
   const body = {
     lines,
     move_out_date: document.getElementById('ei-move-out-date').value || null,
@@ -1738,9 +2506,6 @@ async function saveFinalizedEi() {
     rent_charged_amount: rentCharged,
     pro_rated_days: proRatedDays,
     rent_treatment_reason: rentTreatmentReason,
-    deposit_treatment: depositTreatment,
-    deposit_applied_to_rent: depToRent,
-    deposit_applied_to_deductions: depToDed,
     settlement_decision_reason: settlementReason,
   };
   try {
@@ -2171,7 +2936,9 @@ async function openMessageModal(tenantId) {
   modal.classList.remove('hidden');
 
   try {
-    const { tenant: t } = await api.tenant(tenantId);
+    // Profile endpoint (not GET /tenants/:id) — only it computes the live
+    // balance summary (arrears + rent due + penalties + shortfalls).
+    const { tenant: t, summary } = await api.tenantProfile(tenantId);
     document.getElementById('message-modal-title').textContent = `Send WhatsApp: ${t.name} (${t.tenant_code})`;
 
     // Populate template dropdown
@@ -2191,13 +2958,35 @@ async function openMessageModal(tenantId) {
         return;
       }
       const selectedTpl = templatesCache.find((x) => String(x.id) === String(tplId));
-      if (selectedTpl) {
-        bodyTextarea.value = selectedTpl.body
-          .replaceAll('{{client_name}}', t.name || '')
-          .replaceAll('{{tenant_code}}', t.tenant_code || '')
-          .replaceAll('{{house_name}}', t.property_name || '')
-          .replaceAll('{{house_number}}', t.unit_label || '');
+      if (!selectedTpl) return;
+
+      // Auto-capture the client's details + live balance from their profile.
+      const money = (v) => Number(v || 0).toLocaleString('en-KE');
+      const now = new Date();
+      const balancePeriod = now.toLocaleString('en-GB', { month: 'long', year: 'numeric' });
+      const noticeDate = `${String(now.getDate()).padStart(2, '0')} ${balancePeriod}`;
+
+      const vars = {
+        client_name: t.name || '',
+        tenant_code: t.tenant_code || '',
+        house_name: t.property_name || '',
+        house_number: t.unit_label || t.tenant_code || '',
+        tenant_name: t.name || '',
+        property_name: t.property_name || '',
+        unit_number: t.unit_label || t.tenant_code || '',
+        notice_date: noticeDate,
+        balance_period: balancePeriod,
+        previous_arrears: money(summary?.arrears ?? t.arrears),
+        current_rent_due: money(summary?.rent_amount ?? t.rent_amount),
+        payments_received: money(summary?.rent_paid_this_month ?? t.rent_paid_this_month),
+        total_outstanding_balance: money(summary?.balance),
+      };
+
+      let body = selectedTpl.body;
+      for (const [key, val] of Object.entries(vars)) {
+        body = body.replaceAll(`{{${key}}}`, val);
       }
+      bodyTextarea.value = body;
     };
     
     const newSelect = select.cloneNode(true);
@@ -2243,7 +3032,19 @@ async function loadHouses() {
     }
     tbody.innerHTML = houses.map((h) => renderHouseRow(h)).join('');
   } catch (err) {
+    if (!isNetworkError(err)) {
       tbody.innerHTML = `<tr><td colspan="7" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
+      return;
+    }
+    // Offline — houses from the last synced snapshot (read-only).
+    const cached = await offlineDb.getAll('houses').catch(() => []);
+    if (!cached.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">Offline — no synced property data on this device yet.</td></tr>`;
+      return;
+    }
+    housesCache = cached;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-2 text-amber-500 text-xs font-mono">📴 Offline — showing last synced data (read-only)</td></tr>`
+      + cached.map((h) => renderHouseRow(h)).join('');
   }
 }
 
@@ -2664,26 +3465,52 @@ function stopPolls() {
 async function initSession() {
   if (!api.getToken()) {
     showView('login');
+    finishBoot();
     return;
   }
   try {
     const { user } = await api.me();
     api.setUser(user);
+    stampSession();
     document.getElementById('nav-username').textContent = user.display_name || user.username;
     if (document.getElementById('nav-username-mobile')) document.getElementById('nav-username-mobile').textContent = user.display_name || user.username;
     if (document.getElementById('nav-role-mobile')) document.getElementById('nav-role-mobile').textContent = (user.role || 'operator').toUpperCase();
     document.getElementById('nav-users-link')?.classList.toggle('hidden', !isAdmin());
+    document.getElementById('nav-settings-link')?.classList.toggle('hidden', !isAdmin());
+    document.getElementById('nav-conflicts-link')?.classList.toggle('hidden', !isAdmin());
     const routed = applyRoute();
     if (!routed) showView('dashboard');
     startPolls();
+    // Refresh the on-device snapshot while we are online.
+    pullSnapshot().catch(() => {});
+    finishBoot();
   } catch (err) {
     console.error('Session initialization failed:', err);
     if (err.status === 401 || err.status === 403) {
       api.logout();
+      clearSessionStamp();
       showView('login');
+      finishBoot();
+    } else if (hasUsableOfflineSession()) {
+      // No internet, but the agent logged in within the last 7 days:
+      // boot offline from the cached session + last synced data.
+      const user = api.getUser();
+      try {
+        document.getElementById('nav-username').textContent = (user && (user.display_name || user.username)) || 'Offline agent';
+        if (document.getElementById('nav-username-mobile')) document.getElementById('nav-username-mobile').textContent = (user && (user.display_name || user.username)) || 'Offline agent';
+        if (document.getElementById('nav-role-mobile')) document.getElementById('nav-role-mobile').textContent = ((user && user.role) || 'operator').toUpperCase();
+        document.getElementById('nav-users-link')?.classList.toggle('hidden', !isAdmin());
+    document.getElementById('nav-settings-link')?.classList.toggle('hidden', !isAdmin());
+        document.getElementById('nav-conflicts-link')?.classList.toggle('hidden', !isAdmin());
+      } catch (_) {}
+      showToast(`Offline mode — session valid for ${offlineSessionDaysLeft()} more day(s). Showing last synced data.`, 'error');
+      const routed = applyRoute();
+      if (!routed) showView('dashboard');
+      finishBoot();
     } else {
       const routed = applyRoute();
       if (!routed) showView('dashboard');
+      finishBoot();
     }
   }
 }
@@ -2699,13 +3526,19 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
     );
     api.setToken(result.token);
     api.setUser(result.user);
+    stampSession();
     document.getElementById('nav-username').textContent = result.user.display_name || result.user.username;
     if (document.getElementById('nav-username-mobile')) document.getElementById('nav-username-mobile').textContent = result.user.display_name || result.user.username;
     if (document.getElementById('nav-role-mobile')) document.getElementById('nav-role-mobile').textContent = (result.user.role || 'operator').toUpperCase();
     document.getElementById('nav-users-link')?.classList.toggle('hidden', !isAdmin());
+    document.getElementById('nav-settings-link')?.classList.toggle('hidden', !isAdmin());
+    document.getElementById('nav-conflicts-link')?.classList.toggle('hidden', !isAdmin());
     const routed = applyRoute();
     if (!routed) showView('dashboard');
     startPolls();
+    // Seed the on-device cache right after login for offline use.
+    pullSnapshot().catch(() => {});
+    showToast(`Welcome back, ${result.user.display_name || result.user.username} ✓`);
   } catch (err) {
     errEl.textContent = err.message;
     errEl.classList.remove('hidden');
@@ -2714,6 +3547,7 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
 
 document.getElementById('logout-btn')?.addEventListener('click', () => {
   api.logout();
+  clearSessionStamp();
   stopPolls();
   activeHouseId = null;
   setHash('#');
@@ -2722,6 +3556,7 @@ document.getElementById('logout-btn')?.addEventListener('click', () => {
 
 document.getElementById('logout-btn-mobile')?.addEventListener('click', () => {
   api.logout();
+  clearSessionStamp();
   stopPolls();
   activeHouseId = null;
   setHash('#');
@@ -2781,6 +3616,30 @@ document.getElementById('mobile-menu-backdrop')?.addEventListener('click', () =>
 
 document.querySelectorAll('.nav-jump').forEach((btn) => {
   btn.addEventListener('click', () => showView(btn.dataset.nav));
+});
+
+// Dashboard metric cards / collection panel → open the records behind the
+// figure (Total Tenants jumps to the existing Tenants on Board list).
+document.querySelectorAll('[data-drill]').forEach((el) => {
+  const fire = () => {
+    const kind = el.dataset.drill;
+    if (kind === 'tenants') { showView('tenants'); return; }
+    openDashDrill(kind);
+  };
+  el.addEventListener('click', fire);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fire(); }
+  });
+});
+document.getElementById('dash-drill-close')?.addEventListener('click', () => {
+  document.getElementById('dash-drill-modal')?.classList.add('hidden');
+});
+document.getElementById('dash-drill-modal')?.addEventListener('click', (e) => {
+  const modal = document.getElementById('dash-drill-modal');
+  if (!modal) return;
+  if (e.target === modal) modal.classList.add('hidden');
+  // Tenant account link → close the overlay so the tenant dashboard is visible
+  else if (e.target.closest?.('a[data-tenant-link]')) modal.classList.add('hidden');
 });
 
 document.getElementById('btn-add-tenant')?.addEventListener('click', () => openTenantModal());
@@ -2867,6 +3726,7 @@ document.getElementById('tenant-form')?.addEventListener('submit', async (e) => 
     deposit_paid: Number(form.deposit_paid?.value || 0),
     garbage_fee_amount: Number(form.garbage_fee_amount?.value || 0),
     water_charge_amount: Number(form.water_charge_amount?.value || 0),
+    water_charge_paid: Number(form.water_charge_paid?.value || 0),
     arrears: openingArrears,
     arrears_manually_set: openingArrears > 0,
     opening_advance_rent: openingAdvance,
@@ -2878,12 +3738,29 @@ document.getElementById('tenant-form')?.addEventListener('submit', async (e) => 
     status: form.status.value,
   };
   try {
+    // New tenant registrations and edits need live validation (codes,
+    // duplicates) — online only. Move-in (Mark Occupied) works offline.
+    if (effectiveOffline() && !(id && form.dataset.occupyMode === '1')) {
+      alert('Adding or editing tenant records requires an internet connection. Move-in (Mark Occupied) and payments work offline.');
+      return;
+    }
     if (id && form.dataset.occupyMode === '1') {
       // Mark Occupied: backend resets the previous tenancy's financial rows
       // (preserved in the archive) and registers the new tenant on this unit.
-      delete body.house_id;
-      delete body.status;
-      delete body.deposit_paid;
+        delete body.house_id;
+        delete body.status;
+        delete body.deposit_paid;
+        delete body.water_charge_paid;
+      // Offline move-in queues the occupation (PENDING SYNC). On sync the
+      // server applies it if the unit is still vacant, else SYNC FAILED.
+      if (effectiveOffline()) {
+        const clientTxnId = offlineDb.newClientTxnId();
+        await queueOutboxOp({ type: 'tenant_occupy', payload: { tenant_id: id, body, client_txn_id: clientTxnId } });
+        document.getElementById('tenant-modal').classList.add('hidden');
+        showToast('Move-in saved offline (PENDING SYNC)');
+        try { await loadTenants(); } catch (_) {}
+        return;
+      }
       await api.markOccupied(id, body);
     } else if (id) {
       await api.updateTenant(id, body);
@@ -3163,6 +4040,71 @@ document.getElementById('broadcast-template-select')?.addEventListener('change',
 
 let lastParsedPayment = null;
 
+/**
+ * Offline PARSE — same fields as the server parser, tenant lookup against
+ * the last synced snapshot, duplicate check against cached payments.
+ * The receipt preview is generated server-side on sync (allocation needs
+ * live balances), so the message box shows a placeholder until then.
+ */
+async function parsePaymentMessageOfflineFlow({ raw, hint, tenantSel, amountEl, refEl, msgEl, copyBtn, approveBtn }) {
+  lastParsedPayment = null;
+  try {
+    const parsed = parseMpesaOffline(raw);
+    const tenants = await offlineDb.getAll('tenants').catch(() => []);
+    if (!tenants.length) {
+      if (hint) hint.textContent = 'Offline, and no synced tenant data on this device yet. Connect once to download it.';
+      return;
+    }
+    const matches = matchTenantsOffline(parsed, tenants);
+
+    if (amountEl) amountEl.value = parsed.amount ?? '';
+    if (refEl) refEl.value = parsed.mpesa_reference ?? '';
+
+    // Duplicate check against cached payments (same M-Pesa code).
+    if (parsed.mpesa_reference) {
+      const cached = await offlineDb.getAll('payments').catch(() => []);
+      const dup = (cached || []).find((p) => String(p.mpesa_reference || '').toUpperCase() === String(parsed.mpesa_reference).toUpperCase());
+      if (dup) {
+        if (hint) {
+          hint.innerHTML = `M-Pesa Reference <b>${escapeHtml(parsed.mpesa_reference)}</b> is already recorded on this device (${dup.sync === 'synced' ? 'SYNCED' : 'PENDING SYNC'}, ${escapeHtml(dup.tenant_name || '')}, KES ${Number(dup.amount || 0).toLocaleString()}).`;
+          hint.style.color = '#dc2626';
+        }
+        if (approveBtn) approveBtn.disabled = true;
+        return;
+      }
+    }
+    if (hint) hint.style.color = '';
+
+    if (parsed.amount == null) {
+      if (hint) hint.textContent = 'Offline parse: could not detect the amount. Check the message and try again.';
+      return;
+    }
+    if (!matches.length) {
+      if (hint) hint.textContent = 'Offline parse: no tenant match in synced data. Ensure the message has the tenant phone, tenant code, or house paybill number.';
+      return;
+    }
+
+    if (tenantSel) {
+      tenantSel.innerHTML = matches
+        .map((t) => {
+          const houseName = t.linked_house_name || t.property_name || '';
+          const houseNo = t.linked_house_number || t.unit_label || '';
+          const label = `${t.name} (${t.tenant_code}) — ${houseName}${houseNo ? ` ${houseNo}` : ''}`;
+          return `<option value="${escapeHtml(t.tenant_code || t.id || '')}">${escapeHtml(label)}</option>`;
+        })
+        .join('');
+      tenantSel.disabled = false;
+    }
+    if (msgEl) msgEl.value = '📴 Offline — receipt preview will be generated automatically when this payment syncs.';
+    if (copyBtn) copyBtn.disabled = true;
+    if (approveBtn) approveBtn.disabled = false;
+    if (hint) hint.textContent = `Offline parse OK (last synced data) — ${matches.length > 1 ? 'multiple matches, select the correct tenant.' : 'tenant matched.'} Receipt: PENDING WHATSAPP SEND.`;
+    lastParsedPayment = { offline: true, parsed, matches };
+  } catch (err) {
+    if (hint) hint.textContent = `Offline parse failed: ${err.message}`;
+  }
+}
+
 async function parsePaymentMessageFlow() {
   const raw = document.getElementById('payment-raw-message')?.value || '';
   const hint = document.getElementById('payment-message-hint');
@@ -3176,6 +4118,7 @@ async function parsePaymentMessageFlow() {
   lastParsedPayment = null;
   if (approveBtn) approveBtn.disabled = true;
   if (copyBtn) copyBtn.disabled = true;
+  document.getElementById('payment-outstanding-box')?.remove();
   if (tenantSel) {
     tenantSel.innerHTML = '';
     tenantSel.disabled = true;
@@ -3191,12 +4134,22 @@ async function parsePaymentMessageFlow() {
 
   try {
     if (hint) hint.textContent = 'Parsing…';
-    const result = await api.parsePaymentMessage(raw);
+    let result;
+    try {
+      result = await api.parsePaymentMessage(raw);
+    } catch (apiErr) {
+      if (!isNetworkError(apiErr)) throw apiErr;
+      if (hint) hint.textContent = 'No internet — parsing offline…';
+      return parsePaymentMessageOfflineFlow({ raw, hint, tenantSel, amountEl, refEl, msgEl, copyBtn, approveBtn });
+    }
     lastParsedPayment = result;
 
     if (amountEl) amountEl.value = result.parsed?.amount ?? '';
     if (refEl) refEl.value = result.parsed?.mpesa_reference ?? '';
     if (msgEl) msgEl.value = result.generated_message || '';
+
+    // Show outstanding Invoice Center rows auto-retrieved for this tenant.
+    renderParsedOutstandingInvoices(result.outstanding_invoices || []);
 
     if (result.duplicate) {
       const d = result.duplicate;
@@ -3235,6 +4188,111 @@ async function parsePaymentMessageFlow() {
   }
 }
 
+// Outstanding Invoice Center rows retrieved for the parsed tenant.
+// Display-only: approval applies them automatically, no re-entry needed.
+function renderParsedOutstandingInvoices(invoices) {
+  const hint = document.getElementById('payment-message-hint');
+  if (!hint) return;
+  let box = document.getElementById('payment-outstanding-box');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'payment-outstanding-box';
+    hint.after(box);
+  }
+  if (!invoices.length) {
+    box.innerHTML = '';
+    return;
+  }
+  const total = invoices.reduce((s, r) => s + Number(r.balance_due ?? r.amount ?? 0), 0);
+  box.innerHTML = `<div class="mt-2 rounded border border-slate-700 bg-slate-900 p-2 text-xs font-mono">
+    <div class="text-slate-400 mb-1">Outstanding invoices auto-retrieved (${invoices.length}) — total due ${formatKes(total)}:</div>
+    ${invoices.map((r) => `<div class="flex justify-between gap-2 py-0.5">
+      <span class="text-slate-300">${escapeHtml(r.invoice_type || '')} · ${escapeHtml(r.invoice_number || '')}</span>
+      <span class="text-amber-400">${formatKes(r.balance_due ?? r.amount)}</span>
+    </div>`).join('')}
+    <div class="text-slate-500 mt-1">They will be settled automatically on approve — no need to re-enter them.</div>
+  </div>`;
+}
+
+/**
+ * Offline APPROVE & SEND — saves the payment locally as PENDING SYNC with a
+ * device UUID (`client_txn_id`). The receipt is marked PENDING WHATSAPP SEND.
+ * On reconnect the sync engine uploads it; the server then runs the normal
+ * allocation + WhatsApp workflow. Nothing about that workflow changes.
+ */
+async function approvePaymentOfflineFlow({ raw, tenantId, hint, approveBtn }) {
+  try {
+    if (approveBtn) approveBtn.disabled = true;
+    if (hint) hint.textContent = 'Saving offline…';
+    let parsed = (lastParsedPayment && lastParsedPayment.parsed) || null;
+    let matches = (lastParsedPayment && lastParsedPayment.matches) || [];
+    if (!parsed) {
+      parsed = parseMpesaOffline(raw);
+      const tenants = await offlineDb.getAll('tenants').catch(() => []);
+      matches = matchTenantsOffline(parsed, tenants);
+    }
+    if (parsed.amount == null) {
+      if (hint) hint.textContent = 'Could not detect the amount — cannot save offline.';
+      return;
+    }
+    const tenant = matches.find((t) => String(t.tenant_code || t.id || '') === String(tenantId)) || matches[0] || null;
+    if (!tenant) {
+      if (hint) hint.textContent = 'Select a tenant first (offline lookup found no match).';
+      return;
+    }
+    // Local duplicate guard: same M-Pesa code already on this device.
+    if (parsed.mpesa_reference) {
+      const cached = await offlineDb.getAll('payments').catch(() => []);
+      const dup = (cached || []).find((p) => String(p.mpesa_reference || '').toUpperCase() === String(parsed.mpesa_reference).toUpperCase());
+      if (dup) {
+        if (hint) {
+          hint.style.color = '#dc2626';
+          hint.textContent = `M-Pesa Reference ${parsed.mpesa_reference} is already saved on this device (${dup.sync === 'synced' ? 'SYNCED' : 'PENDING SYNC'}). Not saved twice.`;
+        }
+        return;
+      }
+    }
+    const clientTxnId = offlineDb.newClientTxnId();
+    const today = new Date().toISOString().slice(0, 10);
+    const payload = {
+      raw_message: raw,
+      tenant_id: tenant.tenant_code,
+      payment_date: parsed.payment_date || today,
+      tenant_code: tenant.tenant_code,
+      tenant_name: tenant.name || '',
+      amount: parsed.amount,
+      mpesa_reference: parsed.mpesa_reference || null,
+      payment_mode: 'M-Pesa',
+      sender_account: parsed.phone_number || null,
+    };
+    await queueOutboxOp({ type: 'payment_mpesa', payload });
+    await offlineDb.put('payments', {
+      key: `pending:${clientTxnId}`,
+      client_txn_id: clientTxnId,
+      server_id: null,
+      tenant_code: tenant.tenant_code,
+      tenant_name: tenant.name || '',
+      amount: Number(parsed.amount),
+      mpesa_reference: parsed.mpesa_reference || null,
+      payment_date: parsed.payment_date || today,
+      mode: 'M-Pesa',
+      sync: 'pending',
+      receipt: 'pending',
+      created_at: new Date().toISOString(),
+    });
+    if (hint) {
+      hint.style.color = '';
+      hint.textContent = '🟠 Saved offline — PENDING SYNC. Receipt: PENDING WHATSAPP SEND. Will upload + send automatically when internet returns.';
+    }
+    showToast('Payment saved offline (PENDING SYNC)');
+    try { await loadPayments(); } catch (_) {}
+  } catch (err) {
+    if (hint) hint.textContent = `Offline save failed: ${err.message}`;
+  } finally {
+    if (approveBtn) approveBtn.disabled = false;
+  }
+}
+
 async function approvePaymentFromMessageFlow() {
   const raw = document.getElementById('payment-raw-message')?.value || '';
   const tenantId = document.getElementById('payment-message-tenant-select')?.value;
@@ -3242,6 +4300,10 @@ async function approvePaymentFromMessageFlow() {
   const approveBtn = document.getElementById('btn-approve-from-message');
   if (!raw.trim()) return alert('Paste the M-Pesa message first.');
   if (!tenantId) return alert('Select a tenant first.');
+
+  if (effectiveOffline()) {
+    return approvePaymentOfflineFlow({ raw, tenantId, hint, approveBtn });
+  }
 
   if (!confirm('Approve this payment now? This will update the tenant due date and send WhatsApp confirmation (if configured).')) return;
 
@@ -3272,8 +4334,13 @@ async function approvePaymentFromMessageFlow() {
   } catch (err) {
     const detail = err.data?.message || err.message;
     if (hint) {
-      hint.textContent = `Approve failed: ${detail}`;
-      hint.style.color = err.status === 409 ? '#dc2626' : '';
+      if (isNetworkError(err)) {
+        hint.style.color = '#b45309';
+        hint.textContent = 'Connection lost during approval. The payment may already be saved on the server — check Payment History after reconnect. If it is missing, paste + approve again: duplicate M-Pesa codes are rejected automatically, so it cannot post twice.';
+      } else {
+        hint.textContent = `Approve failed: ${detail}`;
+        hint.style.color = err.status === 409 ? '#dc2626' : '';
+      }
     }
     if (approveBtn) approveBtn.disabled = false;
   }
@@ -3328,7 +4395,54 @@ document.getElementById('payment-mode-select')?.addEventListener('change', async
   }
 });
 
-// Cash / Pesa Link approve
+// Cash / Pesa Link approve — offline variant queues to the outbox (PENDING SYNC).
+async function approveCashOfflineFlow({ payment_mode, amount, date, time, tenantRef, hint }) {
+  try {
+    if (hint) hint.textContent = 'Saving offline…';
+    const tenants = await offlineDb.getAll('tenants').catch(() => []);
+    const tenant = (tenants || []).find((t) => String(t.tenant_code || t.id || '').toUpperCase() === String(tenantRef || '').toUpperCase()) || null;
+    if (!tenant) {
+      if (hint) hint.textContent = 'Tenant not found in synced data — connect once to download tenants, or check the code.';
+      return;
+    }
+    const clientTxnId = offlineDb.newClientTxnId();
+    const today = new Date().toISOString().slice(0, 10);
+    const payload = {
+      payment_mode,
+      amount: Number(amount),
+      payment_date: date || today,
+      payment_time: time || null,
+      tenant_id: tenant.tenant_code,
+      tenant_code: tenant.tenant_code,
+      tenant_name: tenant.name || '',
+      mpesa_reference: null,
+    };
+    await queueOutboxOp({ type: 'payment_cash', payload });
+    await offlineDb.put('payments', {
+      key: `pending:${clientTxnId}`,
+      client_txn_id: clientTxnId,
+      server_id: null,
+      tenant_code: tenant.tenant_code,
+      tenant_name: tenant.name || '',
+      amount: Number(amount),
+      mpesa_reference: null,
+      payment_date: date || today,
+      mode: payment_mode,
+      sync: 'pending',
+      receipt: 'pending',
+      created_at: new Date().toISOString(),
+    });
+    if (hint) {
+      hint.style.color = '';
+      hint.textContent = '🟠 Saved offline — PENDING SYNC. Receipt: PENDING WHATSAPP SEND. Will upload + send automatically when internet returns.';
+    }
+    showToast(`${payment_mode} payment saved offline (PENDING SYNC)`);
+    try { await loadPayments(); } catch (_) {}
+  } catch (err) {
+    if (hint) hint.textContent = `Offline save failed: ${err.message}`;
+  }
+}
+
 document.getElementById('btn-parse-payment-message')?.addEventListener('click', async () => {
   const mode = document.getElementById('payment-mode-select')?.value || 'mpesa';
   if (mode === 'mpesa') return parsePaymentMessageFlow();
@@ -3346,6 +4460,9 @@ document.getElementById('btn-parse-payment-message')?.addEventListener('click', 
     const time = document.getElementById('payment-cash-time')?.value;
     if (!amount || Number(amount) <= 0) { if (hint) hint.textContent = 'Enter a valid amount.'; return; }
     if (!tenantSel?.value) { if (hint) hint.textContent = 'Select a tenant first.'; return; }
+    if (effectiveOffline()) {
+      return approveCashOfflineFlow({ payment_mode: 'Cash', amount, date, time, tenantRef: tenantSel.value, hint });
+    }
     if (!confirm(`Approve KES ${Number(amount).toLocaleString()} cash payment?`)) return;
     try {
       if (hint) hint.textContent = 'Approving…';
@@ -3364,6 +4481,9 @@ document.getElementById('btn-parse-payment-message')?.addEventListener('click', 
     const tenantCode = document.getElementById('payment-pesalink-tenant')?.value;
     if (!amount || Number(amount) <= 0) { if (hint) hint.textContent = 'Enter a valid amount.'; return; }
     if (!tenantCode?.trim()) { if (hint) hint.textContent = 'Enter tenant code / house number.'; return; }
+    if (effectiveOffline()) {
+      return approveCashOfflineFlow({ payment_mode: 'Pesa Link', amount, date, time, tenantRef: tenantCode.trim(), hint });
+    }
     if (!confirm(`Approve KES ${Number(amount).toLocaleString()} Pesa Link payment?`)) return;
     try {
       if (hint) hint.textContent = 'Approving…';
@@ -3431,7 +4551,7 @@ function renderStaffAdvanceList(records) {
   const tbody = document.getElementById('sa-list-tbody');
   if (!tbody) return;
   if (!records.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">No staff advances recorded</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-slate-500 py-6">No staff advances recorded</td></tr>';
     return;
   }
   tbody.innerHTML = records.map(r => {
@@ -3449,6 +4569,7 @@ function renderStaffAdvanceList(records) {
     buttons.push(`<button onclick="deleteStaffAdvance(${r.id})" class="text-rose-400 hover:text-rose-300 text-xs" title="Delete">Delete</button>`);
     return `<tr>
       <td>${r.employee_name || ''}</td>
+      <td>${r.person_type || 'Employee'}</td>
       <td>${r.date_advanced ? new Date(r.date_advanced).toLocaleDateString() : ''}</td>
       <td>${r.reason || ''}</td>
       <td>${r.property_name || ''}${r.unit_code ? ' / ' + r.unit_code : ''}</td>
@@ -3489,7 +4610,18 @@ function showSaForm(record) {
   const wrap = document.getElementById('sa-form-wrap');
   if (!wrap) return;
   wrap.classList.remove('hidden');
+
+  const propSel = document.getElementById('sa-property');
+  if (propSel && propSel.options.length <= 1) {
+    api.houses().then(({ houses }) => {
+      propSel.innerHTML = '<option value="">Select property</option>' +
+        houses.map(h => `<option value="${escapeHtml(h.house_name)}">${escapeHtml(h.house_name)}</option>`).join('');
+      if (record && record.property_name) propSel.value = record.property_name;
+    }).catch(() => {});
+  }
+
   document.getElementById('sa-form-id').value = record ? record.id : '';
+  document.getElementById('sa-person-type').value = record ? record.person_type || 'Employee' : 'Employee';
   document.getElementById('sa-employee').value = record ? record.employee_name : '';
   document.getElementById('sa-date').value = record ? (record.date_advanced || '').slice(0, 10) : new Date().toISOString().slice(0, 10);
   document.getElementById('sa-amount').value = record ? record.amount : '';
@@ -3499,7 +4631,21 @@ function showSaForm(record) {
   document.getElementById('sa-status').value = record ? record.status || 'Pending' : 'Pending';
   document.getElementById('sa-notes').value = record ? record.notes || '' : '';
   document.getElementById('sa-form-result').textContent = '';
-  document.getElementById('sa-property').value = record ? record.property_name || '' : '';
+  if (record && record.property_name) {
+    const propSel = document.getElementById('sa-property');
+    if (propSel) {
+      propSel.value = record.property_name;
+      if (!propSel.value) {
+        const opt = document.createElement('option');
+        opt.value = record.property_name;
+        opt.textContent = record.property_name;
+        propSel.appendChild(opt);
+        propSel.value = record.property_name;
+      }
+    }
+  } else {
+    document.getElementById('sa-property').value = '';
+  }
   document.getElementById('sa-unit').value = record ? record.unit_code || '' : '';
 }
 
@@ -3512,6 +4658,7 @@ async function saveStaffAdvance(e) {
   const id = document.getElementById('sa-form-id').value;
   const data = {
     employee_name: document.getElementById('sa-employee').value.trim(),
+    person_type: document.getElementById('sa-person-type').value,
     date_advanced: document.getElementById('sa-date').value,
     amount: document.getElementById('sa-amount').value,
     reason: document.getElementById('sa-reason').value.trim(),
@@ -4155,6 +5302,29 @@ window.downloadEmployeeRentPdf = downloadEmployeeRentPdf;
 document.getElementById('payments-tbody')?.addEventListener('click', async (e) => {
   const approveId = e.target.dataset.approvePayment;
   const deleteId = e.target.dataset.deletePayment;
+  const viewReceiptId = e.target.dataset.viewReceipt;
+  const downloadReceiptId = e.target.dataset.downloadReceipt;
+
+  if (viewReceiptId) {
+    try {
+      const { document } = await api.paymentReceipt(viewReceiptId);
+      if (!document) throw new Error('No receipt available for this payment');
+      await openDocumentViewModal(document);
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
+  if (downloadReceiptId) {
+    try {
+      const { document } = await api.paymentReceipt(downloadReceiptId);
+      if (!document) throw new Error('No receipt available for this payment');
+      await downloadDocumentFile(document);
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
 
   if (approveId) {
     if (!confirm('Approve this payment and notify tenant on WhatsApp?')) return;
@@ -4187,15 +5357,19 @@ document.getElementById('payments-tbody')?.addEventListener('click', async (e) =
           document.body.appendChild(banner);
         }, 100);
       } else {
-        alert(`Approved. WhatsApp: ${waStatus}`);
+        const pdfStatus = result.pdf ? ` PDF receipt: ${result.pdf.status}.` : '';
+        alert(`Approved. WhatsApp: ${waStatus}.${pdfStatus}`);
       }
     } catch (err) {
       alert(err.message);
     }
   } else if (deleteId) {
-    if (!confirm('Are you sure you want to delete this payment record?')) return;
+    // Permanently deleting a financial record requires a live connection (§14).
+    if (!requireOnline('deleteFinancial', effectiveOffline, showToast)) return;
+    if (!confirm('Are you sure you want to delete this payment record? All of its allocations (rent, deposit, garbage, water, charges, balances) will be rolled back.')) return;
     try {
-      await api.deletePayment(deleteId);
+      const result = await api.deletePayment(deleteId);
+      showDeleteWarnings(result);
       loadPayments();
       loadDashboard();
     } catch (err) {
@@ -4205,11 +5379,26 @@ document.getElementById('payments-tbody')?.addEventListener('click', async (e) =
 });
 
 document.getElementById('td-payments-tbody')?.addEventListener('click', async (e) => {
+  const viewId = e.target.dataset.tdViewReceipt;
+  const downloadId = e.target.dataset.tdDownloadReceipt;
+  if (viewId || downloadId) {
+    try {
+      const { document } = await api.paymentReceipt(viewId || downloadId);
+      if (!document) throw new Error('No receipt available for this payment');
+      if (viewId) await openDocumentViewModal(document);
+      else await downloadDocumentFile(document);
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
   const deleteId = e.target.dataset.tdDeletePayment;
   if (!deleteId) return;
-  if (!confirm('Are you sure you want to delete this payment record?')) return;
+  if (!requireOnline('deleteFinancial', effectiveOffline, showToast)) return;
+  if (!confirm('Are you sure you want to delete this payment record? All of its allocations (rent, deposit, garbage, water, charges, balances) will be rolled back.')) return;
   try {
-    await api.deletePayment(deleteId);
+    const result = await api.deletePayment(deleteId);
+    showDeleteWarnings(result);
     const hash = window.location.hash || '';
     const match = hash.match(/^#tenant\/(.+)/);
     if (match) loadTenantDashboard(match[1]);
@@ -4218,10 +5407,116 @@ document.getElementById('td-payments-tbody')?.addEventListener('click', async (e
   }
 });
 
+// Surfaces partial-rollback notes returned by payment deletion.
+function showDeleteWarnings(result) {
+  if (!result) return;
+  const warnings = result.warnings || [];
+  if (result.fallback) {
+    warnings.unshift('This payment predates allocation tracking, so balances were rebuilt from remaining payments — verify the account.');
+  }
+  if (warnings.length) {
+    showToast('Payment deleted with notes — see alert.', 'error');
+    alert('Payment deleted and allocations rolled back.\n\nPlease verify:\n- ' + warnings.join('\n- '));
+  } else {
+    showToast('Payment deleted — all allocations rolled back.');
+  }
+}
+
+// ─── Signed tenancy agreement upload / preview / delete ────────────────────
+
+document.getElementById('btn-td-agreement-upload')?.addEventListener('click', () => {
+  if (!activeTenantCode) return showToast('Open a tenant first.', 'error');
+  document.getElementById('td-agreement-file')?.click();
+});
+
+document.getElementById('btn-td-scan-doc')?.addEventListener('click', () => {
+  if (!activeTenantCode) return showToast('Open a tenant first.', 'error');
+  // capture="environment" opens the rear camera directly on mobile;
+  // desktop browsers fall back to the file picker (same pipeline).
+  document.getElementById('td-agreement-scan')?.click();
+});
+
+async function handleAgreementFiles(fileList) {
+  const code = activeTenantCode;
+  if (!code) return;
+  const btn = document.getElementById('btn-td-agreement-upload');
+  const scanBtn = document.getElementById('btn-td-scan-doc');
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = 'Compressing…'; }
+    if (scanBtn) scanBtn.disabled = true;
+    const { blob, filename, approxKB } = await prepareAgreementFiles(fileList, code);
+    if (btn) btn.textContent = `Uploading (${approxKB} KB)…`;
+    await api.uploadAgreement(code, blob, filename);
+    showToast(`Agreement saved (${approxKB} KB).`);
+    loadTenantDashboard(code);
+  } catch (err) {
+    showToast('Upload failed: ' + (err.message || err), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Upload Signed Copy'; }
+    if (scanBtn) scanBtn.disabled = false;
+  }
+}
+
+document.getElementById('td-agreement-file')?.addEventListener('change', async (e) => {
+  const input = e.target;
+  if (!input.files || !input.files.length) { input.value = ''; return; }
+  await handleAgreementFiles(input.files);
+  input.value = '';
+});
+
+document.getElementById('td-agreement-scan')?.addEventListener('change', async (e) => {
+  const input = e.target;
+  if (!input.files || !input.files.length) { input.value = ''; return; }
+  showToast(`Compressing ${input.files.length} scanned page(s)…`);
+  await handleAgreementFiles(input.files);
+  input.value = '';
+});
+
+document.getElementById('td-agreements-tbody')?.addEventListener('click', async (e) => {
+  const prevBtn = e.target.closest('[data-ag-preview]');
+  const delBtn = e.target.closest('[data-ag-delete]');
+  const code = activeTenantCode;
+  if (!code) return;
+  if (prevBtn) {
+    try {
+      prevBtn.disabled = true;
+      const { url } = await api.previewAgreement(code, prevBtn.dataset.agPreview);
+      const frame = document.getElementById('td-agreement-frame');
+      if (frame) frame.src = url;
+      // Links expire in ~2 minutes — note it so a stale tab isn't confusing.
+      const note = document.getElementById('td-agreement-preview-note');
+      if (note) note.textContent = 'Preview link expires shortly; reopen Preview if it stops loading.';
+      document.getElementById('td-agreement-modal')?.classList.remove('hidden');
+    } catch (err) {
+      showToast('Preview failed: ' + (err.message || err), 'error');
+    } finally {
+      prevBtn.disabled = false;
+    }
+  } else if (delBtn) {
+    if (!confirm('Delete this signed agreement? The file will be permanently removed from storage.')) return;
+    try {
+      delBtn.disabled = true;
+      await api.deleteAgreement(code, delBtn.dataset.agDelete);
+      showToast('Agreement deleted.');
+      loadTenantDashboard(code);
+    } catch (err) {
+      showToast('Delete failed: ' + (err.message || err), 'error');
+      delBtn.disabled = false;
+    }
+  }
+});
+
+document.getElementById('btn-td-agreement-close')?.addEventListener('click', () => {
+  const frame = document.getElementById('td-agreement-frame');
+  if (frame) frame.removeAttribute('src');
+  document.getElementById('td-agreement-modal')?.classList.add('hidden');
+});
+
 document.getElementById('wa-beacon-slot')?.addEventListener('click', (e) => {
   if (e.target.id === 'btn-wa-reset') handleWhatsappReset();
 });
 
+bootOffline();
 initSession();
 window.removeInvoiceItem = removeInvoiceItem;
 
@@ -4879,10 +6174,117 @@ function renderMntDynamicFields(category) {
     const opts = MNT_STATUS_OPTIONS[category] || MNT_STATUS_OPTIONS.other;
     statusSel.innerHTML = opts.map(s => `<option value="${s}"${s === 'Pending' ? ' selected' : ''}>${s}</option>`).join('');
   }
+
+  // Toggle plot expenses section for staff_reimbursement
+  const plotSection = document.getElementById('mnt-plot-expenses-section');
+  const amountRow = document.getElementById('mnt-amount-row');
+  if (plotSection) {
+    if (category === 'staff_reimbursement') {
+      plotSection.classList.remove('hidden');
+      if (amountRow) amountRow.classList.add('hidden');
+      if (!document.getElementById('mnt-plot-expenses-list')?.children.length) addPlotExpenseRow();
+    } else {
+      plotSection.classList.add('hidden');
+      if (amountRow) amountRow.classList.remove('hidden');
+    }
+  }
+}
+
+// Multi-plot expense row management
+let mntPlotExpenseHousesCache = [];
+
+function addPlotExpenseRow(plotName = '', amount = '', description = '') {
+  const list = document.getElementById('mnt-plot-expenses-list');
+  if (!list) return;
+  const row = document.createElement('div');
+  row.className = 'grid grid-cols-1 md:grid-cols-12 gap-2 items-end plot-expense-row';
+  const options = (mntPlotExpenseHousesCache || []).map(h =>
+    `<option value="${h.paybill_number}" ${h.paybill_number === plotName || h.house_name === plotName ? 'selected' : ''}>${escapeHtml(h.house_name)} (${h.paybill_number})</option>`
+  ).join('');
+  row.innerHTML = `
+    <div class="md:col-span-4">
+      <label class="form-label text-xs">Plot / Property</label>
+      <select class="cyber-input plot-name" required>
+        <option value="">Select Plot</option>${options}</select>
+    </div>
+    <div class="md:col-span-2">
+      <label class="form-label text-xs">Amount (KES)</label>
+      <input type="number" class="cyber-input plot-amount" min="0" step="0.01" placeholder="0" value="${amount}" required />
+    </div>
+    <div class="md:col-span-5">
+      <label class="form-label text-xs">Description</label>
+      <input type="text" class="cyber-input plot-desc" placeholder="e.g. Plumbing repairs" value="${escapeHtml(description)}" />
+    </div>
+    <div class="md:col-span-1 flex justify-center">
+      <button type="button" class="text-rose-400 hover:text-rose-300 text-sm remove-plot-row" title="Remove">✕</button>
+    </div>
+  `;
+  row.querySelector('.remove-plot-row')?.addEventListener('click', () => { row.remove(); updatePlotTotal(); });
+  row.querySelectorAll('.plot-amount').forEach(el => el.addEventListener('input', updatePlotTotal));
+  list.appendChild(row);
+  updatePlotTotal();
+}
+
+function updatePlotTotal() {
+  let total = 0;
+  document.querySelectorAll('#mnt-plot-expenses-list .plot-amount').forEach(el => {
+    total += Number(el.value || 0);
+  });
+  const el = document.getElementById('mnt-plot-total');
+  if (el) el.textContent = `KES ${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+}
+
+function collectPlotExpenseItems() {
+  const category = document.getElementById('mnt-category')?.value || 'other';
+  if (category !== 'staff_reimbursement') return null;
+  const rows = document.querySelectorAll('#mnt-plot-expenses-list .plot-expense-row');
+  if (!rows.length) return null;
+  const dynamicData = {};
+  const fields = MNT_CATEGORY_FIELDS[category] || MNT_CATEGORY_FIELDS.other;
+  fields.forEach(f => {
+    const el = document.getElementById(f.id);
+    if (el) dynamicData[f.id] = el.value.trim();
+  });
+  const items = [];
+  rows.forEach(row => {
+    const plotSelect = row.querySelector('.plot-name');
+    const plotValue = plotSelect?.value || '';
+    const plotLabel = plotSelect?.options[plotSelect.selectedIndex]?.text || plotValue;
+    const amt = Number(row.querySelector('.plot-amount')?.value || 0);
+    const desc = row.querySelector('.plot-desc')?.value?.trim() || '';
+    items.push({
+      unit_code: plotLabel || plotValue,
+      problem: desc || dynamicData['mnt-purpose'] || 'Staff reimbursement',
+      work_required: category,
+      work_done: dynamicData['mnt-person'] || '',
+      materials: JSON.stringify({ ...dynamicData, plot_paybill: plotValue, plot_name: plotLabel, plot_description: desc }),
+      priority: 'Medium',
+      status: document.getElementById('mnt-status')?.value || 'Pending',
+      labour_cost: amt,
+      material_cost: 0,
+    });
+  });
+  return items;
+}
+
+function loadPlotExpenseItems(items) {
+  const list = document.getElementById('mnt-plot-expenses-list');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!items || !items.length) { addPlotExpenseRow(); return; }
+  items.forEach(it => {
+    const mat = it.materials ? (typeof it.materials === 'string' ? JSON.parse(it.materials || '{}') : it.materials) : {};
+    addPlotExpenseRow(mat.plot_paybill || it.unit_code || '', it.labour_cost || '', mat.plot_description || it.problem || '');
+  });
 }
 
 function collectMntItems() {
   const category = document.getElementById('mnt-category')?.value || 'other';
+  // For staff_reimbursement, use plot expense rows
+  if (category === 'staff_reimbursement') {
+    const plotItems = collectPlotExpenseItems();
+    if (plotItems && plotItems.length) return plotItems;
+  }
   const dynamicData = {};
   const fields = MNT_CATEGORY_FIELDS[category] || MNT_CATEGORY_FIELDS.other;
   fields.forEach(f => {
@@ -4915,6 +6317,18 @@ function collectMntItems() {
   return [item];
 }
 
+function collectMntAmount() {
+  const category = document.getElementById('mnt-category')?.value || 'other';
+  if (category === 'staff_reimbursement') {
+    let total = 0;
+    document.querySelectorAll('#mnt-plot-expenses-list .plot-amount').forEach(el => {
+      total += Number(el.value || 0);
+    });
+    return total;
+  }
+  return Number(document.getElementById('mnt-amount')?.value || 0);
+}
+
 function resetMntForm() {
   const form = document.getElementById('maintenance-invoice-form');
   if (form) form.reset();
@@ -4926,6 +6340,13 @@ function resetMntForm() {
   document.getElementById('mnt-status').value = 'Pending';
   renderMntDynamicFields('petty_cash');
   document.getElementById('mnt-form-result').textContent = '';
+  // Clear plot expense rows
+  const plotList = document.getElementById('mnt-plot-expenses-list');
+  if (plotList) plotList.innerHTML = '';
+  const plotSection = document.getElementById('mnt-plot-expenses-section');
+  if (plotSection) plotSection.classList.add('hidden');
+  const amountRow = document.getElementById('mnt-amount-row');
+  if (amountRow) amountRow.classList.remove('hidden');
 }
 
 async function saveMaintenanceInvoice(e) {
@@ -4937,7 +6358,7 @@ async function saveMaintenanceInvoice(e) {
   const issueNos = document.getElementById('mnt-source-issue-nos').value;
   const category = document.getElementById('mnt-category')?.value || 'other';
   const items = collectMntItems();
-  const amount = Number(document.getElementById('mnt-amount')?.value || 0);
+  const amount = collectMntAmount();
   if (amount <= 0) {
     resEl.textContent = 'Enter an amount greater than 0.';
     resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
@@ -4965,6 +6386,40 @@ async function saveMaintenanceInvoice(e) {
 
   resEl.textContent = 'Saving...';
   resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
+  // Offline creates (contractor invoices, repair costs, materials) queue to
+  // the outbox. Updates to synced records stay online-only (§13).
+  if (!id && effectiveOffline()) {
+    try {
+      const clientTxnId = offlineDb.newClientTxnId();
+      await queueOutboxOp({ type: 'maintenance_create', payload: { ...payload, client_txn_id: clientTxnId } });
+      await offlineDb.put('maintenance', {
+        key: `pending:${clientTxnId}`,
+        client_txn_id: clientTxnId,
+        server_id: null,
+        mnt_number: '(pending)',
+        property_name: payload.property_name || '',
+        grand_total: Number(amount || 0),
+        status: payload.status || 'Pending',
+        sync: 'pending',
+        created_at: new Date().toISOString(),
+      });
+      resEl.textContent = '🟠 Expense saved offline — PENDING SYNC. Will upload when internet returns.';
+      resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
+      showToast('Expense saved offline (PENDING SYNC)');
+      document.getElementById('maintenance-invoice-form-wrap').classList.add('hidden');
+      resetMntForm();
+      try { await loadMaintenanceInvoices(); } catch (_) {}
+    } catch (err) {
+      resEl.textContent = 'Offline save failed: ' + err.message;
+      resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    }
+    return;
+  }
+  if (id && effectiveOffline()) {
+    resEl.textContent = 'Editing a synced expense requires internet (conflict protection).';
+    resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    return;
+  }
   try {
     let invoice;
     if (id) {
@@ -5014,7 +6469,15 @@ async function editMaintenanceInvoice(id) {
       const el = document.getElementById(key);
       if (el) el.value = dynamicData[key];
     });
-    set('mnt-amount', item.labour_cost || invoice.grand_total);
+
+    // For staff_reimbursement with multi-plot items, load all items into plot rows
+    if (category === 'staff_reimbursement' && Array.isArray(invoice.items) && invoice.items.length > 1) {
+      loadPlotExpenseItems(invoice.items);
+      const total = invoice.items.reduce((s, it) => s + (Number(it.labour_cost) || 0), 0);
+      set('mnt-amount', total);
+    } else {
+      set('mnt-amount', item.labour_cost || invoice.grand_total);
+    }
 
     const notes = (invoice.notes || '').replace(/^WO Source: \S+\s*/, '').trim();
     set('mnt-notes', notes);
@@ -5045,13 +6508,30 @@ async function deleteMaintenanceInvoice(id) {
 async function loadMaintenanceInvoices() {
   const tbody = document.getElementById('mnt-list-tbody');
   if (!tbody) return;
+  const cachedPending = await offlineDb
+    .getAll('maintenance')
+    .then((all) => (all || []).filter((r) => r && (r.sync === 'pending' || r.sync === 'failed')))
+    .catch(() => []);
+  const pendingRows = cachedPending.map((r) =>
+    '<tr style="opacity:.92">' +
+    '<td class="font-mono">' + escapeHtml(r.mnt_number || '(pending)') + '</td>' +
+    '<td>' + escapeHtml((r.created_at || '').slice(0, 10)) + '</td>' +
+    '<td colspan="2">' + escapeHtml(r.property_name || '—') + '</td>' +
+    '<td><span class="text-slate-400">Offline</span></td>' +
+    '<td>' + escapeHtml(r.property_name || '—') + '</td>' +
+    '<td class="text-right font-mono">' + money(r.grand_total) + '</td>' +
+    '<td class="text-right font-mono text-green-400">—</td>' +
+    '<td class="text-right font-mono text-rose-400">' + money(r.grand_total) + '</td>' +
+    '<td>' + offlineSyncBadge(r.sync) + '</td>' +
+    '<td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td></tr>'
+  ).join('');
   try {
     const { invoices } = await api.listMaintenanceInvoices();
-    if (!invoices.length) {
+    if (!invoices.length && !cachedPending.length) {
       tbody.innerHTML = '<tr><td colspan="11" class="text-center text-slate-500 py-6">No management expenses recorded yet.</td></tr>';
       return;
     }
-    tbody.innerHTML = invoices.map(inv => {
+    tbody.innerHTML = pendingRows + invoices.map(inv => {
       const item = Array.isArray(inv.items) && inv.items.length ? inv.items[0] : {};
       const catKey = item.work_required || 'other';
       const category = MNT_CATEGORY_LABELS[catKey] || catKey;
@@ -5069,19 +6549,42 @@ async function loadMaintenanceInvoices() {
         '<td>' + escapeHtml(category) + '</td>' +
         '<td>' + escapeHtml(description) + '</td>' +
         '<td><span class="' + (isWoSource ? 'text-emerald-400' : 'text-slate-400') + '">' + sourceLabel + '</span>' + (sourceDetail ? ' <span class="text-slate-500 text-xs">' + escapeHtml(sourceDetail) + '</span>' : '') + '</td>' +
-        '<td>' + escapeHtml(inv.property_name || inv.unit_codes || '—') + '</td>' +
+        '<td>' + escapeHtml(inv.property_name || inv.unit_codes || 'All Properties') + '</td>' +
         '<td class="text-right font-mono">' + money(amount) + '</td>' +
         '<td class="text-right font-mono text-green-400">' + (paid > 0 ? money(paid) : '—') + '</td>' +
         '<td class="text-right font-mono ' + (outstanding > 0 ? 'text-rose-400' : 'text-green-400') + '">' + (outstanding > 0 ? money(outstanding) : '—') + '</td>' +
         '<td>' + escapeHtml(inv.status || 'Pending') + '</td>' +
         '<td class="text-right whitespace-nowrap">' +
         '<button type="button" class="action-btn px-2 py-1 text-xs" onclick="editMaintenanceInvoice(' + inv.id + ')">Edit</button> ' +
-        '<button type="button" class="action-btn px-2 py-1 text-xs text-purple-400 border-purple-400" onclick="downloadExpenseInvoice(' + inv.id + ')">Invoice</button> ' +
+        (catKey === 'staff_reimbursement'
+          ? '<button type="button" class="action-btn px-2 py-1 text-xs text-purple-400 border-purple-400" onclick="downloadReimbursementInvoice(' + inv.id + ')">Invoice</button> '
+          : '<button type="button" class="action-btn px-2 py-1 text-xs text-purple-400 border-purple-400" onclick="downloadExpenseInvoice(' + inv.id + ')">Invoice</button> ') +
         '<button type="button" class="action-btn px-2 py-1 text-xs text-rose-400 border-rose-400" onclick="deleteMaintenanceInvoice(' + inv.id + ')">Del</button>' +
         '</td></tr>';
     }).join('');
   } catch (err) {
-    tbody.innerHTML = '<tr><td colspan="11" class="text-center text-rose-400 py-6">Failed to load: ' + escapeHtml(err.message) + '</td></tr>';
+    if (!isNetworkError(err)) {
+      tbody.innerHTML = '<tr><td colspan="11" class="text-center text-rose-400 py-6">Failed to load: ' + escapeHtml(err.message) + '</td></tr>';
+      return;
+    }
+    const cached = await offlineDb.getAll('maintenance').catch(() => []);
+    if (!cached.length) {
+      tbody.innerHTML = '<tr><td colspan="11" class="text-center text-slate-500 py-6">Offline — no synced expenses on this device yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '<tr><td colspan="11" class="text-center text-amber-500 text-xs font-mono py-2">📴 Offline — showing last synced data</td></tr>' + cached.map((r) =>
+      '<tr style="opacity:.92">' +
+      '<td class="font-mono">' + escapeHtml(r.mnt_number || '(pending)') + '</td>' +
+      '<td>' + escapeHtml((r.created_at || r.synced_at || '').slice(0, 10)) + '</td>' +
+      '<td colspan="2">' + escapeHtml(r.property_name || '—') + '</td>' +
+      '<td><span class="text-slate-400">Offline</span></td>' +
+      '<td>' + escapeHtml(r.property_name || '—') + '</td>' +
+      '<td class="text-right font-mono">' + money(r.grand_total) + '</td>' +
+      '<td class="text-right font-mono text-green-400">—</td>' +
+      '<td class="text-right font-mono text-rose-400">' + money(r.grand_total) + '</td>' +
+      '<td>' + offlineSyncBadge(r.sync) + '</td>' +
+      '<td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td></tr>'
+    ).join('');
   }
 }
 
@@ -5667,7 +7170,17 @@ async function generateMgmtExpensesReport() {
 }
 
 function printMgmtExpensesReport() {
+  // Mark the report so @media print hides all app chrome and prints only
+  // this section (landscape A4, repeating table heads, no clipped columns).
+  const section = document.querySelector('[data-view="mgmt-expenses-report"]');
+  const cleanup = () => {
+    section?.classList.remove('print-active');
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  section?.classList.add('print-active');
   window.print();
+  cleanup();
 }
 
 function getReportParams() {
@@ -5752,6 +7265,7 @@ async function downloadExpenseInvoice(invoiceId) {
 async function populatePropertyDropdowns() {
   try {
     const { houses } = await api.houses();
+    mntPlotExpenseHousesCache = houses;
     const propertyNames = [...new Set(houses.map(h => h.house_name).filter(Boolean))].sort();
     ['meh-property', 'mer-property', 'mnt-property'].forEach(id => {
       const sel = document.getElementById(id);
@@ -6182,6 +7696,40 @@ async function saveWorkOrder(e) {
   };
   resEl.textContent = 'Saving...';
   resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
+  // Offline creates queue to the outbox (PENDING SYNC). Updates to existing
+  // server records stay online-only to avoid blind overwrites (§13).
+  if (!id && effectiveOffline()) {
+    try {
+      const clientTxnId = offlineDb.newClientTxnId();
+      const payload = { ...payload, tenant_code: null };
+      await queueOutboxOp({ type: 'wo_create', payload: { ...payload, client_txn_id: clientTxnId } });
+      await offlineDb.put('work_orders', {
+        key: `pending:${clientTxnId}`,
+        client_txn_id: clientTxnId,
+        server_id: null,
+        wo_number: '(pending)',
+        property_name: payload.property_name || '',
+        status: payload.status || 'Pending',
+        sync: 'pending',
+        created_at: new Date().toISOString(),
+      });
+      resEl.textContent = '🟠 Saved offline — PENDING SYNC. Will upload when internet returns.';
+      resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
+      showToast('Work order saved offline (PENDING SYNC)');
+      document.getElementById('work-order-form-wrap').classList.add('hidden');
+      resetWoForm();
+      try { await loadWorkOrders(); } catch (_) {}
+    } catch (err) {
+      resEl.textContent = 'Offline save failed: ' + err.message;
+      resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    }
+    return;
+  }
+  if (id && effectiveOffline()) {
+    resEl.textContent = 'Editing a synced work order requires internet (conflict protection).';
+    resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    return;
+  }
   try {
     if (id) {
       await api.updateWorkOrder(id, payload);
@@ -6304,13 +7852,27 @@ async function runWoGenerate(mode, id, phone_number) {
 async function loadWorkOrders() {
   const tbody = document.getElementById('wo-list-tbody');
   if (!tbody) return;
+  const cachedPending = await offlineDb
+    .getAll('work_orders')
+    .then((all) => (all || []).filter((r) => r && (r.sync === 'pending' || r.sync === 'failed')))
+    .catch(() => []);
+  const pendingRows = cachedPending.map((r) => `
+      <tr style="opacity:.92">
+        <td class="font-mono">${escapeHtml(r.wo_number || '(pending)')}</td>
+        <td>${escapeHtml(r.property_name || '—')}</td>
+        <td>—</td><td>—</td><td>—</td>
+        <td>${offlineSyncBadge(r.sync)}</td>
+        <td class="text-right font-mono">—</td>
+        <td>${escapeHtml((r.created_at || '').slice(0, 10))}</td>
+        <td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td>
+      </tr>`).join('');
   try {
     const { orders } = await api.listWorkOrders();
-    if (!orders.length) {
+    if (!orders.length && !cachedPending.length) {
       tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">No work orders yet. Create one to get started.</td></tr>';
       return;
     }
-    tbody.innerHTML = orders.map(wo => `
+    tbody.innerHTML = pendingRows + orders.map(wo => `
       <tr>
         <td class="font-mono">${escapeHtml(wo.wo_number)}</td>
         <td>${escapeHtml(wo.property_name || '—')}</td>
@@ -6329,9 +7891,426 @@ async function loadWorkOrders() {
       </tr>
     `).join('');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-rose-400 py-6">Failed to load: ${escapeHtml(err.message)}</td></tr>`;
+    if (!isNetworkError(err)) {
+      tbody.innerHTML = `<tr><td colspan="9" class="text-center text-rose-400 py-6">Failed to load: ${escapeHtml(err.message)}</td></tr>`;
+      return;
+    }
+    const cached = await offlineDb.getAll('work_orders').catch(() => []);
+    if (!cached.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">Offline — no synced work orders on this device yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-amber-500 text-xs font-mono py-2">📴 Offline — showing last synced data</td></tr>` + cached.map((r) => `
+      <tr style="opacity:.92">
+        <td class="font-mono">${escapeHtml(r.wo_number || '(pending)')}</td>
+        <td>${escapeHtml(r.property_name || '—')}</td>
+        <td>—</td><td>—</td><td>—</td>
+        <td>${offlineSyncBadge(r.sync)}</td>
+        <td class="text-right font-mono">—</td>
+        <td>${escapeHtml((r.created_at || r.synced_at || '').slice(0, 10))}</td>
+        <td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td>
+      </tr>`).join('');
   }
 }
+
+// ─── Property inspections (offline-capable, Phase 2) ──────────────────────
+
+const INSP_ITEMS = [
+  ['plumbing', 'Plumbing'], ['electrical', 'Electrical'], ['carpentry', 'Carpentry'],
+  ['painting', 'Painting'], ['water', 'Water'], ['doors_locks', 'Doors / Locks'],
+  ['fixtures', 'Fixtures'], ['general', 'General Condition'],
+];
+
+function renderInspChecklist() {
+  const wrap = document.getElementById('insp-checklist');
+  if (!wrap) return;
+  wrap.innerHTML = INSP_ITEMS.map(([key, label]) => `
+    <label class="flex items-center justify-between bg-slate-800/50 rounded px-3 py-2 text-sm">
+      <span class="text-slate-200">${escapeHtml(label)}</span>
+      <select data-insp-item="${key}" class="cyber-input !w-auto !py-1 text-xs">
+        <option value="ok">OK</option>
+        <option value="attention">Needs attention</option>
+        <option value="na">N/A</option>
+      </select>
+    </label>`).join('');
+}
+
+async function openInspectionModal() {
+  const modal = document.getElementById('inspection-modal');
+  if (!modal) return;
+  document.getElementById('insp-client-txn').value = offlineDb.newClientTxnId();
+  document.getElementById('insp-unit').value = '';
+  document.getElementById('insp-notes').value = '';
+  document.getElementById('insp-status').value = 'Draft';
+  document.getElementById('insp-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('insp-photos').value = '';
+  document.getElementById('insp-photo-list').textContent = '';
+  document.getElementById('insp-result').textContent = '';
+  renderInspChecklist();
+  // Properties: live list online, synced snapshot offline.
+  let houses = [];
+  try {
+    const data = await api.houses();
+    houses = data.houses || [];
+  } catch (err) {
+    if (isNetworkError(err)) houses = await offlineDb.getAll('houses').catch(() => []);
+    else throw err;
+  }
+  const propSel = document.getElementById('insp-property');
+  propSel.innerHTML = '<option value="">— Select Property —</option>' + (houses || []).map((h) =>
+    `<option value="${escapeHtml(h.paybill_number || '')}">${escapeHtml(h.house_name || h.paybill_number || '')}</option>`).join('');
+  let tenants = [];
+  try {
+    const data = await api.tenants({});
+    tenants = data.tenants || [];
+  } catch (err) {
+    if (isNetworkError(err)) tenants = await offlineDb.getAll('tenants').catch(() => []);
+  }
+  document.getElementById('insp-tenant').innerHTML = '<option value="">—</option>' + (tenants || []).map((t) =>
+    `<option value="${escapeHtml(t.tenant_code || '')}">${escapeHtml(t.name || '')} (${escapeHtml(t.tenant_code || '')})</option>`).join('');
+  document.getElementById('insp-offline-tag')?.classList.toggle('hidden', !effectiveOffline());
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeInspectionModal() {
+  const modal = document.getElementById('inspection-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function refreshInspPhotoList() {
+  const uuid = document.getElementById('insp-client-txn')?.value;
+  const el = document.getElementById('insp-photo-list');
+  if (!el || !uuid) return;
+  const staged = await stagedMediaFor(uuid).catch(() => []);
+  el.textContent = staged.length ? `${staged.length} photo(s) staged${effectiveOffline() ? ' — will upload on sync' : ''}` : '';
+}
+
+async function saveInspection() {
+  const resEl = document.getElementById('insp-result');
+  const uuid = document.getElementById('insp-client-txn').value || offlineDb.newClientTxnId();
+  const propSel = document.getElementById('insp-property');
+  const paybill = propSel?.value || '';
+  const propName = propSel?.options?.[propSel.selectedIndex]?.textContent?.trim() || '';
+  const checklist = {};
+  document.querySelectorAll('[data-insp-item]').forEach((sel) => { checklist[sel.dataset.inspItem] = sel.value; });
+  const staged = await stagedMediaFor(uuid).catch(() => []);
+  const payload = {
+    client_txn_id: uuid,
+    tenant_code: document.getElementById('insp-tenant')?.value || null,
+    property_name: propName,
+    house_paybill_number: paybill || null,
+    unit_label: document.getElementById('insp-unit')?.value.trim() || null,
+    inspection_date: document.getElementById('insp-date')?.value || new Date().toISOString().slice(0, 10),
+    checklist,
+    photos_count: staged.length,
+    notes: document.getElementById('insp-notes')?.value.trim() || null,
+    status: document.getElementById('insp-status')?.value || 'Draft',
+  };
+  if (!propName) {
+    resEl.textContent = 'Select a property first.';
+    resEl.className = 'text-sm font-mono text-rose-400 text-right mb-2';
+    return;
+  }
+  resEl.textContent = 'Saving...';
+  resEl.className = 'text-sm font-mono text-amber-400 text-right mb-2';
+  try {
+    if (effectiveOffline()) {
+      await queueOutboxOp({ type: 'inspection_create', payload });
+      await offlineDb.put('inspections', {
+        key: `pending:${uuid}`,
+        client_txn_id: uuid,
+        server_id: null,
+        property_name: propName,
+        unit_label: payload.unit_label || '',
+        status: payload.status,
+        sync: 'pending',
+        created_at: new Date().toISOString(),
+      });
+      resEl.textContent = '🟠 Inspection saved offline — PENDING SYNC (photos will upload on sync).';
+      resEl.className = 'text-sm font-mono text-amber-400 text-right mb-2';
+      showToast('Inspection saved offline (PENDING SYNC)');
+      setTimeout(() => { closeInspectionModal(); loadInspections(); }, 1200);
+      return;
+    }
+    const { inspection } = await api.createInspection(payload);
+    // Upload staged photos against the new server record.
+    for (const m of staged) {
+      try {
+        await api.uploadOfflineMedia({
+          client_txn_id: m.client_txn_id,
+          linked_type: 'inspection',
+          linked_client_txn_id: uuid,
+          linked_id: inspection.id,
+          filename: m.filename,
+          mimetype: m.mimetype,
+          data: m.data,
+        });
+        await markMediaSynced(m.key);
+      } catch (_) { /* photo stays staged for the sync engine */ }
+    }
+    resEl.textContent = 'Inspection saved.';
+    resEl.className = 'text-sm font-mono text-green-400 text-right mb-2';
+    setTimeout(() => { closeInspectionModal(); loadInspections(); }, 800);
+  } catch (err) {
+    resEl.textContent = 'Error: ' + err.message;
+    resEl.className = 'text-sm font-mono text-rose-400 text-right mb-2';
+  }
+}
+
+async function loadInspections() {
+  const tbody = document.getElementById('insp-list-tbody');
+  if (!tbody) return;
+  const cachedPending = await offlineDb
+    .getAll('inspections')
+    .then((all) => (all || []).filter((r) => r && (r.sync === 'pending' || r.sync === 'failed')))
+    .catch(() => []);
+  const pendingRows = cachedPending.map((r) => `
+      <tr style="opacity:.92">
+        <td>${escapeHtml(r.property_name || '—')}</td>
+        <td>${escapeHtml(r.unit_label || '—')}</td>
+        <td>${offlineSyncBadge(r.sync)}</td>
+        <td>${escapeHtml((r.created_at || '').slice(0, 10))}</td>
+      </tr>`).join('');
+  try {
+    const { inspections } = await api.listInspections({ limit: 50 });
+    if (!inspections.length && !cachedPending.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center text-slate-500 py-4">No inspections yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = pendingRows + inspections.map((i) => `
+      <tr>
+        <td>${escapeHtml(i.property_name || '—')}</td>
+        <td>${escapeHtml(i.unit_label || '—')}</td>
+        <td>${escapeHtml(i.status || 'Draft')}</td>
+        <td>${escapeHtml((i.inspection_date || i.created_at || '').slice(0, 10))}</td>
+      </tr>`).join('');
+  } catch (err) {
+    if (!isNetworkError(err)) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-rose-400 py-4">${escapeHtml(err.message)}</td></tr>`;
+      return;
+    }
+    const cached = await offlineDb.getAll('inspections').catch(() => []);
+    tbody.innerHTML = (cached.length ? '' : '<tr><td colspan="4" class="text-center text-slate-500 py-4">Offline — no synced inspections yet.</td></tr>')
+      + cached.map((r) => `
+      <tr style="opacity:.92">
+        <td>${escapeHtml(r.property_name || '—')}</td>
+        <td>${escapeHtml(r.unit_label || '—')}</td>
+        <td>${offlineSyncBadge(r.sync)}</td>
+        <td>${escapeHtml((r.created_at || r.synced_at || '').slice(0, 10))}</td>
+      </tr>`).join('');
+  }
+}
+
+document.getElementById('btn-new-inspection')?.addEventListener('click', openInspectionModal);
+document.getElementById('btn-inspection-close')?.addEventListener('click', closeInspectionModal);
+document.getElementById('btn-inspection-cancel')?.addEventListener('click', closeInspectionModal);
+document.getElementById('btn-inspection-save')?.addEventListener('click', saveInspection);
+document.getElementById('insp-photos')?.addEventListener('change', async (e) => {
+  const uuid = document.getElementById('insp-client-txn')?.value;
+  const listEl = document.getElementById('insp-photo-list');
+  if (!uuid) return;
+  const files = [...(e.target.files || [])].slice(0, 5);
+  for (const f of files) {
+    try {
+      await stagePhoto(uuid, 'inspection', f, f.name);
+    } catch (err) {
+      if (listEl) listEl.textContent = 'Photo error: ' + err.message;
+      break;
+    }
+  }
+  e.target.value = '';
+  refreshInspPhotoList();
+});
+
+// ─── Sync conflicts — manager review queue (Phase 3) ──────────────────────
+
+let _conflictsFilter = 'pending';
+
+const CONFLICT_TYPE_LABELS = {
+  payment_mpesa: 'M-Pesa payment',
+  payment_cash: 'Cash payment',
+  wo_create: 'Work order',
+  maintenance_create: 'Expense',
+  water_create: 'Water reading',
+  inspection_create: 'Inspection',
+  notice_send: 'Notice',
+  exit_create: 'Move-out',
+  tenant_occupy: 'Move-in',
+};
+
+async function loadConflicts() {
+  const tbody = document.getElementById('conflicts-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center text-slate-500 py-6">Loading…</td></tr>';
+  try {
+    const { conflicts } = await api.listConflicts(_conflictsFilter === 'resolved' ? 'resolved' : 'pending');
+    if (!conflicts.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-slate-500 py-6">${_conflictsFilter === 'resolved' ? 'No resolved conflicts.' : 'No pending conflicts. Offline uploads are syncing cleanly. 🟢'}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = conflicts.map((c) => {
+      const summary = c.summary || {};
+      const existing = c.existing_ref || null;
+      const who = summary.tenant_name || c.tenant_code || '—';
+      const detail = summary.mpesa_reference || summary.billing_month || summary.name || summary.property_name || c.client_txn_id || '';
+      const existingTxt = existing
+        ? `${existing.tenant_name || ''} ${existing.amount != null ? 'KES ' + Number(existing.amount).toLocaleString() : ''} ${existing.receipt_number ? '(' + existing.receipt_number + ')' : ''}`.trim() || '—'
+        : '—';
+      const statusBadge = c.status === 'resolved'
+        ? `<span class="status-badge badge-active">${escapeHtml(c.resolution || 'resolved')}</span>`
+        : `<span class="status-badge badge-suspended"><span class="status-dot"></span>pending review</span>`;
+      const actions = c.status === 'resolved'
+        ? `<span class="text-xs text-slate-500">by ${escapeHtml(c.resolved_by || '—')}</span>`
+        : `<button type="button" class="action-btn px-2 py-1 text-xs" data-conflict-dismiss="${c.id}">Dismiss</button>
+           <button type="button" class="action-btn px-2 py-1 text-xs text-amber-400 border-amber-400" data-conflict-retry="${c.id}">Retry upload</button>`;
+      return `<tr>
+        <td class="font-mono text-xs">${escapeHtml((c.created_at || '').slice(0, 16).replace('T', ' '))}</td>
+        <td>${escapeHtml(CONFLICT_TYPE_LABELS[c.op_type] || c.op_type || '—')}</td>
+        <td>${escapeHtml(who)} <span class="text-slate-500 font-mono text-xs">${escapeHtml(String(detail))}</span></td>
+        <td class="text-rose-300 text-xs max-w-xs">${escapeHtml(c.reason || '')}</td>
+        <td class="text-xs text-slate-300">${escapeHtml(existingTxt)}</td>
+        <td>${statusBadge}</td>
+        <td class="text-right whitespace-nowrap">${actions}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-rose-400 py-6">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function resolveConflict(id, resolution) {
+  const resEl = document.getElementById('conflicts-result');
+  const verb = resolution === 'dismissed' ? 'dismiss (keep server record)' : 'retry the upload';
+  if (!confirm(`Are you sure you want to ${verb}?\n\nDismiss: the agent's upload is dropped everywhere.\nRetry: the upload goes up again on the agent's next sync.`)) return;
+  try {
+    await api.resolveConflict(id, resolution);
+    if (resEl) {
+      resEl.textContent = resolution === 'dismissed'
+        ? 'Dismissed. The agent\u2019s device will clear this upload on its next sync.'
+        : 'Marked for retry. The upload will go up again on the agent\u2019s next sync.';
+      resEl.className = 'text-sm font-mono text-green-400 text-right mt-2';
+    }
+    loadConflicts();
+  } catch (err) {
+    if (resEl) {
+      resEl.textContent = 'Error: ' + err.message;
+      resEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    }
+  }
+}
+
+document.getElementById('conflicts-tbody')?.addEventListener('click', (e) => {
+  const dismissId = e.target.dataset?.conflictDismiss;
+  const retryId = e.target.dataset?.conflictRetry;
+  if (dismissId) resolveConflict(dismissId, 'dismissed');
+  else if (retryId) resolveConflict(retryId, 'retry');
+});
+document.getElementById('btn-conflicts-pending')?.addEventListener('click', () => { _conflictsFilter = 'pending'; loadConflicts(); });
+document.getElementById('btn-conflicts-resolved')?.addEventListener('click', () => { _conflictsFilter = 'resolved'; loadConflicts(); });
+document.getElementById('btn-conflicts-refresh')?.addEventListener('click', () => loadConflicts());
+
+// ─── Commissions (agent commission per house per month) ───────────────────
+
+const fmtKes0 = (v) => 'KES ' + Number(v || 0).toLocaleString('en-KE', { maximumFractionDigits: 0 });
+
+async function loadCommissions() {
+  const monthEl = document.getElementById('cm-month');
+  if (monthEl && !monthEl.value) monthEl.value = new Date().toISOString().slice(0, 7);
+  // House filter options (cached houses fall back to report rows).
+  try {
+    const filterSel = document.getElementById('cm-house-filter');
+    if (filterSel && filterSel.options.length <= 1) {
+      const { houses } = await api.houses();
+      filterSel.innerHTML = '<option value="">All houses</option>' + (houses || []).map((h) =>
+        `<option value="${escapeHtml(h.paybill_number || h.id || '')}">${escapeHtml(h.house_name || '')}</option>`).join('');
+    }
+  } catch (_) {}
+  await runCommissionReport();
+}
+
+async function runCommissionReport() {
+  const tbody = document.getElementById('cm-tbody');
+  const resEl = document.getElementById('cm-result');
+  const month = document.getElementById('cm-month')?.value || new Date().toISOString().slice(0, 7);
+  const house = document.getElementById('cm-house-filter')?.value || null;
+  if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">Calculating…</td></tr>';
+  try {
+    const report = await api.commissionReport({ month, house_paybill: house });
+    const rows = report.rows || [];
+    const t = report.totals || {};
+    setTextEl('cm-t-collected', fmtKes0(t.collected));
+    setTextEl('cm-t-base', fmtKes0(t.commissionable));
+    setTextEl('cm-t-commission', fmtKes0(t.commission));
+    setTextEl('cm-t-payout', fmtKes0(t.landlord_payout));
+    if (!tbody) return;
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">No houses found.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map((r) => `
+      <tr>
+        <td>${escapeHtml(r.property_name || r.house_paybill_number || '—')} <span class="text-slate-500 font-mono text-xs">${escapeHtml(r.house_paybill_number || '')}</span>
+          <div class="text-[10px] text-slate-500 font-mono">${Number(r.payment_count || 0)} payment(s)</div></td>
+        <td class="text-right font-mono">${fmtKes0(r.collected)}</td>
+        <td class="text-right font-mono text-slate-400">${fmtKes0(r.deposit)}</td>
+        <td class="text-right font-mono text-slate-400">${fmtKes0(r.garbage)}</td>
+        <td class="text-right font-mono text-slate-400">${fmtKes0(r.water)}</td>
+        <td class="text-right font-mono text-cyan-400 font-semibold">${fmtKes0(r.commissionable)}</td>
+        <td class="text-right">
+          <span class="inline-flex items-center gap-1">
+            <input type="number" min="0" max="100" step="0.5" value="${Number(r.rate_percent || 0)}"
+              data-cm-rate-for="${escapeHtml(r.house_paybill_number || '')}"
+              class="cyber-input !w-20 !py-1 text-right font-mono" />
+            <span class="font-mono text-slate-400">%</span>
+            <button type="button" class="action-btn px-2 py-1 text-xs" data-cm-save="${escapeHtml(r.house_paybill_number || '')}">Save</button>
+          </span>
+        </td>
+        <td class="text-right font-mono text-amber-400 font-bold">${fmtKes0(r.commission)}</td>
+        <td class="text-right font-mono text-green-400 font-bold">${fmtKes0(r.landlord_payout)}</td>
+      </tr>`).join('') + `
+      <tr class="border-t-2 border-slate-600 font-bold">
+        <td>Total</td>
+        <td class="text-right font-mono">${fmtKes0(t.collected)}</td>
+        <td class="text-right font-mono">${fmtKes0(t.deposit)}</td>
+        <td class="text-right font-mono">${fmtKes0(t.garbage)}</td>
+        <td class="text-right font-mono">${fmtKes0(t.water)}</td>
+        <td class="text-right font-mono text-cyan-400">${fmtKes0(t.commissionable)}</td>
+        <td></td>
+        <td class="text-right font-mono text-amber-400">${fmtKes0(t.commission)}</td>
+        <td class="text-right font-mono text-green-400">${fmtKes0(t.landlord_payout)}</td>
+      </tr>`;
+    if (resEl) {
+      const d = new Date(`${report.month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      resEl.textContent = `${d}: commission = rate % × (collected − deposit − garbage − water). Landlord payout = collected − commission.`;
+    }
+  } catch (err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-center text-rose-400 py-6">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function saveCommissionRate(paybill) {
+  const input = document.querySelector(`[data-cm-rate-for="${CSS.escape(paybill)}"]`);
+  const rate = Number(input?.value ?? 0);
+  if (!paybill) return;
+  if (!(rate >= 0 && rate <= 100)) { showToast('Rate must be between 0 and 100%.', 'error'); return; }
+  try {
+    await api.setCommissionRate(paybill, rate);
+    showToast(`Commission rate saved: ${rate}%`);
+    await runCommissionReport();
+  } catch (err) {
+    showToast('Failed to save rate: ' + (err.message || err), 'error');
+  }
+}
+
+document.getElementById('cm-tbody')?.addEventListener('click', (e) => {
+  const paybill = e.target?.dataset?.cmSave;
+  if (paybill) saveCommissionRate(paybill);
+});
+document.getElementById('btn-cm-refresh')?.addEventListener('click', runCommissionReport);
+document.getElementById('cm-house-filter')?.addEventListener('change', runCommissionReport);
 
 document.querySelectorAll('[data-invoice-type]').forEach(btn => {
   btn.addEventListener('click', () => showInvoiceType(btn.dataset.invoiceType));
@@ -6394,6 +8373,7 @@ document.getElementById('btn-add-invoice-item')?.addEventListener('click', addIn
 document.getElementById('mnt-category')?.addEventListener('change', (e) => {
   renderMntDynamicFields(e.target.value);
 });
+document.getElementById('btn-add-plot-expense')?.addEventListener('click', () => addPlotExpenseRow());
 document.getElementById('btn-close-wo-expense-modal')?.addEventListener('click', hideWoExpenseModal);
 document.getElementById('wo-expense-filter-house')?.addEventListener('change', filterWoExpenses);
 document.getElementById('wo-expense-modal')?.addEventListener('click', (e) => {
@@ -6582,6 +8562,29 @@ document.getElementById('message-form')?.addEventListener('submit', async (e) =>
   statusEl.className = 'text-amber-500 text-sm font-mono mt-2';
   btn.disabled = true;
 
+  // Offline: save as Pending Send — delivered automatically on reconnect.
+  if (effectiveOffline()) {
+    try {
+      const clientTxnId = offlineDb.newClientTxnId();
+      await queueOutboxOp({
+        type: 'notice_send',
+        payload: { tenant_id: tenantId, message, client_txn_id: clientTxnId },
+      });
+      statusEl.textContent = '🟠 Saved — Pending Send. Will deliver automatically when internet returns.';
+      statusEl.className = 'text-amber-500 text-sm font-mono mt-2';
+      showToast('Notice saved (Pending Send)');
+      setTimeout(() => {
+        document.getElementById('message-modal').classList.add('hidden');
+        btn.disabled = false;
+      }, 1500);
+    } catch (err) {
+      statusEl.textContent = 'Offline save failed: ' + err.message;
+      statusEl.className = 'text-rose-400 text-sm font-mono mt-2';
+      btn.disabled = false;
+    }
+    return;
+  }
+
   try {
     await api.sendMessage(tenantId, message);
     statusEl.textContent = '✓ Message sent successfully!';
@@ -6707,6 +8710,9 @@ document.getElementById('btn-run-rollover')?.addEventListener('click', async () 
     }
   } finally {
     if (btn) btn.disabled = false;
+    // Rollover changes arrears / due dates / statuses — refresh the cards now
+    // instead of waiting for the 30s dashboard poll.
+    loadDashboard();
   }
 });
 
@@ -6720,6 +8726,7 @@ function docsTypeLabel(type) {
     invoice: 'Invoice',
     exit_invoice: 'Exit Invoice',
     report: 'Report',
+    letter: 'Letter',
   }[type] || (type || 'Document');
 }
 
@@ -6785,6 +8792,13 @@ function renderDocuments(documents, total) {
     return;
   }
 
+  const letterStatusBadge = (d) => ({
+    Draft: '<span class="status-badge badge-pending"><span class="status-dot"></span>Draft</span>',
+    Finalized: '<span class="status-badge badge-active"><span class="status-dot"></span>Ready</span>',
+    Sent: '<span class="status-badge badge-active"><span class="status-dot"></span>Sent</span>',
+    Downloaded: '<span class="status-badge"><span class="status-dot"></span>Downloaded</span>',
+  }[d.status] || `<span class="status-badge">${escapeHtml(d.status || '')}</span>`);
+
   tbody.innerHTML = documents.map(d => `
     <tr>
       <td><span class="sys-tag">${escapeHtml(docsTypeLabel(d.doc_type).toUpperCase())}</span></td>
@@ -6792,6 +8806,7 @@ function renderDocuments(documents, total) {
       <td>
         <div class="font-semibold">${escapeHtml(d.title || 'Document')}</div>
         ${d.tenant_name ? `<div class="text-xs text-slate-400">${escapeHtml(d.tenant_name)}</div>` : ''}
+        ${d.doc_type === 'letter' ? `<div class="mt-1">${letterStatusBadge(d)}</div>` : ''}
       </td>
       <td class="text-slate-300">
         ${escapeHtml(d.house_name || d.property_name || '—')}
@@ -6800,9 +8815,23 @@ function renderDocuments(documents, total) {
       <td>${formatDocsDate(d.doc_date)}</td>
       <td class="text-right font-mono">${d.amount != null ? formatKes(d.amount) : '—'}</td>
       <td class="text-right whitespace-nowrap">
+        ${d.doc_type === 'letter' && d.status === 'Draft' ? `
+        <button type="button" class="action-btn text-xs" data-doc-action="edit-draft" data-doc-id="${d.id}">Edit</button>
+        <button type="button" class="action-btn text-green-400 border-green-400 hover:bg-green-400/20 text-xs" data-doc-action="finalize" data-doc-id="${d.id}">Finalize</button>
+        <button type="button" class="action-btn action-btn-danger text-xs" data-doc-action="delete" data-doc-id="${d.id}">Delete</button>
+        ` : d.doc_type === 'letter' ? `
+        <button type="button" class="action-btn text-xs" data-doc-action="view" data-doc-id="${d.id}">View</button>
+        <button type="button" class="action-btn text-xs" data-doc-action="edit-version" data-doc-id="${d.id}">Edit</button>
         <button type="button" class="action-btn text-xs" data-doc-action="download" data-doc-id="${d.id}">Download</button>
         <button type="button" class="action-btn text-xs" data-doc-action="print" data-doc-id="${d.id}">Print</button>
         <button type="button" class="action-btn text-green-400 border-green-400 hover:bg-green-400/20 text-xs" data-doc-action="share" data-doc-id="${d.id}">WhatsApp</button>
+        <button type="button" class="action-btn action-btn-danger text-xs" data-doc-action="delete" data-doc-id="${d.id}">Delete</button>
+        ` : `
+        <button type="button" class="action-btn text-xs" data-doc-action="view" data-doc-id="${d.id}">View</button>
+        <button type="button" class="action-btn text-xs" data-doc-action="download" data-doc-id="${d.id}">Download</button>
+        <button type="button" class="action-btn text-xs" data-doc-action="print" data-doc-id="${d.id}">Print</button>
+        <button type="button" class="action-btn text-green-400 border-green-400 hover:bg-green-400/20 text-xs" data-doc-action="share" data-doc-id="${d.id}">WhatsApp</button>
+        `}
       </td>
     </tr>
   `).join('');
@@ -6826,6 +8855,40 @@ async function downloadDocumentFile(doc) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+let documentsViewBlobUrl = null;
+async function openDocumentViewModal(doc) {
+  const modal = document.getElementById('documents-view-modal');
+  const frame = document.getElementById('documents-view-frame');
+  const title = document.getElementById('documents-view-title');
+  if (!modal || !frame) return;
+  if (title) title.textContent = doc.title || doc.doc_number || 'Document';
+  frame.src = 'about:blank';
+  modal.classList.remove('hidden');
+  try {
+    const res = await fetch(`/api/documents/${doc.id}/print`, {
+      headers: { Authorization: `Bearer ${api.getToken()}` },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Failed to open document');
+    }
+    const blob = await res.blob();
+    if (documentsViewBlobUrl) URL.revokeObjectURL(documentsViewBlobUrl);
+    documentsViewBlobUrl = URL.createObjectURL(blob);
+    frame.src = documentsViewBlobUrl;
+  } catch (err) {
+    if (title) title.textContent = 'Failed to load: ' + err.message;
+  }
+}
+function closeDocumentViewModal() {
+  const modal = document.getElementById('documents-view-modal');
+  const frame = document.getElementById('documents-view-frame');
+  if (modal) modal.classList.add('hidden');
+  if (frame) frame.src = 'about:blank';
+  if (documentsViewBlobUrl) { URL.revokeObjectURL(documentsViewBlobUrl); documentsViewBlobUrl = null; }
+}
+document.getElementById('btn-documents-view-close')?.addEventListener('click', closeDocumentViewModal);
 
 async function openDocumentForPrint(doc) {
   const res = await fetch(`/api/documents/${doc.id}/print`, {
@@ -6861,9 +8924,46 @@ document.getElementById('documents-tbody')?.addEventListener('click', async (e) 
     const { document: doc } = await api.document(id);
     if (!doc) throw new Error('Document not found');
     const action = btn.dataset.docAction;
-    if (action === 'download') {
+    if (action === 'edit-draft') {
       btn.disabled = true;
-      try { await downloadDocumentFile(doc); } finally { btn.disabled = false; }
+      try { await openDocDraftEditor(id); } finally { btn.disabled = false; }
+    } else if (action === 'finalize') {
+      if (!confirm('Finalize this draft? A document number and PDF will be generated and the row locked.')) return;
+      btn.disabled = true;
+      try {
+        await api.finalizeLetter(id);
+        showToast('Letter finalized and saved to Documents Hub.');
+        revealLetterInHub();
+        loadDocuments();
+      } catch (err) {
+        alert('Finalize failed: ' + (err.message || err));
+      } finally { btn.disabled = false; }
+    } else if (action === 'view') {
+      openDocumentViewModal(doc);
+    } else if (action === 'edit-version') {
+      if (!confirm('Create a new editable draft version of this finalized letter? The original stays unchanged.')) return;
+      btn.disabled = true;
+      try {
+        const res = await api.newVersionLetter(id);
+        showToast(`New draft version created (#${res.document?.id || '—'}).`);
+        await openDocDraftEditor(res.document.id);
+        loadDocuments();
+      } catch (err) {
+        alert('New version failed: ' + (err.message || err));
+      } finally { btn.disabled = false; }
+    } else if (action === 'delete') {
+      if (!confirm(`Delete "${doc.title || 'this letter'}" permanently? The PDF file is removed too. Tenant, property and payment records are NOT affected.`)) return;
+      btn.disabled = true;
+      try {
+        await api.deleteDocument(id);
+        showToast('Document deleted.');
+        loadDocuments();
+      } catch (err) {
+        alert('Delete failed: ' + (err.message || err));
+      } finally { btn.disabled = false; }
+    } else if (action === 'download') {
+      btn.disabled = true;
+      try { await downloadDocumentFile(doc); loadDocuments(); } finally { btn.disabled = false; }
     } else if (action === 'print') {
       btn.disabled = true;
       try { await openDocumentForPrint(doc); } finally { btn.disabled = false; }
@@ -6901,6 +9001,7 @@ document.getElementById('btn-documents-share-send')?.addEventListener('click', a
       statusEl.textContent = 'Sent successfully!';
       statusEl.className = 'text-sm font-mono text-green-400';
     }
+    loadDocuments();
     setTimeout(() => {
       const shareModal = document.getElementById('documents-share-modal');
       if (shareModal) shareModal.classList.add('hidden');
@@ -6915,6 +9016,629 @@ document.getElementById('btn-documents-share-send')?.addEventListener('click', a
     if (btn) btn.disabled = false;
   }
 });
+
+// ─── Documents Hub letter templates (inside the existing hub) ─────────────
+
+// ─── Custom Notice (Blank Letterhead) — inside the existing hub ─────────────
+// Recipient (Tenant / Unit / Property → all or specific tenants) → review →
+// notice date + subject + content → one INDIVIDUAL notice per tenant, saved
+// under that tenant. Nothing is ever auto-sent: Send is per row, by the user.
+
+let cnTenants = null;
+
+async function ensureCnTenants() {
+  if (cnTenants && cnTenants.length) return cnTenants;
+  const { tenants } = await api.tenants();
+  cnTenants = (tenants || []).map((t) => ({
+    tenant_code: t.tenant_code,
+    name: t.name,
+    unit: t.unit_label || t.tenant_code,
+    property: t.property_name || '—',
+  }));
+  return cnTenants;
+}
+
+function cnRecipientType() {
+  return document.querySelector('input[name="cn-recipient-type"]:checked')?.value || 'tenant';
+}
+
+function cnCurrentSelection() {
+  if (!cnTenants) return [];
+  const type = cnRecipientType();
+  if (type === 'tenant') {
+    const code = document.getElementById('cn-tenant')?.value;
+    return code ? cnTenants.filter((t) => t.tenant_code === code) : [];
+  }
+  if (type === 'unit') {
+    const code = document.getElementById('cn-unit')?.value;
+    return code ? cnTenants.filter((t) => t.tenant_code === code) : [];
+  }
+  const prop = document.getElementById('cn-property')?.value;
+  if (!prop) return [];
+  const inProp = cnTenants.filter((t) => t.property === prop);
+  const scope = document.querySelector('input[name="cn-scope"]:checked')?.value || 'all';
+  if (scope === 'all') return inProp;
+  const checked = new Set(
+    [...document.querySelectorAll('#cn-specific-list input:checked')].map((i) => i.value)
+  );
+  return inProp.filter((t) => checked.has(t.tenant_code));
+}
+
+function cnRenderReview() {
+  const sel = cnCurrentSelection();
+  const body = document.getElementById('cn-review-body');
+  const count = document.getElementById('cn-review-count');
+  if (count) count.textContent = String(sel.length);
+  if (!body) return;
+  if (!sel.length) {
+    body.innerHTML = '<tr><td colspan="3" class="p-2 text-slate-500">No recipients selected</td></tr>';
+    return;
+  }
+  body.innerHTML = sel.map((t) => `
+    <tr class="border-t border-slate-800">
+      <td class="p-2 text-slate-200">${escapeHtml(t.name)} <span class="text-slate-500 font-mono">(${escapeHtml(t.tenant_code)})</span></td>
+      <td class="p-2 font-mono text-slate-300">${escapeHtml(String(t.unit))}</td>
+      <td class="p-2 text-slate-400">${escapeHtml(t.property)}</td>
+    </tr>`).join('');
+}
+
+function cnRenderSpecificList() {
+  const wrap = document.getElementById('cn-specific-wrap');
+  const list = document.getElementById('cn-specific-list');
+  const type = cnRecipientType();
+  const scope = document.querySelector('input[name="cn-scope"]:checked')?.value || 'all';
+  const show = type === 'property' && scope === 'specific';
+  if (wrap) wrap.classList.toggle('hidden', !show);
+  if (!show || !list) return;
+  const prop = document.getElementById('cn-property')?.value || '';
+  const checked = new Set([...list.querySelectorAll('input:checked')].map((i) => i.value));
+  const inProp = (cnTenants || []).filter((t) => t.property === prop);
+  list.innerHTML = inProp.length ? inProp.map((t) => `
+    <label class="flex items-center gap-2 py-0.5">
+      <input type="checkbox" value="${escapeHtml(t.tenant_code)}" ${checked.has(t.tenant_code) ? 'checked' : ''} />
+      <span class="text-slate-300">${escapeHtml(String(t.unit))} — ${escapeHtml(t.name)}</span>
+    </label>`).join('') : '<span class="text-slate-500 p-2">No tenants in this property</span>';
+}
+
+function cnSyncControls() {
+  const type = cnRecipientType();
+  const tenantWrap = document.getElementById('cn-tenant-wrap');
+  const unitWrap = document.getElementById('cn-unit-wrap');
+  const propWrap = document.getElementById('cn-property-wrap');
+  const scopeWrap = document.getElementById('cn-scope-wrap');
+  if (tenantWrap) tenantWrap.classList.toggle('hidden', type !== 'tenant');
+  if (unitWrap) unitWrap.classList.toggle('hidden', type !== 'unit');
+  if (propWrap) propWrap.classList.toggle('hidden', type !== 'property');
+  if (scopeWrap) scopeWrap.classList.toggle('hidden', type !== 'property');
+  cnRenderSpecificList();
+  cnRenderReview();
+}
+
+async function openCustomNoticeModal() {
+  const modal = document.getElementById('custom-notice-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  const status = document.getElementById('cn-status');
+  if (status) { status.textContent = 'Loading tenants…'; status.className = 'text-sm font-mono text-center mb-2 text-amber-400'; }
+  try {
+    const list = await ensureCnTenants();
+    const tenantSel = document.getElementById('cn-tenant');
+    const unitSel = document.getElementById('cn-unit');
+    const propSel = document.getElementById('cn-property');
+    if (tenantSel) {
+      tenantSel.innerHTML = '<option value="">— Select tenant —</option>' +
+        list.map((t) => `<option value="${escapeHtml(t.tenant_code)}">${escapeHtml(t.name)} (${escapeHtml(String(t.unit))})</option>`).join('');
+    }
+    if (unitSel) {
+      unitSel.innerHTML = '<option value="">— Select unit —</option>' +
+        [...list].sort((a, b) => String(a.unit).localeCompare(String(b.unit)))
+          .map((t) => `<option value="${escapeHtml(t.tenant_code)}">${escapeHtml(String(t.unit))} — ${escapeHtml(t.name)}</option>`).join('');
+    }
+    if (propSel) {
+      const props = [...new Set(list.map((t) => t.property))].sort();
+      propSel.innerHTML = '<option value="">— Select property —</option>' +
+        props.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+    }
+    const dateEl = document.getElementById('cn-date');
+    if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+    const subjEl = document.getElementById('cn-subject');
+    const bodyEl = document.getElementById('cn-body');
+    if (subjEl) subjEl.value = '';
+    if (bodyEl) bodyEl.value = '';
+    const typeTenant = document.querySelector('input[name="cn-recipient-type"][value="tenant"]');
+    const scopeAll = document.querySelector('input[name="cn-scope"][value="all"]');
+    if (typeTenant) typeTenant.checked = true;
+    if (scopeAll) scopeAll.checked = true;
+    if (status) status.textContent = '';
+    cnSyncControls();
+  } catch (err) {
+    if (status) { status.textContent = 'Failed to load tenants: ' + err.message; status.className = 'text-sm font-mono text-center mb-2 text-rose-400'; }
+  }
+}
+
+function closeCustomNoticeModal() {
+  const modal = document.getElementById('custom-notice-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+document.getElementById('btn-custom-notice')?.addEventListener('click', openCustomNoticeModal);
+document.getElementById('btn-cn-close')?.addEventListener('click', closeCustomNoticeModal);
+document.getElementById('btn-cn-cancel')?.addEventListener('click', closeCustomNoticeModal);
+document.querySelectorAll('input[name="cn-recipient-type"]').forEach((el) => {
+  el.addEventListener('change', cnSyncControls);
+});
+document.querySelectorAll('input[name="cn-scope"]').forEach((el) => {
+  el.addEventListener('change', cnSyncControls);
+});
+document.getElementById('cn-tenant')?.addEventListener('change', cnRenderReview);
+document.getElementById('cn-unit')?.addEventListener('change', cnRenderReview);
+document.getElementById('cn-property')?.addEventListener('change', cnSyncControls);
+document.getElementById('cn-specific-list')?.addEventListener('change', cnRenderReview);
+
+document.getElementById('btn-cn-create')?.addEventListener('click', async () => {
+  const btn = document.getElementById('btn-cn-create');
+  const status = document.getElementById('cn-status');
+  const subject = document.getElementById('cn-subject')?.value.trim() || '';
+  const body = document.getElementById('cn-body')?.value || '';
+  const notice_date = document.getElementById('cn-date')?.value || '';
+  const sel = cnCurrentSelection();
+  const setStatus = (text, cls) => {
+    if (status) { status.textContent = text; status.className = `text-sm font-mono text-center mb-2 ${cls}`; }
+  };
+  if (!sel.length) return setStatus('Select at least one recipient first.', 'text-amber-400');
+  if (!subject) return setStatus('Subject is required.', 'text-amber-400');
+  if (!body.trim()) return setStatus('Notice content is required.', 'text-amber-400');
+  if (!confirm(`Create ${sel.length} individual notice${sel.length > 1 ? 's' : ''}? Each is saved separately under its tenant. Nothing will be sent.`)) return;
+  if (btn) btn.disabled = true;
+  setStatus(`Creating ${sel.length} notice${sel.length > 1 ? 's' : ''}…`, 'text-amber-400');
+  try {
+    const res = await api.customNotice({
+      tenant_codes: sel.map((t) => t.tenant_code),
+      subject, body, notice_date,
+    });
+    if (res.failed > 0) {
+      const errs = (res.results || []).filter((r) => !r.ok).map((r) => `${r.tenant_code}: ${r.error}`).join('; ');
+      setStatus(`Created ${res.created}, failed ${res.failed}. ${errs}`, 'text-amber-400');
+    } else {
+      setStatus(`Created ${res.created} notice${res.created > 1 ? 's' : ''} — not sent.`, 'text-green-400');
+      showToast(`${res.created} individual notice${res.created > 1 ? 's' : ''} created and saved under each tenant. Nothing was sent — use Send on each notice.`);
+      setTimeout(() => {
+        closeCustomNoticeModal();
+        ['documents-type', 'documents-tenant', 'documents-q', 'documents-from', 'documents-to'].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        runDocumentsSearch();
+      }, 700);
+    }
+  } catch (err) {
+    setStatus('Error: ' + err.message, 'text-rose-400');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+
+let docLetterTemplates = [];
+let docBodyEdited = false;
+let docResolvedTenant = null;
+let docLastSubject = '';
+let docLastRecipient = '';
+let docPlaceholderTarget = 'doc-letter-body';
+const docPlaceholderCache = {};
+
+async function loadDocPlaceholders(templateKey) {
+  const pick = document.getElementById('doc-placeholder-pick');
+  if (!pick) return;
+  try {
+    if (!docPlaceholderCache[templateKey]) {
+      const r = await api.placeholders(templateKey);
+      docPlaceholderCache[templateKey] = r.placeholders || [];
+    }
+    const groups = {};
+    for (const p of docPlaceholderCache[templateKey]) {
+      (groups[p.group || 'Other'] = groups[p.group || 'Other'] || []).push(p);
+    }
+    pick.innerHTML = '<option value="">— Insert placeholder at cursor (Subject / Recipient / Body) —</option>' +
+      Object.entries(groups).map(([g, items]) =>
+        `<optgroup label="${escapeHtml(g)}">` +
+        items.map((p) => `<option value="${escapeHtml(p.code)}">{{${escapeHtml(p.code)}}} — ${escapeHtml(p.label)}</option>`).join('') +
+        '</optgroup>').join('');
+  } catch (_) {}
+}
+
+async function openDocTemplatePicker() {
+  const modal = document.getElementById('doc-template-modal');
+  const grid = document.getElementById('doc-template-grid');
+  if (!modal || !grid) return;
+  grid.innerHTML = '<p class="text-slate-500 text-sm">Loading templates…</p>';
+  modal.classList.remove('hidden');
+  try {
+    if (!docLetterTemplates.length) {
+      const { templates } = await api.docTemplates();
+      docLetterTemplates = templates || [];
+    }
+    grid.innerHTML = docLetterTemplates.map((t) => `
+      <button type="button" class="text-left rounded border border-slate-700 bg-slate-900 p-3 hover:border-cyan-400" data-doc-template="${escapeHtml(t.key)}">
+        <div class="font-semibold text-sm text-white">${escapeHtml(t.label)}</div>
+        <div class="text-xs text-slate-400 mt-1">${escapeHtml(t.description || '')}</div>
+      </button>`).join('') || '<p class="text-slate-500 text-sm">No templates available.</p>';
+  } catch (err) {
+    grid.innerHTML = `<p class="text-rose-400 text-sm">Failed to load templates: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function docLetterFieldInput(f, value) {
+  const val = value ?? f.default ?? '';
+  const req = f.required ? 'required' : '';
+  const base = `data-doc-field="${escapeHtml(f.name)}"`;
+  const label = `<label class="form-label text-xs">${escapeHtml(f.label)}${f.required ? ' *' : ''}</label>`;
+  if (f.type === 'textarea' || f.type === 'list') {
+    return `<div>${label}<textarea ${base} rows="${f.type === 'list' ? 5 : 3}" class="cyber-input w-full font-mono text-xs" placeholder="${escapeHtml(f.placeholder || '')}">${escapeHtml(val)}</textarea></div>`;
+  }
+  if (f.type === 'select') {
+    const opts = (f.options || []).map((o) => `<option value="${escapeHtml(o.value ?? o)}" ${String(val) === String(o.value ?? o) ? 'selected' : ''}>${escapeHtml(o.label ?? o)}</option>`).join('');
+    return `<div>${label}<select ${base} class="cyber-input w-full">${opts}</select></div>`;
+  }
+  const inputType = f.type === 'date' ? 'date' : f.type === 'month' ? 'month' : f.type === 'number' ? 'number' : 'text';
+  return `<div>${label}<input type="${inputType}" ${base} value="${escapeHtml(val)}" ${req} class="cyber-input w-full" placeholder="${escapeHtml(f.placeholder || '')}" /></div>`;
+}
+
+function collectDocLetterValues() {
+  const values = {};
+  document.querySelectorAll('[data-doc-field]').forEach((el) => {
+    values[el.dataset.docField] = el.value;
+  });
+  return values;
+}
+
+async function openDocLetterEditor(templateKey, existingDoc = null) {
+  const template = (docLetterTemplates.find((t) => t.key === templateKey))
+    || (await api.docTemplates().then((r) => (docLetterTemplates = r.templates || []).find((t) => t.key === templateKey)).catch(() => null));
+  if (!template) { alert('Template not found.'); return; }
+  document.getElementById('doc-template-modal')?.classList.add('hidden');
+  document.getElementById('doc-letter-key').value = template.key;
+  document.getElementById('doc-letter-id').value = existingDoc?.id || '';
+  document.getElementById('doc-letter-title').textContent = (existingDoc ? 'Edit Draft — ' : 'New Document — ') + template.label;
+  document.getElementById('doc-letter-desc').textContent = template.description || '';
+  document.getElementById('doc-letter-fields').innerHTML =
+    (template.fields || [])
+      .filter((f) => !['letter_subject', 'letter_body', 'document_title', 'document_body'].includes(f.name))
+      .map((f) => docLetterFieldInput(f)).join('');
+  // Custom/landlord addressees need name + address inputs (tenant/house
+  // details still auto-fill the body from the selected tenant).
+  if (template.recipient === 'custom' || template.recipient === 'landlord') {
+    const wrap = document.getElementById('doc-letter-fields');
+    const extra = document.createElement('div');
+    extra.className = 'grid grid-cols-1 md:grid-cols-2 gap-3 col-span-full';
+    extra.innerHTML =
+      `<div><label class="form-label text-xs">Recipient Name</label>` +
+      `<input type="text" data-doc-field="recipient_name" class="cyber-input w-full" placeholder="Who receives this letter" /></div>` +
+      `<div><label class="form-label text-xs">Recipient Address</label>` +
+      `<textarea data-doc-field="recipient_address" rows="2" class="cyber-input w-full font-mono text-xs"></textarea></div>`;
+    wrap.prepend(extra);
+  }
+  // Tenant picker (existing tenants; optional).
+  const tenantSel = document.getElementById('doc-letter-tenant');
+  if (tenantSel) {
+    if (tenantSel.options.length <= 1) {
+      try {
+        const { tenants } = await api.tenants();
+        tenantSel.innerHTML = '<option value="">— No tenant —</option>' +
+          (tenants || []).map((t) => `<option value="${escapeHtml(t.tenant_code)}">${escapeHtml(t.name)} (${escapeHtml(t.tenant_code)})</option>`).join('');
+      } catch (_) {}
+    }
+    tenantSel.value = existingDoc?.tenant_code || '';
+    tenantSel.disabled = !!existingDoc;
+  }
+  // Property picker for property-wide batch generation.
+  const propSel = document.getElementById('doc-letter-property');
+  if (propSel && propSel.options.length <= 1) {
+    try {
+      const { houses } = await api.houses();
+      propSel.innerHTML = '<option value="">— No property —</option>' +
+        (houses || []).map((h) => `<option value="${escapeHtml(h.paybill_number || h.id || '')}">${escapeHtml(h.house_name || '')}</option>`).join('');
+    } catch (_) {}
+  }
+  // Batch is offered for tenant-addressed templates only.
+  document.getElementById('btn-doc-letter-batch')?.classList.toggle(
+    'hidden', !(template.recipient === 'tenant') || !!existingDoc
+  );
+  document.getElementById('doc-letter-subject').value = existingDoc?.title || template.subject || '';
+  document.getElementById('doc-letter-recipient').value = '';
+  document.getElementById('doc-letter-body').value = existingDoc?.body_text || '';
+  document.getElementById('doc-letter-preview').classList.add('hidden');
+  document.getElementById('doc-letter-preview').innerHTML = '';
+  setDocLetterStatus('');
+  docBodyEdited = !!existingDoc;
+  docResolvedTenant = null;
+  docLastSubject = '';
+  docLastRecipient = '';
+  document.getElementById('doc-letter-modal')?.classList.remove('hidden');
+  loadDocPlaceholders(template.key);
+  if (!existingDoc) await autofillDocLetter(false);
+}
+
+function setDocLetterStatus(msg, isError) {
+  const el = document.getElementById('doc-letter-status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.className = 'text-sm font-mono text-center mb-2 ' + (isError ? 'text-rose-400' : 'text-green-400');
+}
+
+async function autofillDocLetter(announce = true) {
+  const key = document.getElementById('doc-letter-key')?.value;
+  const tenantCode = document.getElementById('doc-letter-tenant')?.value || null;
+  if (!key) return;
+  const values = collectDocLetterValues();
+  setDocLetterStatus('Resolving details…');
+  try {
+    const r = await api.resolveLetter({ template_key: key, tenant_code: tenantCode, values });
+    const subjectEl = document.getElementById('doc-letter-subject');
+    const recipEl = document.getElementById('doc-letter-recipient');
+    const bodyEl = document.getElementById('doc-letter-body');
+    // Subject/recipient follow the tenant unless the user customized them
+    // after the last resolution; the body follows until hand-edited. A
+    // subject still showing the raw template text counts as uncustomized.
+    const rawTemplateSubject = (docLetterTemplates.find((t) => t.key === key)?.subject) || '';
+    if (subjectEl && (!subjectEl.value || subjectEl.value === docLastSubject || subjectEl.value === rawTemplateSubject)) {
+      subjectEl.value = r.subject || '';
+    }
+    if (recipEl && (!recipEl.value || recipEl.value === docLastRecipient)) {
+      recipEl.value = r.recipient_block || '';
+    }
+    if (bodyEl && !docBodyEdited) bodyEl.value = r.body || '';
+    docLastSubject = r.subject || '';
+    docLastRecipient = r.recipient_block || '';
+    docResolvedTenant = tenantCode;
+    // Fill empty dynamic fields from resolved raw values (arrears, rent,
+    // dates…). Never overwrite what the user already typed.
+    const raw = r.raw || {};
+    const disp = r.data || {};
+    document.querySelectorAll('#doc-letter-fields [data-doc-field]').forEach((el) => {
+      if (el.value !== '' && el.value != null) return;
+      const name = el.dataset.docField;
+      const type = el.type || el.tagName.toLowerCase();
+      if (raw[name] !== undefined && raw[name] !== null && raw[name] !== '') {
+        if (type === 'number' || type === 'date' || type === 'month') {
+          const str = String(raw[name]);
+          if (type === 'number' || /^\d{4}-\d{2}(-\d{2})?$/.test(str)) el.value = str;
+        } else if (el.tagName === 'SELECT') {
+          const opt = [...el.options].find((o) => o.value === String(raw[name]));
+          if (opt) el.value = opt.value;
+        } else if (disp[name]) {
+          el.value = disp[name];
+        }
+      }
+    });
+    setDocLetterStatus(announce ? 'Details loaded — review and edit freely.' : '');
+    return r;
+  } catch (err) {
+    setDocLetterStatus('Autofill failed: ' + (err.message || err), true);
+    return null;
+  }
+}
+
+function previewDocLetter() {
+  previewDocLetterServer();
+}
+
+// Server-rendered preview: identical substitution to the PDF, so raw
+// {{VARIABLE}} placeholders can never hide in the letter body unnoticed.
+async function previewDocLetterServer() {
+  const container = document.getElementById('doc-letter-preview');
+  if (!container) return;
+  const key = document.getElementById('doc-letter-key')?.value;
+  if (!key) return;
+  container.innerHTML = '<p class="text-slate-500 text-sm">Rendering preview…</p>';
+  container.classList.remove('hidden');
+  try {
+    const r = await api.previewLetter({
+      template_key: key,
+      tenant_code: document.getElementById('doc-letter-tenant')?.value || null,
+      values: collectDocLetterValues(),
+      body: document.getElementById('doc-letter-body')?.value || null,
+      subject: document.getElementById('doc-letter-subject')?.value || null,
+      recipient: document.getElementById('doc-letter-recipient')?.value || null,
+    });
+    container.innerHTML = r.html || '<p class="text-slate-500">Empty preview.</p>';
+  } catch (err) {
+    container.innerHTML = `<p class="text-rose-500 text-sm">Preview failed: ${escapeHtml(err.message || err)}</p>`;
+  }
+}
+
+function gatherDocLetterPayload(status) {
+  const key = document.getElementById('doc-letter-key')?.value;
+  if (!key) throw new Error('No template selected');
+  const template = docLetterTemplates.find((t) => t.key === key);
+  const values = collectDocLetterValues();
+  // Subject/body live in the dedicated editor inputs; mirror them onto the
+  // template fields that alias them (general letter, custom document).
+  const editorSubject = document.getElementById('doc-letter-subject')?.value || '';
+  const editorBody = document.getElementById('doc-letter-body')?.value || '';
+  for (const alias of ['letter_subject', 'document_title']) {
+    if (!String(values[alias] ?? '').trim()) values[alias] = editorSubject;
+  }
+  for (const alias of ['letter_body', 'document_body']) {
+    if (!String(values[alias] ?? '').trim()) values[alias] = editorBody;
+  }
+  const missing = (template?.fields || []).filter((f) => f.required && !String(values[f.name] ?? '').trim());
+  if (missing.length) {
+    // Highlight the exact fields blocking the save.
+    document.querySelectorAll('#doc-letter-fields [data-doc-field]').forEach((el) => {
+      const bad = missing.some((f) => f.name === el.dataset.docField);
+      el.style.borderColor = bad ? '#ef4444' : '';
+      if (bad) el.title = 'This field is required';
+    });
+    const first = document.querySelector('#doc-letter-fields [data-doc-field][style*="border-color"]');
+    if (first && first.scrollIntoView) first.scrollIntoView({ block: 'center' });
+    throw new Error('Please fill required: ' + missing.map((f) => f.label).join(', '));
+  } else {
+    document.querySelectorAll('#doc-letter-fields [data-doc-field]').forEach((el) => { el.style.borderColor = ''; });
+  }
+  return {
+    template_key: key,
+    tenant_code: document.getElementById('doc-letter-tenant')?.value || null,
+    values,
+    title: document.getElementById('doc-letter-subject')?.value.trim() || null,
+    recipient: document.getElementById('doc-letter-recipient')?.value || null,
+    body: document.getElementById('doc-letter-body')?.value || null,
+    status,
+  };
+}
+
+async function saveDocLetterDraft() {
+  setDocLetterStatus('Saving draft…');
+  try {
+    // Sender fields ride along inside values for resolution-free saves.
+    const payload = gatherDocLetterPayload('Draft');
+    const tenantCode = document.getElementById('doc-letter-tenant')?.value || null;
+    const id = document.getElementById('doc-letter-id')?.value;
+    let doc;
+    if (id) {
+      const res = await api.updateLetterDraft(id, {
+        title: payload.title, body: payload.body, recipient: payload.recipient,
+      });
+      doc = res.document;
+    } else {
+      const res = await api.createLetter({ ...payload, tenant_code: tenantCode });
+      doc = res.document;
+      document.getElementById('doc-letter-id').value = doc?.id || '';
+    }
+    setDocLetterStatus(`Draft saved (#${doc?.id || '—'}).`);
+    revealLetterInHub();
+    loadDocuments();
+  } catch (err) {
+    setDocLetterStatus('Save failed: ' + (err.message || err), true);
+  }
+}
+
+async function generateDocLetter() {
+  setDocLetterStatus('Generating PDF…');
+  try {
+    const payload = gatherDocLetterPayload('Finalized');
+    const id = document.getElementById('doc-letter-id')?.value;
+    let doc;
+    if (id) {
+      // Persist latest edits to the draft first, then finalize it.
+      await api.updateLetterDraft(id, {
+        title: payload.title, body: payload.body, recipient: payload.recipient,
+      });
+      const res = await api.finalizeLetter(id);
+      doc = res.document;
+    } else {
+      const res = await api.createLetter(payload);
+      doc = res.document;
+    }
+    setDocLetterStatus(`Generated ${doc?.doc_number || ''} — saved to Documents Hub.`);
+    document.getElementById('doc-letter-id').value = doc?.id || '';
+    revealLetterInHub();
+    loadDocuments();
+    setTimeout(() => document.getElementById('doc-letter-modal')?.classList.add('hidden'), 1200);
+  } catch (err) {
+    setDocLetterStatus('Generate failed: ' + (err.message || err), true);
+  }
+}
+
+document.getElementById('btn-documents-new')?.addEventListener('click', openDocTemplatePicker);
+document.getElementById('btn-doc-template-close')?.addEventListener('click', () => {
+  document.getElementById('doc-template-modal')?.classList.add('hidden');
+});
+document.getElementById('doc-template-grid')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-doc-template]');
+  if (btn) openDocLetterEditor(btn.dataset.docTemplate);
+});
+document.getElementById('btn-doc-letter-close')?.addEventListener('click', () => {
+  document.getElementById('doc-letter-modal')?.classList.add('hidden');
+});
+document.getElementById('btn-doc-letter-autofill')?.addEventListener('click', () => autofillDocLetter(true));
+document.getElementById('doc-letter-tenant')?.addEventListener('change', () => {
+  // Tenant (re)selected: refresh subject, recipient/house block and any
+  // still-empty detail fields from that tenant's dashboard data.
+  showToast('Loading tenant details…');
+  autofillDocLetter(false);
+});
+document.getElementById('btn-doc-letter-preview')?.addEventListener('click', previewDocLetter);
+document.getElementById('btn-doc-letter-batch')?.addEventListener('click', async () => {
+  const key = document.getElementById('doc-letter-key')?.value;
+  const propSel = document.getElementById('doc-letter-property');
+  const paybill = propSel?.value || null;
+  const propName = propSel?.options?.[propSel.selectedIndex]?.textContent?.trim() || '';
+  if (!key || !paybill) {
+    setDocLetterStatus('Select a template and a property first.', true);
+    return;
+  }
+  if (!confirm(`Generate an individualized letter for EVERY occupying tenant of ${propName}?\n\nEach tenant gets their own finalized document (own number + PDF). This cannot be undone per letter — delete rows individually if needed.`)) return;
+  setDocLetterStatus('Generating batch — this can take a while for large properties…');
+  try {
+    const r = await api.batchLetters({
+      template_key: key,
+      house_paybill_number: paybill,
+      values: collectDocLetterValues(),
+    });
+    const failed = (r.results || []).filter((x) => !x.ok);
+    setDocLetterStatus(`Batch done: ${r.succeeded}/${r.total} generated for ${r.property || propName}.` +
+      (failed.length ? ` Failed: ${failed.map((x) => `${x.tenant_code || '?'} (${(x.error || '').slice(0, 60)})`).join('; ')}` : ''));
+    loadDocuments();
+  } catch (err) {
+    setDocLetterStatus('Batch failed: ' + (err.message || err), true);
+  }
+});
+document.getElementById('btn-doc-letter-draft')?.addEventListener('click', saveDocLetterDraft);
+document.getElementById('btn-doc-letter-generate')?.addEventListener('click', generateDocLetter);
+// After saving a letter, make sure the hub filter isn't hiding it
+// (e.g. filtered to Receipts) so the new row is actually visible.
+function revealLetterInHub() {
+  const typeSel = document.getElementById('documents-type');
+  if (typeSel && typeSel.value !== '' && typeSel.value !== 'letter') {
+    typeSel.value = 'letter';
+    showToast('Switched filter to Letters so your document is visible.');
+  }
+}
+
+document.getElementById('doc-letter-body')?.addEventListener('input', () => { docBodyEdited = true; });
+['doc-letter-subject', 'doc-letter-recipient', 'doc-letter-body'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('focus', () => { docPlaceholderTarget = id; });
+});
+document.getElementById('btn-doc-placeholder-insert')?.addEventListener('click', () => {
+  const pick = document.getElementById('doc-placeholder-pick');
+  const code = pick?.value;
+  if (!code) return;
+  const el = document.getElementById(docPlaceholderTarget) || document.getElementById('doc-letter-body');
+  const token = `{{${code}}}`;
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0, start) + token + el.value.slice(end);
+  el.focus();
+  try { el.setSelectionRange(start + token.length, start + token.length); } catch (_) {}
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  pick.value = '';
+});
+
+async function openDocDraftEditor(id) {
+  try {
+    const { document: doc } = await api.document(id);
+    if (!doc) throw new Error('Document not found');
+    if (doc.doc_type !== 'letter' || doc.status !== 'Draft') {
+      alert('Only draft letters can be edited. Generate a new version for changes.');
+      return;
+    }
+    if (!docLetterTemplates.length) {
+      const { templates } = await api.docTemplates();
+      docLetterTemplates = templates || [];
+    }
+    await openDocLetterEditor(doc.template_key, doc);
+    // Restore frozen draft text (editor defaults would otherwise re-resolve).
+    if (doc.title) document.getElementById('doc-letter-subject').value = doc.title;
+    if (doc.resolved_recipient != null) document.getElementById('doc-letter-recipient').value = doc.resolved_recipient;
+    if (doc.body_text != null) document.getElementById('doc-letter-body').value = doc.body_text;
+    docBodyEdited = true;
+    docResolvedTenant = doc.tenant_code || null;
+    docLastSubject = document.getElementById('doc-letter-subject')?.value || '';
+    docLastRecipient = document.getElementById('doc-letter-recipient')?.value || '';
+  } catch (err) {
+    alert('Cannot open draft: ' + (err.message || err));
+  }
+}
 
 async function loadReceiptMode() {
   // Receipt numbers are now lifetime continuous (GEHPM-RCT-YYYYMM-NNNNNN).
@@ -6966,6 +9690,372 @@ document.getElementById('import-excel-input')?.addEventListener('change', async 
     }
   };
   reader.readAsDataURL(file);
+});
+
+// ─── Company Settings — Official GEHPM Stamp (admin) ───────────────────────
+let stampState = null;
+let stampPreviewUrl = null;
+
+function setStampMsg(text, isError) {
+  const el = document.getElementById('stamp-msg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'text-sm font-mono text-center mt-2 ' + (isError ? 'text-rose-400' : 'text-green-400');
+}
+
+async function loadStampSettings() {
+  const statusEl = document.getElementById('stamp-status');
+  const img = document.getElementById('stamp-preview');
+  const toggleBtn = document.getElementById('btn-stamp-toggle');
+  if (!statusEl) return;
+  setStampMsg('');
+  statusEl.textContent = 'Loading…';
+  try {
+    const s = await api.stampStatus();
+    stampState = s;
+    if (!s.configured) {
+      statusEl.innerHTML = '<span class="text-amber-400">No stamp uploaded yet.</span> Upload the official GEHPM stamp to start stamping finalized PDFs.';
+    } else {
+      statusEl.innerHTML =
+        `<span class="${s.active ? 'text-green-400' : 'text-amber-400'} font-bold">${s.active ? 'ACTIVE' : 'INACTIVE'}</span>` +
+        ` <span class="text-slate-500">${escapeHtml(s.original_name || s.mimetype || '')}</span>` +
+        (s.updated_at ? ` <span class="text-slate-500">· ${escapeHtml(new Date(s.updated_at).toLocaleString())}</span>` : '') +
+        (s.updated_by ? ` <span class="text-slate-500">· by ${escapeHtml(s.updated_by)}</span>` : '');
+    }
+    if (img) {
+      if (stampPreviewUrl) { URL.revokeObjectURL(stampPreviewUrl); stampPreviewUrl = null; }
+      if (s.configured && s.active) {
+        try {
+          const blob = await api.stampImageBlob();
+          stampPreviewUrl = URL.createObjectURL(blob);
+          img.src = stampPreviewUrl;
+          img.classList.remove('hidden');
+        } catch (_) {
+          img.classList.add('hidden');
+        }
+      } else {
+        img.classList.add('hidden');
+      }
+    }
+    if (toggleBtn) {
+      toggleBtn.textContent = s.active ? 'Deactivate' : 'Activate';
+      toggleBtn.disabled = !s.configured;
+    }
+  } catch (err) {
+    statusEl.textContent = 'Failed to load stamp status: ' + (err.message || err);
+  }
+}
+
+document.getElementById('btn-stamp-upload')?.addEventListener('click', async () => {
+  const input = document.getElementById('stamp-file');
+  const file = input?.files?.[0];
+  if (!file) return setStampMsg('Choose a PNG or JPEG file first.', true);
+  setStampMsg('Uploading stamp…');
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    await api.uploadStamp(form);
+    input.value = '';
+    setStampMsg('Stamp saved and activated — future finalized PDFs will carry it.');
+    showToast('Official stamp uploaded and activated.');
+    await loadStampSettings();
+  } catch (err) {
+    setStampMsg('Upload failed: ' + (err.message || err), true);
+  }
+});
+
+document.getElementById('btn-stamp-toggle')?.addEventListener('click', async () => {
+  if (!stampState?.configured) return;
+  const to = !stampState.active;
+  setStampMsg((to ? 'Activating' : 'Deactivating') + ' stamp…');
+  try {
+    await api.setStampActive(to);
+    setStampMsg(to ? 'Stamp activated.' : 'Stamp deactivated — finalized PDFs will not carry it.');
+    await loadStampSettings();
+  } catch (err) {
+    setStampMsg('Failed: ' + (err.message || err), true);
+  }
+});
+
+document.getElementById('btn-stamp-delete')?.addEventListener('click', async () => {
+  if (!stampState?.configured) return setStampMsg('Nothing to remove.', true);
+  if (!confirm('Remove the official stamp completely? Finalized PDFs will no longer carry it.')) return;
+  try {
+    await api.deleteStamp();
+    setStampMsg('Stamp removed.');
+    await loadStampSettings();
+  } catch (err) {
+    setStampMsg('Failed: ' + (err.message || err), true);
+  }
+});
+
+// ─── Payment Arrangement (management-only; never tenant-visible) ────────────
+let tdArrCode = null;
+let tdArrActiveId = null;
+
+const tdArrMsg = (text, isError) => {
+  const el = document.getElementById('td-arr-msg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'text-xs font-mono text-center mt-2 ' + (isError ? 'text-rose-400' : 'text-green-400');
+};
+
+async function loadTenantArrangements(code) {
+  tdArrCode = code;
+  tdArrActiveId = null;
+  const body = document.getElementById('td-arr-body');
+  const badge = document.getElementById('td-arr-status');
+  const histWrap = document.getElementById('td-arr-history-wrap');
+  const histBody = document.getElementById('td-arr-history-tbody');
+  if (!body) return;
+  body.textContent = 'Loading…';
+  if (badge) { badge.textContent = '…'; badge.className = 'font-mono text-xs font-bold text-slate-400'; }
+  if (histWrap) histWrap.classList.add('hidden');
+  tdArrMsg('');
+  try {
+    const { arrangements, active } = await api.arrangements(code);
+    const money = (n) => `KES ${Number(n || 0).toLocaleString()}`;
+    const badgeFor = (s) => {
+      if (s === 'Approved') return 'text-green-400';
+      if (s === 'Fulfilled') return 'text-emerald-300';
+      if (s === 'Partially Paid') return 'text-amber-400';
+      if (s === 'Pending') return 'text-cyan-400';
+      if ((s || '').startsWith('Overdue')) return 'text-rose-400';
+      return 'text-slate-400';
+    };
+    if (!active) {
+      if (badge) { badge.textContent = 'NONE'; badge.className = 'font-mono text-xs font-bold text-slate-400'; }
+      body.innerHTML = '<span class="text-slate-500">Normal Rent Due Date governs. No arrangement in effect — fill the dates below to record one.</span>';
+    } else {
+      tdArrActiveId = active.id;
+      if (badge) { badge.textContent = (active.display_status || active.status).toUpperCase(); badge.className = `font-mono text-xs font-bold ${badgeFor(active.display_status || active.status)}`; }
+      body.innerHTML =
+        `<div class="grid grid-cols-2 md:grid-cols-4 gap-2">` +
+        `<div>Normal Due Date<br><span class="text-slate-200">${escapeHtml(active.normal_due_date || '—')}</span></div>` +
+        `<div>Approved Pay Date<br><span class="text-green-300">${escapeHtml(active.approved_date ? String(active.approved_date).slice(0, 10) : '—')}</span></div>` +
+        `<div>Actual Pay Date<br><span class="text-slate-200">${escapeHtml(active.actual_payment_date || 'Pending')}</span></div>` +
+        `<div>Status<br><span class="${badgeFor(active.display_status || active.status)}">${escapeHtml(active.display_status || active.status)}</span></div>` +
+        `<div>Rent (${escapeHtml(active.billing_period || '')})<br><span class="text-slate-200">${money(active.rent_amount)}</span></div>` +
+        `<div>Paid<br><span class="text-slate-200">${money(active.amount_paid)}</span></div>` +
+        `<div>Outstanding<br><span class="text-rose-300">${money(active.outstanding)}</span></div>` +
+        `<div>Notes<br><span class="text-slate-500">${escapeHtml((active.reason || '—').slice(0, 80))}</span></div>` +
+        `</div>`;
+      const req = document.getElementById('td-arr-requested');
+      const app = document.getElementById('td-arr-approved');
+      const rsn = document.getElementById('td-arr-reason');
+      if (req && !req.value && active.requested_date) req.value = String(active.requested_date).slice(0, 10);
+      if (app && !app.value && active.approved_date) app.value = String(active.approved_date).slice(0, 10);
+      if (rsn && !rsn.value && active.reason) rsn.value = active.reason;
+    }
+    if (histWrap && histBody) {
+      if ((arrangements || []).length) {
+        histWrap.classList.remove('hidden');
+        histBody.innerHTML = arrangements.map((a) => `
+          <tr>
+            <td class="font-mono text-xs">${escapeHtml(a.billing_period || '')}</td>
+            <td class="font-mono text-xs">${escapeHtml(a.requested_date ? String(a.requested_date).slice(0, 10) : '—')}</td>
+            <td class="font-mono text-xs">${escapeHtml(a.approved_date ? String(a.approved_date).slice(0, 10) : '—')}</td>
+            <td class="font-mono text-xs">${a.actual_payment_date ? `${escapeHtml(a.actual_payment_date)} · ${money(a.amount_paid)}` : 'Pending'}</td>
+            <td class="font-mono text-xs ${badgeFor(a.display_status || a.status)}">${escapeHtml(a.display_status || a.status)}</td>
+          </tr>`).join('');
+      } else {
+        histWrap.classList.add('hidden');
+      }
+    }
+  } catch (err) {
+    body.textContent = 'Failed to load arrangements: ' + (err.message || err);
+    // Unknown tenant: drop the linkage so Save/Approve can never file
+    // against a stale or truncated code. Transient errors keep it.
+    if (/not found/i.test(err.message || '')) tdArrCode = null;
+  }
+}
+
+function tdArrForm() {
+  return {
+    requested_date: document.getElementById('td-arr-requested')?.value || null,
+    approved_date: document.getElementById('td-arr-approved')?.value || null,
+    reason: document.getElementById('td-arr-reason')?.value.trim() || null,
+  };
+}
+
+document.getElementById('btn-td-arr-save')?.addEventListener('click', async () => {
+  if (!tdArrCode) return;
+  tdArrMsg('Saving…');
+  try {
+    const f = tdArrForm();
+    await api.createArrangement({ tenant_code: tdArrCode, ...f });
+    tdArrMsg('Arrangement saved as Pending.');
+    await loadTenantArrangements(tdArrCode);
+  } catch (err) { tdArrMsg('Save failed: ' + (err.message || err), true); }
+});
+
+document.getElementById('btn-td-arr-approve')?.addEventListener('click', async () => {
+  if (!tdArrCode) return;
+  tdArrMsg('Approving…');
+  try {
+    const f = tdArrForm();
+    let id = tdArrActiveId;
+    if (!id) {
+      const created = await api.createArrangement({ tenant_code: tdArrCode, ...f });
+      id = created.arrangement.id;
+    }
+    await api.approveArrangement(id, { approved_date: f.approved_date, reason: f.reason });
+    tdArrMsg('Arrangement APPROVED.');
+    await loadTenantArrangements(tdArrCode);
+  } catch (err) { tdArrMsg('Approve failed: ' + (err.message || err), true); }
+});
+
+document.getElementById('btn-td-arr-modify')?.addEventListener('click', async () => {
+  if (!tdArrActiveId) return tdArrMsg('No active arrangement to modify.', true);
+  tdArrMsg('Modifying…');
+  try {
+    const f = tdArrForm();
+    await api.modifyArrangement(tdArrActiveId, f);
+    tdArrMsg('Arrangement modified (change logged).');
+    await loadTenantArrangements(tdArrCode);
+  } catch (err) { tdArrMsg('Modify failed: ' + (err.message || err), true); }
+});
+
+document.getElementById('btn-td-arr-decline')?.addEventListener('click', async () => {
+  if (!tdArrActiveId) return tdArrMsg('No active arrangement to decline.', true);
+  try {
+    await api.declineArrangement(tdArrActiveId, { reason: tdArrForm().reason });
+    tdArrMsg('Arrangement declined.');
+    await loadTenantArrangements(tdArrCode);
+  } catch (err) { tdArrMsg('Decline failed: ' + (err.message || err), true); }
+});
+
+document.getElementById('btn-td-arr-cancel')?.addEventListener('click', async () => {
+  if (!tdArrActiveId) return tdArrMsg('No active arrangement to cancel.', true);
+  if (!confirm('Cancel this payment arrangement? The record is kept for audit.')) return;
+  try {
+    await api.cancelArrangement(tdArrActiveId, { reason: tdArrForm().reason });
+    tdArrMsg('Arrangement cancelled.');
+    await loadTenantArrangements(tdArrCode);
+  } catch (err) { tdArrMsg('Cancel failed: ' + (err.message || err), true); }
+});
+
+document.getElementById('btn-td-arr-expire')?.addEventListener('click', async () => {
+  if (!tdArrActiveId) return tdArrMsg('No active arrangement to expire.', true);
+  try {
+    await api.expireArrangement(tdArrActiveId, { reason: tdArrForm().reason });
+    tdArrMsg('Arrangement expired.');
+    await loadTenantArrangements(tdArrCode);
+  } catch (err) { tdArrMsg('Expire failed: ' + (err.message || err), true); }
+});
+
+// ─── Company Settings — Authorized Signature (admin) ───────────────────────
+let sigState = null;
+let sigPreviewUrl = null;
+
+function setSigMsg(text, isError) {
+  const el = document.getElementById('sig-msg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'text-sm font-mono text-center mt-2 ' + (isError ? 'text-rose-400' : 'text-green-400');
+}
+
+async function loadSignatureSettings() {
+  const statusEl = document.getElementById('sig-status');
+  const img = document.getElementById('sig-preview');
+  const toggleBtn = document.getElementById('btn-sig-toggle');
+  const holderInput = document.getElementById('sig-holder');
+  if (!statusEl) return;
+  setSigMsg('');
+  statusEl.textContent = 'Loading…';
+  try {
+    const s = await api.signatureStatus();
+    sigState = s;
+    if (!s.configured) {
+      statusEl.innerHTML = '<span class="text-amber-400">No signature uploaded yet.</span> Letters will show the generating user as signatory.';
+    } else {
+      statusEl.innerHTML =
+        `<span class="${s.active ? 'text-green-400' : 'text-amber-400'} font-bold">${s.active ? 'ACTIVE' : 'INACTIVE'}</span>` +
+        ` <span class="text-slate-200">${escapeHtml(s.holder_name || '—')}</span>` +
+        (s.updated_at ? ` <span class="text-slate-500">· ${escapeHtml(new Date(s.updated_at).toLocaleString())}</span>` : '');
+    }
+    if (holderInput && !holderInput.value && s.holder_name) holderInput.value = s.holder_name;
+    if (img) {
+      if (sigPreviewUrl) { URL.revokeObjectURL(sigPreviewUrl); sigPreviewUrl = null; }
+      if (s.configured && s.active) {
+        try {
+          const blob = await api.signatureImageBlob();
+          sigPreviewUrl = URL.createObjectURL(blob);
+          img.src = sigPreviewUrl;
+          img.classList.remove('hidden');
+        } catch (_) {
+          img.classList.add('hidden');
+        }
+      } else {
+        img.classList.add('hidden');
+      }
+    }
+    if (toggleBtn) {
+      toggleBtn.textContent = s.active ? 'Deactivate' : 'Activate';
+      toggleBtn.disabled = !s.configured;
+    }
+  } catch (err) {
+    statusEl.textContent = 'Failed to load signature status: ' + (err.message || err);
+  }
+}
+
+document.getElementById('btn-sig-upload')?.addEventListener('click', async () => {
+  const fileInput = document.getElementById('sig-file');
+  const file = fileInput?.files?.[0];
+  const holder = document.getElementById('sig-holder')?.value.trim() || '';
+  if (!file) return setSigMsg('Choose a PNG or JPEG file first.', true);
+  if (!holder) return setSigMsg('Enter the signature holder name first.', true);
+  setSigMsg('Uploading signature…');
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('holder_name', holder);
+    await api.uploadSignature(form);
+    fileInput.value = '';
+    setSigMsg('Signature saved and assigned — letter downloads will carry it.');
+    showToast('Authorized signature uploaded and assigned.');
+    await loadSignatureSettings();
+  } catch (err) {
+    setSigMsg('Upload failed: ' + (err.message || err), true);
+  }
+});
+
+document.getElementById('btn-sig-save-name')?.addEventListener('click', async () => {
+  const holder = document.getElementById('sig-holder')?.value.trim() || '';
+  if (!holder) return setSigMsg('Enter the signature holder name first.', true);
+  setSigMsg('Saving holder name…');
+  try {
+    await api.patchSignature({ holder_name: holder });
+    setSigMsg('Holder name saved.');
+    await loadSignatureSettings();
+  } catch (err) {
+    setSigMsg('Save failed: ' + (err.message || err), true);
+  }
+});
+
+document.getElementById('btn-sig-toggle')?.addEventListener('click', async () => {
+  if (!sigState?.configured) return;
+  const to = !sigState.active;
+  setSigMsg((to ? 'Activating' : 'Deactivating') + ' signature…');
+  try {
+    await api.patchSignature({ active: to });
+    setSigMsg(to ? 'Signature activated.' : 'Signature deactivated — letters fall back to the generating user.');
+    await loadSignatureSettings();
+  } catch (err) {
+    setSigMsg('Failed: ' + (err.message || err), true);
+  }
+});
+
+document.getElementById('btn-sig-delete')?.addEventListener('click', async () => {
+  if (!sigState?.configured) return setSigMsg('Nothing to remove.', true);
+  if (!confirm('Remove the authorized signature completely? Letter downloads will no longer carry it.')) return;
+  try {
+    await api.deleteSignature();
+    setSigMsg('Signature removed.');
+    await loadSignatureSettings();
+  } catch (err) {
+    setSigMsg('Failed: ' + (err.message || err), true);
+  }
 });
 
 async function loadUsers() {
@@ -7277,12 +10367,14 @@ async function loadReportData(month) {
 
 document.getElementById('mr-month-select')?.addEventListener('change', (e) => {
   if (_currentMrView === 'enhanced') loadEnhancedReport(e.target.value);
+  else if (_currentMrView === 'water') loadWaterBillReport();
   else loadReportData(e.target.value);
 });
 document.getElementById('mr-property-select')?.addEventListener('change', () => {
   const month = document.getElementById('mr-month-select')?.value;
   if (month) {
     if (_currentMrView === 'enhanced') loadEnhancedReport(month);
+    else if (_currentMrView === 'water') loadWaterBillReport();
     else loadReportData(month);
   }
 });
@@ -7291,6 +10383,7 @@ document.getElementById('btn-refresh-report')?.addEventListener('click', async (
   const month = document.getElementById('mr-month-select')?.value;
   if (!month) return;
   if (_currentMrView === 'enhanced') { await loadEnhancedReport(month); return; }
+  if (_currentMrView === 'water') { await loadWaterBillReport(); return; }
   const housePaybill = document.getElementById('mr-property-select')?.value || '';
   try {
     await api.refreshMonthlyReport(month, housePaybill || undefined);
@@ -7313,6 +10406,117 @@ let _currentMrView = 'standard';
 
 document.getElementById('btn-mr-standard')?.addEventListener('click', () => switchMrView('standard'));
 document.getElementById('btn-mr-enhanced')?.addEventListener('click', () => switchMrView('enhanced'));
+document.getElementById('btn-mr-water')?.addEventListener('click', () => switchMrView('water'));
+
+// ─── Water Bill Report (read-only reporting over recorded invoices) ───────
+
+async function loadWaterBillReport() {
+  const standardView = document.getElementById('mr-report-view');
+  const enhancedView = document.getElementById('mr-enhanced-view');
+  const waterView = document.getElementById('mr-water-view');
+  const empty = document.getElementById('mr-empty');
+  const tbody = document.getElementById('mr-water-tbody');
+  const tfoot = document.getElementById('mr-water-tfoot');
+  const summary = document.getElementById('mr-water-summary');
+  const resEl = document.getElementById('mr-water-result');
+  const month = document.getElementById('mr-month-select')?.value;
+  const housePaybill = document.getElementById('mr-property-select')?.value || '';
+  const unit = document.getElementById('mr-water-unit')?.value.trim() || null;
+  if (standardView) standardView.classList.add('hidden');
+  if (enhancedView) enhancedView.classList.add('hidden');
+  if (!month || !housePaybill) {
+    if (waterView) waterView.classList.remove('hidden');
+    if (empty) empty.classList.add('hidden');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-4">Select a billing month and a specific property above, then press Generate Report.</td></tr>';
+    if (tfoot) tfoot.innerHTML = '';
+    if (resEl) resEl.textContent = 'Select a billing month and a specific property first.';
+    return;
+  }
+  if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-4">Loading water bill report…</td></tr>';
+  try {
+    const { report } = await api.getWaterBillReport({ house_paybill: housePaybill, billing_month: month, unit });
+    if (waterView) waterView.classList.remove('hidden');
+    if (empty) empty.classList.add('hidden');
+    const money = (n) => 'KES ' + Number(n || 0).toLocaleString('en-KE', { maximumFractionDigits: 0 });
+    const rows = report.rows || [];
+    if (tbody) {
+      tbody.innerHTML = rows.length ? rows.map((r) => {
+        const vacant = r.occupancy === 'Vacant';
+        const note = vacant && r.usage_note ? `<div class="text-[10px] italic text-amber-400">${escapeHtml(r.usage_note)}</div>` : '';
+        return `<tr class="${vacant ? 'opacity-60' : ''}">
+          <td class="font-mono font-semibold">${escapeHtml(r.unit || '')}</td>
+          <td>${vacant ? '—' : escapeHtml(r.tenant_name || '')}</td>
+          <td>${vacant ? `<span class="text-slate-400">Vacant</span>${note}` : '<span class="text-green-400">Occupied</span>'}</td>
+          <td class="text-right font-mono">${Number(r.previous_reading || 0).toFixed(1)}</td>
+          <td class="text-right font-mono">${Number(r.current_reading || 0).toFixed(1)}</td>
+          <td class="text-right font-mono font-semibold">${Number(r.consumption || 0).toFixed(1)}</td>
+          <td class="text-right font-mono">${Number(r.rate_per_unit || 0).toFixed(2)}</td>
+          <td class="text-right font-mono font-semibold">${money(r.water_charge)}</td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="8" class="text-center text-slate-500 py-4">No units found for this property.</td></tr>';
+    }
+    const t = report.totals || {};
+    if (tfoot) {
+      tfoot.innerHTML = `<tr class="font-bold border-t-2 border-slate-600">
+        <td colspan="5" class="text-right">TOTALS (${t.total_units || 0} units · ${t.occupied_units || 0} occupied · ${t.vacant_units || 0} vacant)</td>
+        <td class="text-right font-mono">${Number(t.total_consumption || 0).toFixed(1)}</td>
+        <td></td>
+        <td class="text-right font-mono text-green-400">${money(t.total_water_charges)}</td>
+      </tr>`;
+    }
+    if (summary) {
+      const card = (label, val, cls) => `<div class="p-3 bg-slate-800/50 rounded-lg border border-slate-700"><p class="text-xs text-slate-400 uppercase font-bold mb-1">${label}</p><p class="text-xl font-bold ${cls}">${val}</p></div>`;
+      summary.innerHTML =
+        card('Billing month', escapeHtml(report.billing_month_label || ''), 'text-white') +
+        card('Units (occ/vac)', `${t.total_units || 0} (${t.occupied_units || 0}/${t.vacant_units || 0})`, 'text-cyan-400') +
+        card('Consumption', `${Number(t.total_consumption || 0).toFixed(1)} units`, 'text-white') +
+        card('Water rate', `KES ${Number(report.water_rate || 0).toFixed(2)}`, 'text-white') +
+        card('Total charges', money(t.total_water_charges), 'text-green-400');
+    }
+    if (resEl) resEl.textContent = `${rows.length} unit(s) · ${report.property_name || ''} · ${report.billing_month_label || ''}`;
+  } catch (err) {
+    if (waterView) waterView.classList.add('hidden');
+    if (empty) empty.classList.remove('hidden');
+    if (resEl) resEl.textContent = 'Error: ' + (err.message || err);
+  }
+}
+
+document.getElementById('btn-generate-water-report')?.addEventListener('click', loadWaterBillReport);
+
+document.getElementById('btn-download-water-report')?.addEventListener('click', async () => {
+  const month = document.getElementById('mr-month-select')?.value;
+  const housePaybill = document.getElementById('mr-property-select')?.value || '';
+  const unit = document.getElementById('mr-water-unit')?.value.trim() || null;
+  const resEl = document.getElementById('mr-water-result');
+  if (!month || !housePaybill) { if (resEl) resEl.textContent = 'Select a billing month and a specific property first.'; return; }
+  try {
+    if (resEl) resEl.textContent = 'Generating PDF…';
+    const result = await api.downloadWaterBillReport({ house_paybill: housePaybill, billing_month: month, unit });
+    if (result.blob) triggerFileDownload(result);
+    if (resEl) resEl.textContent = 'PDF downloaded.';
+  } catch (err) {
+    if (resEl) resEl.textContent = 'Download failed: ' + (err.message || err);
+  }
+});
+
+document.getElementById('btn-send-water-report')?.addEventListener('click', async () => {
+  const month = document.getElementById('mr-month-select')?.value;
+  const housePaybill = document.getElementById('mr-property-select')?.value || '';
+  const unit = document.getElementById('mr-water-unit')?.value.trim() || null;
+  const resEl = document.getElementById('mr-water-result');
+  if (!month || !housePaybill) { if (resEl) resEl.textContent = 'Select a billing month and a specific property first.'; return; }
+  const phone = prompt('Send the Water Bill Report PDF via WhatsApp to which number? (e.g. 2547XXXXXXXX)');
+  if (!phone) return;
+  try {
+    if (resEl) resEl.textContent = 'Sending via WhatsApp…';
+    const result = await api.sendWaterBillReport({ house_paybill: housePaybill, billing_month: month, unit, phone: phone.trim() });
+    if (resEl) resEl.textContent = result.message || 'Sent via WhatsApp.';
+    showToast('Water bill report sent via WhatsApp.');
+  } catch (err) {
+    if (resEl) resEl.textContent = 'Send failed: ' + ((err.data && err.data.error) || err.message || err);
+    showToast('Send failed: ' + ((err.data && err.data.error) || err.message || err), 'error');
+  }
+});
 
 function switchMrView(view) {
   _currentMrView = view;
@@ -7320,10 +10524,15 @@ function switchMrView(view) {
   document.getElementById('btn-mr-standard')?.classList.toggle('text-white', view === 'standard');
   document.getElementById('btn-mr-enhanced')?.classList.toggle('bg-blue-600', view === 'enhanced');
   document.getElementById('btn-mr-enhanced')?.classList.toggle('text-white', view === 'enhanced');
+  document.getElementById('btn-mr-water')?.classList.toggle('bg-blue-600', view === 'water');
+  document.getElementById('btn-mr-water')?.classList.toggle('text-white', view === 'water');
   const month = document.getElementById('mr-month-select')?.value;
   if (month) {
     if (view === 'enhanced') loadEnhancedReport(month);
+    else if (view === 'water') loadWaterBillReport();
     else loadReportData(month);
+  } else {
+    if (view === 'water') loadWaterBillReport();
   }
 }
 
@@ -7526,11 +10735,23 @@ function renderInvoiceRegister(records, total) {
   if (!tbody) return;
 
   if (!records.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-6">No invoices found in register.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">No invoices found in register.</td></tr>';
     return;
   }
 
-  tbody.innerHTML = records.map(r => `
+  tbody.innerHTML = records.map(r => {
+    const paidBadge = !r.payment_state ? '' :
+      r.payment_state === 'Paid'
+        ? '<span class="status-badge badge-active"><span class="status-dot"></span>Paid</span>'
+        : r.payment_state === 'Partially Paid'
+          ? '<span class="status-badge badge-pending"><span class="status-dot"></span>Partially Paid</span>'
+          : '<span class="status-badge badge-suspended"><span class="status-dot"></span>Unpaid</span>';
+    const paidCell = `<td class="text-right font-mono text-xs">
+        <div class="text-green-400">${formatKes(r.amount_paid || 0)} paid</div>
+        <div class="text-slate-400">${formatKes(r.balance_due ?? r.amount)} due</div>
+        <div class="mt-1">${paidBadge}</div>
+      </td>`;
+    return `
     <tr>
       <td><span class="sys-tag">${escapeHtml(irTypeLabel(r.invoice_type).toUpperCase())}</span></td>
       <td class="font-mono">${escapeHtml(r.invoice_number || '—')}</td>
@@ -7544,14 +10765,17 @@ function renderInvoiceRegister(records, total) {
       </td>
       <td>${formatDocsDate(r.generated_at)}</td>
       <td class="text-right font-mono">${r.amount != null ? formatKes(r.amount) : '—'}</td>
-      <td>${irRegisterBadge(r.status)}</td>
+      <td>${irRegisterBadge(r.status)}${r.voided ? ' <span class="sys-tag">VOID</span>' : ''}</td>
+      ${paidCell}
       <td class="text-right whitespace-nowrap">
         <button type="button" class="action-btn text-xs" data-ir-action="view" data-ir-id="${r.id}" ${r.document_id ? '' : 'disabled title="No stored PDF attached"'} ${r.document_id ? '' : 'style="opacity:0.4;cursor:not-allowed"'}>View</button>
         <button type="button" class="action-btn text-xs" data-ir-action="download" data-ir-id="${r.id}" ${r.document_id ? '' : 'disabled style="opacity:0.4;cursor:not-allowed"'}>Download</button>
         <button type="button" class="action-btn text-green-400 border-green-400 hover:bg-green-400/20 text-xs" data-ir-action="send" data-ir-id="${r.id}" ${r.document_id ? '' : 'disabled style="opacity:0.4;cursor:not-allowed"'}>WhatsApp</button>
+        <button type="button" class="action-btn text-xs" data-ir-action="edit" data-ir-id="${r.id}">Edit</button>
+        <button type="button" class="action-btn text-rose-400 border-rose-400 hover:bg-rose-400/20 text-xs" data-ir-action="delete" data-ir-id="${r.id}">Delete</button>
       </td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 async function openInvoiceRegisterView(id) {
@@ -7587,7 +10811,61 @@ async function openInvoiceRegisterView(id) {
   }
 }
 
+let irEditId = null;
+
+async function openInvoiceRegisterEdit(id) {
+  try {
+    const { register } = await api.invoiceRegisterById(id);
+    if (!register) throw new Error('Register entry not found');
+    irEditId = register.id;
+    const ctx = document.getElementById('ir-edit-context');
+    if (ctx) ctx.textContent = `${irTypeLabel(register.invoice_type)} ${register.invoice_number || ''} — ${register.tenant_name || ''} (${register.tenant_code || '—'})`;
+    const amt = document.getElementById('ir-edit-amount');
+    if (amt) amt.value = register.amount ?? '';
+    const note = document.getElementById('ir-edit-paid-note');
+    if (note) note.textContent = `Already paid: KES ${Number(register.amount_paid || 0).toLocaleString()} — balance recomputes automatically and the linked PDF amount follows. Payments and counters are untouched.`;
+    const statusEl = document.getElementById('ir-edit-status');
+    if (statusEl) { statusEl.textContent = ''; statusEl.className = 'text-sm font-mono text-amber-400'; }
+    document.getElementById('ir-edit-modal')?.classList.remove('hidden');
+  } catch (err) {
+    alert('Failed to open edit: ' + err.message);
+  }
+}
+
+document.getElementById('btn-ir-edit-cancel')?.addEventListener('click', () => {
+  document.getElementById('ir-edit-modal')?.classList.add('hidden');
+  irEditId = null;
+});
+
+document.getElementById('btn-ir-edit-save')?.addEventListener('click', async () => {
+  if (!irEditId) return;
+  const btn = document.getElementById('btn-ir-edit-save');
+  const statusEl = document.getElementById('ir-edit-status');
+  const amount = Number(document.getElementById('ir-edit-amount')?.value);
+  if (!Number.isFinite(amount) || amount < 0) {
+    if (statusEl) { statusEl.textContent = 'Enter a non-negative amount.'; statusEl.className = 'text-sm font-mono text-rose-400'; }
+    return;
+  }
+  if (btn) btn.disabled = true;
+  if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'text-sm font-mono text-amber-400'; }
+  try {
+    const res = await api.updateInvoiceRegister(irEditId, { amount });
+    if (statusEl) { statusEl.textContent = 'Saved — register, balance and linked PDF updated.'; statusEl.className = 'text-sm font-mono text-green-400'; }
+    showToast(`Invoice updated${res.clamped ? ' (balance clamped at zero — paid exceeded the new total)' : ''}.`);
+    setTimeout(() => {
+      document.getElementById('ir-edit-modal')?.classList.add('hidden');
+      irEditId = null;
+      loadInvoiceRegister();
+    }, 700);
+  } catch (err) {
+    if (statusEl) { statusEl.textContent = 'Save failed: ' + (err.message || err); statusEl.className = 'text-sm font-mono text-rose-400'; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+
 async function downloadInvoiceRegisterFile(id) {
+
   const { blob, filename } = await api.downloadRegisterDocument(id);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -7653,6 +10931,18 @@ document.getElementById('ir-tbody')?.addEventListener('click', async (e) => {
       const statusEl = document.getElementById('ir-share-status');
       if (statusEl) statusEl.textContent = '';
       document.getElementById('ir-share-modal')?.classList.remove('hidden');
+    } else if (action === 'edit') {
+      await openInvoiceRegisterEdit(id);
+    } else if (action === 'delete') {
+      const { register } = await api.invoiceRegisterById(id);
+      const label = `${register.invoice_type || 'invoice'} ${register.invoice_number || ''}`.trim();
+      if (!confirm(`Delete ${label} from the register?\n\nThis removes the register entry, its linked PDF and its payment links. Payments, receipts and tenant counters are NOT touched.`)) return;
+      btn.disabled = true;
+      try {
+        const res = await api.deleteInvoiceRegister(id);
+        showToast(`Invoice deleted (links removed: ${res.links_removed ?? 0}, document removed: ${res.document_removed ? 'yes' : 'no'}).`);
+        loadInvoiceRegister();
+      } finally { btn.disabled = false; }
     }
   } catch (err) {
     alert('Action failed: ' + err.message);
@@ -8008,8 +11298,17 @@ document.getElementById('dr-record-form')?.addEventListener('submit', async (e) 
 window.openDrDetail = openDrDetail;
 
 // ─── WhatsApp Module (QR-Linked) ────────────────────────────────────────────
-let _waPolling = null;
-let _waQrPolling = null;
+// NOTE: _waPolling/_waQrPolling are declared at the top of the file because
+// showView() (which runs during startup) calls waStart/StopPolling.
+try {
+  window.GEHM_DEBUG = {
+    version: () => GEHM_VERSION,
+    view: () => currentView,
+    viewLog: () => [..._gehmViewLog],
+    errors: () => [..._gehmErrors],
+    clickNav: (n) => showView(n),
+  };
+} catch (_) {}
 
 async function waLoadStatus() {
   try {
@@ -8056,6 +11355,8 @@ async function waLoadStatus() {
     } else {
       info.classList.add('hidden');
       btnConnect.style.display = '';
+      btnConnect.textContent = 'Connect WhatsApp';
+      btnConnect.disabled = false;
       btnDisconnect.style.display = 'none';
       btnLogout.style.display = 'none';
       btnTest.style.display = 'none';
@@ -8158,6 +11459,7 @@ async function waLoadStats() {
     const stats = data.stats || {};
     setTextEl('wa-stat-today', Number(stats.today || 0));
     setTextEl('wa-stat-sent', Number(stats.sent_count || 0));
+    setTextEl('wa-stat-delivered', Number(stats.delivered_count || 0));
     setTextEl('wa-stat-failed', Number(stats.failed_count || 0));
     setTextEl('wa-stat-queued', Number(stats.queued || 0));
   } catch (_) {}
@@ -8171,27 +11473,46 @@ async function waLoadMessages(page = 1) {
     const messages = data.messages || [];
     if (messages.length === 0) {
       tbody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-slate-500">No messages yet</td></tr>';
+      const emptyPag = document.getElementById('wa-messages-pagination');
+      if (emptyPag) emptyPag.innerHTML = '';
       return;
     }
-    tbody.innerHTML = messages.map(m => `
+    tbody.innerHTML = messages.map(m => {
+      const body = (m.content || '').replace(/\s+/g, ' ').trim();
+      const snippet = body.length > 90 ? body.slice(0, 90) + '…' : body;
+      const st = (m.status || '').toLowerCase();
+      const badge = ['sent', 'delivered', 'read'].includes(st)
+        ? 'bg-green-900 text-green-300'
+        : st === 'failed' ? 'bg-red-900 text-red-300' : 'bg-slate-700 text-slate-300';
+      return `
       <tr class="text-sm">
-        <td class="py-2 pr-3">${escapeHtml(m.tenant_name || '—')}</td>
+        <td class="py-2 pr-3">${escapeHtml(m.tenant_name || m.tenant_code || '—')}</td>
         <td class="py-2 pr-3 font-mono text-xs">${escapeHtml(m.phone_number || '—')}</td>
         <td class="py-2 pr-3">${escapeHtml(m.message_type || 'text')}</td>
-        <td class="py-2 pr-3"><span class="px-2 py-0.5 rounded text-xs ${m.status === 'sent' ? 'bg-green-900 text-green-300' : m.status === 'failed' ? 'bg-red-900 text-red-300' : 'bg-slate-700 text-slate-300'}">${escapeHtml(m.status)}</span></td>
-        <td class="py-2 pr-3">${escapeHtml(m.direction)}</td>
+        <td class="py-2 pr-3"><span class="px-2 py-0.5 rounded text-xs ${badge}">${escapeHtml(m.status || '—')}</span></td>
+        <td class="py-2 pr-3 text-xs text-slate-500" title="${escapeHtml(body)}">${escapeHtml(snippet) || '—'}</td>
         <td class="py-2 text-xs text-slate-400">${m.created_at ? new Date(m.created_at).toLocaleString() : '—'}</td>
-      </tr>
-    `).join('');
-    const totalPages = data.totalPages || 1;
+      </tr>`;
+    }).join('');
+
+    const pagination = data.pagination || {};
+    const totalPages = Math.max(Number(pagination.totalPages) || 1, 1);
     const pag = document.getElementById('wa-messages-pagination');
-    if (pag && totalPages > 1) {
-      let btns = '';
-      for (let i = 1; i <= totalPages; i++) {
-        btns += `<button class="qc-btn text-xs ${i === page ? 'qc-btn-primary' : ''}" onclick="waLoadMessages(${i})">${i}</button>`;
-      }
-      pag.innerHTML = btns;
+    if (!pag) return;
+    if (totalPages <= 1) { pag.innerHTML = ''; return; }
+    const cur = Math.min(Math.max(Number(pagination.page) || page, 1), totalPages);
+    const win = 2;
+    const start = Math.max(1, cur - win);
+    const end = Math.min(totalPages, cur + win);
+    let html = `<button class="qc-btn text-xs" ${cur <= 1 ? 'disabled' : ''} onclick="waLoadMessages(${cur - 1})">‹ Prev</button>`;
+    if (start > 1) html += `<button class="qc-btn text-xs" onclick="waLoadMessages(1)">1</button>${start > 2 ? '<span class="text-slate-400 text-xs px-1 self-center">…</span>' : ''}`;
+    for (let i = start; i <= end; i++) {
+      html += `<button class="qc-btn text-xs ${i === cur ? 'qc-btn-primary' : ''}" onclick="waLoadMessages(${i})">${i}</button>`;
     }
+    if (end < totalPages) html += `${end < totalPages - 1 ? '<span class="text-slate-400 text-xs px-1 self-center">…</span>' : ''}<button class="qc-btn text-xs" onclick="waLoadMessages(${totalPages})">${totalPages}</button>`;
+    html += `<button class="qc-btn text-xs" ${cur >= totalPages ? 'disabled' : ''} onclick="waLoadMessages(${cur + 1})">Next ›</button>`;
+    html += `<span class="text-xs text-slate-400 px-1 self-center">Page ${cur} of ${totalPages}</span>`;
+    pag.innerHTML = html;
   } catch (err) {
     console.error('[WA] Messages error:', err);
   }
@@ -8330,6 +11651,169 @@ window.waSendTestMsg = waSendTestMsg;
 window.waLoadMessages = waLoadMessages;
 window.waSaveSettings = waSaveSettings;
 window.waPreviewTemplate = waPreviewTemplate;
+
+// ─── SMS Module (Bytewave Networks) ────────────────────────────────────────
+
+async function smsLoadStatus() {
+  try {
+    const info = await api.smsStatus();
+    setTextEl('sms-status-text', info.hasToken ? 'Configured' : 'Not configured');
+    const dot = document.getElementById('sms-status-dot');
+    if (dot) dot.className = `w-2 h-2 rounded-full ${info.hasToken ? 'bg-green-500' : 'bg-amber-400'}`;
+    const panel = document.getElementById('sms-provider-info');
+    if (panel) panel.classList.toggle('hidden', false);
+    setTextEl('sms-provider-name', info.providerName || 'Bytewave Networks');
+    setTextEl('sms-api-base', info.apiBase || '');
+    setTextEl('sms-sender-display', info.senderId ? `Sender ID: ${info.senderId}` : 'Sender ID: (none)');
+    const senderInput = document.getElementById('sms-sender-id');
+    if (senderInput && info.senderId) senderInput.value = info.senderId;
+    const tokenInput = document.getElementById('sms-api-token');
+    if (tokenInput) tokenInput.value = '';
+  } catch (err) {
+    // Retry once — on first view the auth token may still be settling
+    if (!err || err.status !== 401) {
+      setTextEl('sms-status-text', 'Error');
+      console.error('[SMS] Status error:', err);
+      return;
+    }
+    await new Promise(r => setTimeout(r, 1200));
+    try {
+      const info2 = await api.smsStatus();
+      setTextEl('sms-status-text', info2.hasToken ? 'Configured' : 'Not configured');
+      const dot2 = document.getElementById('sms-status-dot');
+      if (dot2) dot2.className = `w-2 h-2 rounded-full ${info2.hasToken ? 'bg-green-500' : 'bg-amber-400'}`;
+      const panel2 = document.getElementById('sms-provider-info');
+      if (panel2) panel2.classList.toggle('hidden', false);
+      setTextEl('sms-provider-name', info2.providerName || 'Bytewave Networks');
+      setTextEl('sms-api-base', info2.apiBase || '');
+      setTextEl('sms-sender-display', info2.senderId ? `Sender ID: ${info2.senderId}` : 'Sender ID: (none)');
+      const senderInput2 = document.getElementById('sms-sender-id');
+      if (senderInput2 && info2.senderId) senderInput2.value = info2.senderId;
+    } catch (_) {
+      setTextEl('sms-status-text', 'Error');
+    }
+  }
+}
+
+async function smsSaveSettings() {
+  const token = document.getElementById('sms-api-token')?.value?.trim() || '';
+  const senderId = document.getElementById('sms-sender-id')?.value?.trim() || '';
+  const body = {};
+  if (token) body.api_token = token;
+  if (senderId) body.sender_id = senderId;
+  if (Object.keys(body).length === 0) return alert('Enter an API token and/or Sender ID');
+  try {
+    await api.smsUpdateSettings(body);
+    alert('SMS settings saved!');
+    const tokenInput = document.getElementById('sms-api-token');
+    if (tokenInput) tokenInput.value = '';
+    smsLoadStatus();
+    smsLoadBalance();
+  } catch (err) {
+    alert('Failed: ' + (err.message || err));
+  }
+}
+
+// Per-SMS cost as reported by the Bytewave gateway on real sends (KSh).
+const SMS_RATE_KSH = 0.3;
+
+async function smsLoadBalance() {
+  const el = document.getElementById('sms-balance-display');
+  if (el) el.textContent = '…';
+  try {
+    const data = await api.smsBalance();
+    // Gateway payload: { ok, data: { status, message, data: { remaining_balance, expired_on } } }
+    const inner = data.data || {};
+    const gw = (inner.data && typeof inner.data === 'object') ? inner.data : inner;
+    const amount = parseFloat(String(gw.remaining_balance ?? gw.balance ?? '').replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(amount)) {
+      if (el) el.textContent = '—';
+      return;
+    }
+    const sms = Math.floor(amount / SMS_RATE_KSH).toLocaleString('en-KE');
+    const bal = amount.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (el) {
+      el.innerHTML =
+        `<span><span class="font-semibold text-slate-800">${sms}</span> <span class="text-xs text-slate-500">SMS available</span></span>` +
+        `<span><span class="text-xs text-slate-500">KSh</span> <span class="font-semibold text-slate-800">${bal}</span> <span class="text-xs text-slate-500">Balance</span></span>`;
+    }
+  } catch (_) {
+    // Always-visible widget — stay quiet on transient gateway/network errors.
+    if (el) el.textContent = '—';
+  }
+}
+
+async function smsSendTestMsg() {
+  const phone = document.getElementById('sms-test-phone')?.value;
+  const msg = document.getElementById('sms-test-msg')?.value;
+  if (!phone || !msg) return alert('Enter phone and message');
+  try {
+    const result = await api.smsSendTest(phone, msg);
+    alert(result.message || 'SMS sent!');
+    smsLoadMessages();
+  } catch (err) {
+    alert('Failed: ' + (err.message || err));
+    smsLoadMessages();
+  }
+}
+
+async function smsLoadMessages(page = 1) {
+  try {
+    const data = await api.smsMessages({ page, limit: 20 });
+    const tbody = document.getElementById('sms-messages-tbody');
+    if (!tbody) return;
+    const messages = data.messages || [];
+    if (messages.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-slate-500">No SMS messages yet</td></tr>';
+      const emptyPag = document.getElementById('sms-messages-pagination');
+      if (emptyPag) emptyPag.innerHTML = '';
+      return;
+    }
+    tbody.innerHTML = messages.map(m => {
+      const body = (m.content || '').replace(/\s+/g, ' ').trim();
+      const snippet = body.length > 90 ? body.slice(0, 90) + '…' : body;
+      const st = (m.status || '').toLowerCase();
+      const badge = ['sent', 'delivered', 'read'].includes(st)
+        ? 'bg-green-900 text-green-300'
+        : st === 'failed' ? 'bg-red-900 text-red-300' : 'bg-slate-700 text-slate-300';
+      return `
+      <tr class="text-sm">
+        <td class="py-2 pr-3">${escapeHtml(m.tenant_name || m.tenant_code || '—')}</td>
+        <td class="py-2 pr-3">${escapeHtml(m.message_type || 'SMS')}</td>
+        <td class="py-2 pr-3"><span class="px-2 py-0.5 rounded text-xs ${badge}">${escapeHtml(m.status || '—')}</span></td>
+        <td class="py-2 pr-3 text-xs text-slate-500" title="${escapeHtml(body)}">${escapeHtml(snippet) || '—'}</td>
+        <td class="py-2 text-xs text-slate-400">${m.created_at ? new Date(m.created_at).toLocaleString() : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    const pagination = data.pagination || {};
+    const totalPages = Math.max(Number(pagination.totalPages) || 1, 1);
+    const pag = document.getElementById('sms-messages-pagination');
+    if (!pag) return;
+    if (totalPages <= 1) { pag.innerHTML = ''; return; }
+    const cur = Math.min(Math.max(Number(pagination.page) || page, 1), totalPages);
+    const win = 2;
+    const start = Math.max(1, cur - win);
+    const end = Math.min(totalPages, cur + win);
+    let html = `<button class="qc-btn text-xs" ${cur <= 1 ? 'disabled' : ''} onclick="smsLoadMessages(${cur - 1})">‹ Prev</button>`;
+    if (start > 1) html += `<button class="qc-btn text-xs" onclick="smsLoadMessages(1)">1</button>${start > 2 ? '<span class="text-slate-400 text-xs px-1 self-center">…</span>' : ''}`;
+    for (let i = start; i <= end; i++) {
+      html += `<button class="qc-btn text-xs ${i === cur ? 'qc-btn-primary' : ''}" onclick="smsLoadMessages(${i})">${i}</button>`;
+    }
+    if (end < totalPages) html += `${end < totalPages - 1 ? '<span class="text-slate-400 text-xs px-1 self-center">…</span>' : ''}<button class="qc-btn text-xs" onclick="smsLoadMessages(${totalPages})">${totalPages}</button>`;
+    html += `<button class="qc-btn text-xs" ${cur >= totalPages ? 'disabled' : ''} onclick="smsLoadMessages(${cur + 1})">Next ›</button>`;
+    html += `<span class="text-xs text-slate-400 px-1 self-center">Page ${cur} of ${totalPages}</span>`;
+    pag.innerHTML = html;
+  } catch (err) {
+    console.error('[SMS] Messages error:', err);
+  }
+}
+
+window.smsLoadStatus = smsLoadStatus;
+window.smsSaveSettings = smsSaveSettings;
+window.smsLoadBalance = smsLoadBalance;
+window.smsSendTestMsg = smsSendTestMsg;
+window.smsLoadMessages = smsLoadMessages;
 
 // ─── Future Tenancies ──────────────────────────────────────────────────────
 
@@ -8698,12 +12182,27 @@ async function loadWaterBillInvoices() {
     const tbody = document.getElementById('wb-list-tbody');
     if (!tbody) return;
     const invoices = data.water_invoices || [];
+    const cachedPending = await offlineDb
+      .getAll('water')
+      .then((all) => (all || []).filter((r) => r && (r.sync === 'pending' || r.sync === 'failed')))
+      .catch(() => []);
+    const pendingRows = cachedPending.map((r) => `<tr class="border-b border-slate-800 hover:bg-slate-800/30" style="opacity:.92">
+        <td class="font-mono text-xs">${escapeHtml(r.wtr_number || '(pending)')}</td>
+        <td>—</td><td>—</td>
+        <td>${escapeHtml(r.tenant_name || '—')}</td>
+        <td>${escapeHtml(r.billing_month || '—')}</td>
+        <td class="text-right font-mono font-bold">—</td>
+        <td>${escapeHtml((r.created_at || '').slice(0, 10))}</td>
+        <td>${offlineSyncBadge(r.sync)}</td>
+        <td><span class="text-slate-500">Unpaid</span></td>
+        <td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td>
+      </tr>`).join('');
     const filtered = unitFilter ? invoices.filter(inv => (inv.unit_label || '').toLowerCase().includes(unitFilter.toLowerCase())) : invoices;
-    if (!filtered.length) {
+    if (!filtered.length && !cachedPending.length) {
       tbody.innerHTML = '<tr><td colspan="10" class="text-center text-slate-500 py-6">No water invoices found.</td></tr>';
       return;
     }
-    tbody.innerHTML = filtered.map(inv => {
+    tbody.innerHTML = pendingRows + filtered.map(inv => {
       const statusClass = { Draft: 'text-amber-400', Finalized: 'text-blue-400', Sent: 'text-green-400', Downloaded: 'text-blue-300', Paid: 'text-green-300', Void: 'text-rose-400' }[inv.status] || 'text-slate-400';
       const actions = [];
       actions.push(`<button class="text-cyan-400 hover:text-cyan-300 px-1" onclick="viewWaterInvoice(${inv.id})">View</button>`);
@@ -8725,13 +12224,34 @@ async function loadWaterBillInvoices() {
         <td>${escapeHtml(inv.billing_month)}</td>
         <td class="text-right font-mono font-bold">${Number(inv.total_amount).toLocaleString()}</td>
         <td>${inv.created_at ? new Date(inv.created_at).toLocaleDateString('en-GB') : ''}</td>
-        <td class="${statusClass} font-semibold">${escapeHtml(inv.status)}</td>
+        <td class="${statusClass} font-semibold">${escapeHtml(inv.status)}${inv.anomaly_flag ? ` <span title="${escapeHtml(inv.anomaly_detail || inv.anomaly_flag)}">⚠️ ${escapeHtml(String(inv.anomaly_flag).toUpperCase())}</span>` : ''}</td>
         <td>${paymentStatus}</td>
         <td class="text-right whitespace-nowrap">${actions.join(' ')}</td>
       </tr>`;
     }).join('');
   } catch (err) {
-    showToast('Failed to load water invoices: ' + err.message, 'error');
+    if (!isNetworkError(err)) {
+      showToast('Failed to load water invoices: ' + err.message, 'error');
+      return;
+    }
+    const tbody = document.getElementById('wb-list-tbody');
+    if (!tbody) return;
+    const cached = await offlineDb.getAll('water').catch(() => []);
+    if (!cached.length) {
+      tbody.innerHTML = '<tr><td colspan="10" class="text-center text-slate-500 py-6">Offline — no synced water records on this device yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-amber-500 text-xs font-mono py-2">📴 Offline — showing last synced data</td></tr>' + cached.map((r) => `<tr class="border-b border-slate-800 hover:bg-slate-800/30" style="opacity:.92">
+        <td class="font-mono text-xs">${escapeHtml(r.wtr_number || '(pending)')}</td>
+        <td>—</td><td>—</td>
+        <td>${escapeHtml(r.tenant_name || '—')}</td>
+        <td>${escapeHtml(r.billing_month || '—')}</td>
+        <td class="text-right font-mono font-bold">—</td>
+        <td>${escapeHtml((r.created_at || r.synced_at || '').slice(0, 10))}</td>
+        <td>${offlineSyncBadge(r.sync)}${r.anomaly_flag ? `<div class="text-[10px] text-amber-500 font-mono mt-1" title="${escapeHtml(r.anomaly_detail || '')}">⚠️ ${escapeHtml(String(r.anomaly_flag).toUpperCase())}</div>` : ''}</td>
+        <td><span class="text-slate-500">Unpaid</span></td>
+        <td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td>
+      </tr>`).join('');
   }
 }
 
@@ -8987,6 +12507,49 @@ function updateWaterBillCalc() {
   document.getElementById('wb-current-charges-display').textContent = fmt(totalCurrentCharges);
   document.getElementById('wb-outstanding-display').textContent = fmt(totalOutstanding);
   document.getElementById('wb-grand-total-display').textContent = fmt(grandTotal);
+  // Live anomaly screen (Phase 3) — same rules as the server.
+  try { renderWaterAnomalyWarn(); } catch (_) {}
+}
+
+/** History of per-bill consumption for the form's tenant (cached invoices). */
+function currentWaterAnomaly(historyUnits) {
+  const prev = Number(document.getElementById('wb-prev-reading')?.value || 0);
+  const curr = Number(document.getElementById('wb-curr-reading')?.value || 0);
+  return detectWaterAnomaly({ previous: prev, current: curr, history: historyUnits || [] });
+}
+
+async function cachedWaterHistoryUnits() {
+  const code = waterBillCurrentTenant?.tenant_code;
+  if (!code) return [];
+  const cached = await offlineDb.getAll('water').catch(() => []);
+  // Server rows lack per-row readings in cache; use units where stored,
+  // else fall back to consumption derived from consecutive readings.
+  const rows = (cached || []).filter((w) => w && w.tenant_code === code && w.sync === 'synced');
+  const units = [];
+  for (const w of rows) {
+    if (w.units_used != null) units.push(Number(w.units_used));
+  }
+  return units.slice(0, 6);
+}
+
+async function renderWaterAnomalyWarn() {
+  const el = document.getElementById('wb-anomaly-warn');
+  if (!el) return;
+  const history = await cachedWaterHistoryUnits();
+  const a = currentWaterAnomaly(history);
+  if (a.level === 'ok' || !a.code) {
+    el.classList.add('hidden');
+    el.textContent = '';
+    return;
+  }
+  el.classList.remove('hidden');
+  if (a.level === 'reject') {
+    el.style.cssText = 'background:#450a0a;border:1px solid #ef4444;color:#fecaca';
+    el.textContent = '⛔ ' + a.message;
+  } else {
+    el.style.cssText = 'background:#451a03;border:1px solid #f59e0b;color:#fde68a';
+    el.textContent = '⚠️ ' + a.message;
+  }
 }
 
 // Form submit
@@ -9128,6 +12691,51 @@ document.getElementById('btn-close-wb-review')?.addEventListener('click', functi
 document.getElementById('btn-confirm-wb-issue')?.addEventListener('click', async function() {
   const body = JSON.parse(document.getElementById('wb-review-modal').dataset.body || '{}');
   const resultEl = document.getElementById('wb-form-result');
+  // Anomaly gate (Phase 3): rejections block here too, so a bad reading
+  // can never be queued offline nor posted online.
+  try {
+    const history = await cachedWaterHistoryUnits();
+    const anomaly = currentWaterAnomaly(history);
+    if (anomaly.level === 'reject') {
+      resultEl.textContent = '⛔ ' + anomaly.message;
+      resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+      return;
+    }
+    if (anomaly.level === 'warn' && !confirm(`⚠️ Unusual reading\n\n${anomaly.message}\n\nSave anyway?`)) {
+      return;
+    }
+    body.anomaly_flag = anomaly.level === 'warn' ? anomaly.code : null;
+    body.anomaly_detail = anomaly.level === 'warn' ? anomaly.message : null;
+  } catch (_) {}
+  // Offline: queue the reading (PENDING SYNC). Previous-reading validation
+  // re-runs server-side on sync against live data.
+  if (effectiveOffline()) {
+    try {
+      const clientTxnId = offlineDb.newClientTxnId();
+      await queueOutboxOp({ type: 'water_create', payload: { ...body, client_txn_id: clientTxnId } });
+      await offlineDb.put('water', {
+        key: `pending:${clientTxnId}`,
+        client_txn_id: clientTxnId,
+        server_id: null,
+        wtr_number: '(pending)',
+        tenant_code: body.tenant_code || '',
+        tenant_name: body.tenant_name || '',
+        billing_month: body.billing_month || '',
+        current_reading: Number(body.current_reading || 0),
+        sync: 'pending',
+        created_at: new Date().toISOString(),
+      });
+      document.getElementById('wb-review-modal').style.display = 'none';
+      resultEl.textContent = '🟠 Reading saved offline — PENDING SYNC. Will upload when internet returns.';
+      resultEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
+      showToast('Water reading saved offline (PENDING SYNC)');
+      setTimeout(() => { cancelWaterBillForm(); try { loadWaterBillInvoices(); } catch (_) {} }, 1200);
+    } catch (err) {
+      resultEl.textContent = 'Offline save failed: ' + err.message;
+      resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
+    }
+    return;
+  }
   try {
     const data = await api.createWaterInvoice(body);
     if (data.water_invoice) {
@@ -9171,14 +12779,15 @@ async function viewWaterInvoice(id) {
     const billingLabel = new Date(`${inv.billing_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
     const paymentLabel = inv.payment_month ? new Date(`${inv.payment_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' }) : '';
     const dueDateLabel = (() => {
-      if (!inv.due_date) return 'N/A';
-      const p = String(inv.due_date).split('-');
-      if (p.length < 3) return inv.due_date;
-      const day = parseInt(p[2], 10);
-      const month = parseInt(p[1], 10);
-      const year = parseInt(p[0], 10);
+      const m = String(inv.due_date || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return 'N/A';
+      const day = Number(m[3]); const month = Number(m[2]); const year = Number(m[1]);
       const months = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
-      return `${day} ${months[month]} ${year}`;
+      const ord = (n) => {
+        if (n % 100 >= 11 && n % 100 <= 13) return `${n}th`;
+        switch (n % 10) { case 1: return `${n}st`; case 2: return `${n}nd`; case 3: return `${n}rd`; default: return `${n}th`; }
+      };
+      return `${ord(day)} ${months[month]} ${year}`;
     })();
     const statusClass = { Draft: 'text-amber-400', Finalized: 'text-blue-400', Sent: 'text-green-400', Paid: 'text-green-300', Void: 'text-rose-400' }[inv.status] || 'text-slate-400';
     const fmt = (v) => `KES ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
