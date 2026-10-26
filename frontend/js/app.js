@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v67';
+const GEHM_VERSION = 'v68';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -4558,6 +4558,11 @@ async function approvePaymentFromMessageFlow() {
     if (waStatus === 'Failed' && wa.failureReason) hintMsg += ` (${wa.failureReason})`;
     if (waStatus === 'Pending') hintMsg += ' (awaiting delivery confirmation)';
     if (hint) hint.textContent = hintMsg;
+    if (waStatus === 'Pending' && result.payment && result.payment.id) {
+      // Keep polling the delivery receipt so this status flips to
+      // Delivered/Read automatically once WhatsApp confirms delivery.
+      trackPaymentDelivery(result.payment.id, hint, 'Approved. WhatsApp');
+    }
     loadPayments();
     loadDashboard();
   } catch (err) {
@@ -4573,6 +4578,52 @@ async function approvePaymentFromMessageFlow() {
     }
     if (approveBtn) approveBtn.disabled = false;
   }
+}
+
+// Live WhatsApp delivery tracker: polls the payment's delivery status until
+// WhatsApp confirms (Delivered/Read) or fails, updating either the inline
+// approval hint or a dismissible fixed banner. The backend callback
+// (Baileys delivery receipt -> message_logs) is the source of truth.
+async function trackPaymentDelivery(paymentId, hintEl = null, hintBase = 'Approved. WhatsApp') {
+  let banner = null;
+  let statusEl = null;
+  if (!hintEl) {
+    document.getElementById('wa-delivery-banner')?.remove();
+    banner = document.createElement('div');
+    banner.id = 'wa-delivery-banner';
+    banner.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#1e293b;border:1px solid #f59e0b;padding:14px 16px;border-radius:8px;z-index:9999;max-width:360px;color:#e2f8f0;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3)';
+    banner.innerHTML = `<div class="wa-delivery-line">Approved. WhatsApp: Pending — waiting for delivery confirmation…</div>
+      <button onclick="this.parentElement.remove()" style="background:transparent;color:#94a3b8;border:none;cursor:pointer;margin-left:8px;font-size:12px">Dismiss</button>`;
+    statusEl = banner.querySelector('.wa-delivery-line');
+    document.body.appendChild(banner);
+  }
+  const set = (text, color, borderColor) => {
+    if (hintEl) { hintEl.textContent = text; hintEl.style.color = color || ''; }
+    if (statusEl) { statusEl.textContent = text; statusEl.style.color = color || ''; if (borderColor && banner) banner.style.borderColor = borderColor; }
+  };
+  const BASE = hintBase;
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    if (banner && !document.body.contains(banner)) return; // dismissed
+    try {
+      const { delivery } = await api.paymentDeliveryStatus(paymentId);
+      const st = delivery && delivery.status;
+      if (st === 'Delivered' || st === 'Read') {
+        set(`${BASE}: ${st} ✓ (auto-confirmed)`, '#16a34a', '#22c55e');
+        return;
+      }
+      if (st === 'Failed') {
+        set(`${BASE}: Failed — use Resend`, '#dc2626', '#ef4444');
+        return;
+      }
+      if (st === 'Sent' || st === 'Pending') {
+        set(`${BASE}: ${st} — waiting for delivery confirmation…`);
+      } else if (st === null && delivery && delivery.reason === 'confirmation_not_logged') {
+        set(`${BASE}: confirmation still sending…`);
+      }
+    } catch (_) { /* transient network error — keep polling */ }
+  }
+  set(`${BASE}: confirmation still pending — see WhatsApp > Messages for the live status`);
 }
 
 document.getElementById('btn-parse-payment-message')?.addEventListener('click', parsePaymentMessageFlow);
@@ -5585,6 +5636,15 @@ document.getElementById('payments-tbody')?.addEventListener('click', async (e) =
           banner.innerHTML = `<div>WhatsApp delivery failed for this payment.</div>${resendBtn} <button onclick="this.parentElement.remove()" style="background:transparent;color:#94a3b8;border:none;cursor:pointer;margin-left:8px">Dismiss</button>`;
           document.body.appendChild(banner);
         }, 100);
+      } else if (waStatus === 'Pending') {
+        // Live status banner instead of a one-shot alert: updates itself to
+        // Delivered/Read as soon as the WhatsApp delivery receipt arrives.
+        const pdfNote = result.pdf ? ` PDF receipt: ${result.pdf.status}.` : '';
+        if (result.payment && result.payment.id) {
+          trackPaymentDelivery(result.payment.id, null, 'Approved. WhatsApp');
+        } else {
+          alert(`Approved. WhatsApp: Pending.${pdfNote}`);
+        }
       } else {
         const pdfStatus = result.pdf ? ` PDF receipt: ${result.pdf.status}.` : '';
         alert(`Approved. WhatsApp: ${waStatus}.${pdfStatus}`);
@@ -11723,6 +11783,27 @@ async function waLoadMessages(page = 1) {
     const tbody = document.getElementById('wa-messages-tbody');
     if (!tbody) return;
     const messages = data.messages || [];
+
+    // Auto-refresh: while any message on this page is still awaiting a
+    // delivery/read receipt, re-load so Delivered/Read appear automatically
+    // (bounded so it can never poll forever).
+    clearTimeout(window._waMessagesRefreshTimer);
+    const awaitingDelivery = messages.some((m) => {
+      const st = String(m.status || '').toLowerCase();
+      return st === 'pending' || st === 'sent' || st === 'sending' || st === 'queued';
+    });
+    if (awaitingDelivery) {
+      window._waMessagesRefreshCount = (window._waMessagesRefreshCount || 0) + 1;
+      if (window._waMessagesRefreshCount <= 30) {
+        window._waMessagesRefreshTimer = setTimeout(() => {
+          const view = document.querySelector('[data-view="messages"]');
+          if (view && !view.classList.contains('hidden')) waLoadMessages(page);
+          else window._waMessagesRefreshCount = 0;
+        }, 5000);
+      }
+    } else {
+      window._waMessagesRefreshCount = 0;
+    }
     if (messages.length === 0) {
       tbody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-slate-500">No messages yet</td></tr>';
       const emptyPag = document.getElementById('wa-messages-pagination');

@@ -3844,6 +3844,48 @@ async function logMessage({ tenantId, messageType, messageBody, status, whatsapp
   return res.rows[0]?.id;
 }
 
+/**
+ * Live WhatsApp delivery status for an approved payment's confirmation
+ * message. The confirmation log carries the provider message id, and the
+ * Baileys delivery-receipt callback upgrades message_logs.status to
+ * Delivered/Read — this reads whatever that callback has confirmed so far.
+ * Returns null when the payment or its confirmation log cannot be found.
+ */
+async function getPaymentDeliveryStatus(paymentId) {
+  const pay = await query(
+    `SELECT id, tenant_code, receipt_number, status FROM payments WHERE id = $1`,
+    [paymentId]
+  );
+  const p = pay.rows[0];
+  if (!p) return null;
+  if (p.status !== 'Approved' || !p.receipt_number) {
+    return { status: null, payment_status: p.status, reason: 'not_approved' };
+  }
+  // Both confirmation texts (direct send + queued template) contain the
+  // receipt number — track the most recent one for this tenant.
+  const msg = await query(
+    `SELECT id, message_type, status, whatsapp_message_id, logged_at
+       FROM message_logs
+      WHERE tenant_code = $1
+        AND message_body LIKE '%' || $2 || '%'
+      ORDER BY id DESC
+      LIMIT 1`,
+    [p.tenant_code, p.receipt_number]
+  );
+  const row = msg.rows[0];
+  if (!row) {
+    return { status: null, payment_status: p.status, reason: 'confirmation_not_logged' };
+  }
+  return {
+    status: row.status,
+    message_id: row.id,
+    message_type: row.message_type,
+    whatsapp_message_id: row.whatsapp_message_id,
+    logged_at: row.logged_at,
+    payment_status: p.status,
+  };
+}
+
 async function findMessageByClientTxnId(clientTxnId) {
   if (!clientTxnId) return null;
   const res = await query(
@@ -8627,6 +8669,7 @@ module.exports = {
   getDashboardMetrics,
   getDashboardDrilldown,
   logMessage,
+  getPaymentDeliveryStatus,
   updateMessageDelivery,
   tenantsDueInDays,
   findTenantsForPaymentLookup,

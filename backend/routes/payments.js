@@ -53,7 +53,13 @@ async function ensureReceiptPdf(tenant, payment, allocation) {
 // Sends the receipt PDF together with the acknowledgement text. Honest,
 // per-channel status — a text failure never blocks the PDF attempt, and a
 // text fallback never counts as a delivered PDF.
-async function sendReceiptPdf(tenant, payment, doc) {
+async function sendReceiptPdf(tenant, payment, doc, allocation = null) {
+  if (!doc || !doc.file_path || !fs.existsSync(doc.file_path)) {
+    // One fresh attempt (e.g. the first generation timed out) before giving up.
+    if (allocation !== null && allocation !== undefined) {
+      doc = await ensureReceiptPdf(tenant, payment, allocation);
+    }
+  }
   if (!doc || !doc.file_path || !fs.existsSync(doc.file_path)) {
     return { status: 'Skipped', failureReason: 'no_pdf' };
   }
@@ -115,6 +121,20 @@ router.get('/', async (req, res) => {
     res.json({ payments });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load payments' });
+  }
+});
+
+// Live WhatsApp delivery status for an approved payment. The Baileys
+// delivery-receipt callback upgrades message_logs.status (Sent -> Delivered
+// -> Read); this endpoint surfaces the latest confirmed state so the UI can
+// stop showing "Pending - awaiting delivery confirmation" automatically.
+router.get('/:id/delivery-status', async (req, res) => {
+  try {
+    const delivery = await store.getPaymentDeliveryStatus(req.params.id);
+    if (!delivery) return res.status(404).json({ error: 'Payment not found' });
+    res.json({ delivery });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read delivery status: ' + err.message });
   }
 });
 
@@ -208,13 +228,20 @@ router.post('/:id/approve', async (req, res) => {
 
     if (overpayment > 0) {
       const receiptDoc = await receiptPromise;
+      // Every payment type gets BOTH the confirmation text and the PDF
+      // receipt — advanced/overpayment included (workflow unchanged: the
+      // overpayment is still flagged for resolution below).
+      const isOnboarding = !!(result.allocation && result.allocation.onboarding);
+      const wa = await sendReceiptAndReport(result.tenant, result.payment, result.allocation, isOnboarding);
+      const pdf = await sendReceiptPdf(result.tenant, result.payment, receiptDoc, result.allocation);
       return res.json({
         success: true,
         payment: result.payment,
         tenant: result.tenant,
         allocation: result.allocation,
         overpayment,
-        whatsapp: { status: 'Pending Overpayment Resolution' },
+        whatsapp: { ...wa, overpayment_resolution: 'Pending Overpayment Resolution' },
+        pdf,
         receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
         sync: result.sync,
       });
@@ -231,7 +258,7 @@ router.post('/:id/approve', async (req, res) => {
     ]);
     // The PDF travels together with the acknowledgement text (honest status
     // for each channel; a text failure never blocks the PDF attempt).
-    const pdf = await sendReceiptPdf(result.tenant, result.payment, receiptDoc);
+    const pdf = await sendReceiptPdf(result.tenant, result.payment, receiptDoc, result.allocation);
 
     res.json({ success: true, payment: result.payment, tenant: result.tenant, allocation: result.allocation, whatsapp: wa, pdf, receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null, newTenancy: isOnboarding || null, sync: result.sync });
   } catch (err) {
@@ -792,13 +819,19 @@ router.post('/approve-from-message', async (req, res) => {
 
     if (approved.allocation && approved.allocation.overpayment > 0) {
       const receiptDoc = await receiptPromise;
+      // Every payment type gets BOTH the confirmation text and the PDF
+      // receipt — advanced/overpayment included.
+      const isOnboarding = !!(approved.allocation && approved.allocation.onboarding);
+      const wa = await sendReceiptAndReport(approved.tenant, approved.payment, approved.allocation, isOnboarding);
+      const pdf = await sendReceiptPdf(approved.tenant, approved.payment, receiptDoc, approved.allocation);
       res.json({
         success: true,
         parsed,
         payment: approved.payment,
         tenant: approved.tenant,
-        whatsapp: whatsappResult,
+        whatsapp: { ...wa, overpayment_resolution: 'Pending Overpayment Resolution' },
         overpayment: approved.allocation.overpayment,
+        pdf,
         payment_id: approved.payment.id,
         receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
       });
@@ -816,7 +849,7 @@ router.post('/approve-from-message', async (req, res) => {
       receiptPromise,
     ]);
     // The PDF travels together with the acknowledgement text.
-    const pdf = await sendReceiptPdf(approved.tenant, approved.payment, receiptDoc);
+    const pdf = await sendReceiptPdf(approved.tenant, approved.payment, receiptDoc, approved.allocation);
 
     res.json({
       success: true,
@@ -929,12 +962,18 @@ router.post('/approve-cash-pesalink', async (req, res) => {
 
     if (approved.allocation && approved.allocation.overpayment > 0) {
       const receiptDoc = await receiptPromise;
+      // Every payment type gets BOTH the confirmation text and the PDF
+      // receipt — advanced/overpayment included.
+      const isOnboarding = !!(approved.allocation && approved.allocation.onboarding);
+      const wa = await sendReceiptAndReport(approved.tenant, approved.payment, approved.allocation, isOnboarding);
+      const pdf = await sendReceiptPdf(approved.tenant, approved.payment, receiptDoc, approved.allocation);
       return res.json({
         success: true,
         payment: approved.payment,
         tenant: approved.tenant,
-        whatsapp: { status: 'Skipped' },
+        whatsapp: { ...wa, overpayment_resolution: 'Pending Overpayment Resolution' },
         overpayment: approved.allocation.overpayment,
+        pdf,
         payment_id: approved.payment.id,
         receipt: receiptDoc ? { id: receiptDoc.id, doc_number: receiptDoc.doc_number, filename: receiptDoc.filename } : null,
       });
@@ -951,7 +990,7 @@ router.post('/approve-cash-pesalink', async (req, res) => {
       receiptPromise,
     ]);
     // The PDF travels together with the acknowledgement text.
-    const pdf = await sendReceiptPdf(approved.tenant, approved.payment, receiptDoc);
+    const pdf = await sendReceiptPdf(approved.tenant, approved.payment, receiptDoc, approved.allocation);
 
     res.json({
       success: true,

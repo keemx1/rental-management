@@ -3,7 +3,7 @@
 Living record of every update applied to this repository
 (`origin → https://github.com/keemx1/rental-management`, branch `main`).
 
-**Last updated:** 2026-10-25 · app version `v67` · SW cache `gutenberg-v68-irmanage`
+**Last updated:** 2026-10-25 · app version `v68` · SW cache `gutenberg-v69-irmanage`
 
 ---
 
@@ -29,6 +29,7 @@ Run from the repo root (server must be up on port `3003`):
 | Archive payment history | `node tests/test_archive_history.js` | 41 assertions — per-tenancy chronological payments with allocations and exact balance-before/after, complete financial summary, exit-invoice link, no bleed from later tenants of the same unit |
 | WhatsApp report send | `node tests/test_report_whatsapp.js` | 26 assertions — sent attachment is the same valid .xlsx as Download with the correct spreadsheet mimetype, delivery vs generation failures reported separately (502/500), cleanup never surfaces as an error |
 | House collection position | `node tests/test_house_collection.js` | 29 assertions — expected (rent/deposits/water/garbage/penalties/maintenance/exit charges) and collected (any category) per period, remaining + %, mid-period joiner included, live recompute on charge/payment changes |
+| Payment delivery + receipt | `node tests/test_payment_delivery.js` | 27 assertions — delivery-status flips Sent→Delivered→Read via the real receipt callback, confirmation text AND PDF receipt sent for every payment type (normal/advanced/overpayment/partial/arrears), overpayment workflow preserved |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -338,6 +339,39 @@ mojibake (no other file was affected; confirmed by full-repo scan).
 - Version bumped to v67 / SW cache v68 so clients re-precache clean assets;
   all seven suites re-run green (358/358).
 
+### 14. WhatsApp delivery status + PDF receipt automation (app `v68`)
+Two related defects after payment approval:
+
+**Status stuck at "Pending – awaiting delivery confirmation".** The approval
+response is a one-shot snapshot: when the send exceeded the 10s bound the UI
+showed Pending and never refreshed, even though the delivery receipt arrived.
+The Baileys callback itself was already writing `message_logs`
+(Sent → Delivered → Read — verified live: 165 Delivered/Read rows).
+Fixes:
+- New `GET /api/payments/:id/delivery-status` (`store.getPaymentDeliveryStatus`)
+  reads the confirmation log by receipt number — the same log the callback
+  upgrades.
+- `trackPaymentDelivery()` in the UI polls it every 3s (up to 60s): the
+  approval hint flips to "Delivered ✓ (auto-confirmed)"/"Read ✓" by itself;
+  the payments-list approval shows a dismissible live banner instead of a
+  one-shot alert when the status is Pending.
+- The WhatsApp Messages view now auto-refreshes (bounded, every 5s) while any
+  visible message is still Pending/Sent, so Delivered/Read appear without a
+  manual refresh.
+
+**Advanced/overpayment got text but no PDF.** The overpayment branch of all
+three approval routes returned before `sendReceiptPdf` — and its awaited text
+call never ran either (the NotificationEngine path skips because the trigger
+payload carries no phone number). Now every approved payment — normal,
+advanced/next-month, overpayment, partial, arrears-clearing — sends BOTH the
+awaited confirmation text and the PDF receipt on the same path, with the
+overpayment still flagged exactly as before
+(`whatsapp.overpayment_resolution = 'Pending Overpayment Resolution'`).
+`sendReceiptPdf` also retries generation once (covers a first-attempt
+generation timeout) and all six call sites pass the allocation for that retry.
+
+Workflow and payment-allocation logic unchanged — delivery/automation only.
+
 ---
 
 ## Open items / next
@@ -372,3 +406,4 @@ mojibake (no other file was affected; confirmed by full-repo scan).
 | 11 | WhatsApp report send: correct .xlsx mimetype + honest stage-based errors | v65 |
 | 12 | House Dashboard: live collection position (expected/collected/remaining/%) | v66 |
 | 13 | Encoding repair: mojibake removed, original symbols/labels restored | v67 |
+| 14 | WhatsApp delivery status auto-updates + PDF receipt for every payment type | v68 |

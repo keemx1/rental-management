@@ -518,6 +518,9 @@ export const api = {
   paymentReceipt(id) {
     return request(`/payments/${id}/receipt`);
   },
+  paymentDeliveryStatus(id) {
+    return request(`/payments/${id}/delivery-status`);
+  },
   resolveLetter({ template_key, tenant_code, values }) {
     return request('/documents/letters/resolve', {
       method: 'POST',
