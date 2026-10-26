@@ -284,7 +284,7 @@
   <div class="separator-bar"></div>
 
   <div class="inv-header">
-    <div class="inv-title">MONTHLY RENT & UTILITY INVOICE</div>
+    <div class="inv-title">WATER BILL INVOICE</div>
     <div class="inv-date">{{date_issued}}</div>
   </div>
 
@@ -328,23 +328,6 @@
     </div>
   </div>
 
-  <!-- ======================== CURRENT CHARGES ======================== -->
-  <div class="section-label">Current Charges</div>
-  <table>
-    <thead>
-      <tr>
-        <th>Description</th>
-        <th style="text-align: right;">Amount (KES)</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>Monthly Rent</td>
-        <td style="text-align: right; font-weight: 700;">{{rent_amount}}</td>
-      </tr>
-    </tbody>
-  </table>
-
   <div class="section-label" style="margin-top: 6px;">Water Consumption Details</div>
   <table>
     <thead>
@@ -387,10 +370,6 @@
         <td>Water Bill</td>
         <td style="text-align: right; font-weight: 700;">{{water_bill}}</td>
       </tr>
-      <tr>
-        <td>Garbage Fee</td>
-        <td style="text-align: right; font-weight: 700;">{{garbage_fee}}</td>
-      </tr>
     </tbody>
   </table>
 
@@ -416,20 +395,8 @@
     </thead>
     <tbody>
       <tr>
-        <td>Rent Arrears</td>
-        <td style="text-align: right; font-weight: 700;">{{rent_arrears}}</td>
-      </tr>
-      <tr>
         <td>Water Arrears</td>
         <td style="text-align: right; font-weight: 700;">{{water_arrears}}</td>
-      </tr>
-      <tr>
-        <td>Garbage Arrears</td>
-        <td style="text-align: right; font-weight: 700;">{{garbage_arrears}}</td>
-      </tr>
-      <tr>
-        <td>Other Outstanding</td>
-        <td style="text-align: right; font-weight: 700;">{{other_arrears}}</td>
       </tr>
       <tr>
         <td><strong>TOTAL PREVIOUS OUTSTANDING</strong></td>

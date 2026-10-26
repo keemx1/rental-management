@@ -96,7 +96,8 @@ router.post('/', async (req, res) => {
       due_date: due_date || null,
       payment_terms: payment_terms || null,
       notes: notes || null,
-      rent_amount: rent_amount != null ? Number(rent_amount) : Number(tenant.rent_amount || 0),
+      // Water-only invoice: never inject the tenant's rent into this document.
+      rent_amount: rent_amount != null ? Number(rent_amount) : 0,
       garbage_fee: garbage_fee != null ? Number(garbage_fee) : 0,
       rent_arrears: rent_arrears != null ? Number(rent_arrears) : 0,
       water_arrears: water_arrears != null ? Number(water_arrears) : 0,

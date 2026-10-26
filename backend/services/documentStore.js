@@ -894,14 +894,10 @@ function buildWaterInvoiceHtml(invoice) {
   const unitsUsed = Number(invoice.units_used);
   const ratePerUnit = Number(invoice.rate_per_unit);
   const waterBill = unitsUsed * ratePerUnit;
-  const rentAmount = Number(invoice.rent_amount || 0);
-  const garbageFee = Number(invoice.garbage_fee || 0);
-  const totalCurrentCharges = rentAmount + waterBill + garbageFee;
-  const rentArrears = Number(invoice.rent_arrears || 0);
+  // Water-only invoice: payable = current water bill + previous WATER arrears.
   const waterArrears = Number(invoice.water_arrears || 0);
-  const garbageArrears = Number(invoice.garbage_arrears || 0);
-  const otherArrears = Number(invoice.other_arrears || 0);
-  const totalPreviousOutstanding = rentArrears + waterArrears + garbageArrears + otherArrears;
+  const totalCurrentCharges = waterBill;
+  const totalPreviousOutstanding = waterArrears;
   const totalAmountPayable = totalCurrentCharges + totalPreviousOutstanding;
 
   const paymentTerms = `Water bill for ${billingMonthLabel}, issued in ${issueMonthLabel}, is due on or before ${dueDateOrdinal}. Please ensure payment is made using the payment details provided below.`;
@@ -927,7 +923,7 @@ function buildWaterInvoiceHtml(invoice) {
     modeOfPayment = `Payment via ${escDocText(house.payment_method || 'M-PESA')} — Contact management for payment details.`;
   }
 
-  const defaultNotes = `Water charges for ${billingMonthLabel} are calculated from the recorded meter readings using the applicable water rate of KSh ${ratePerUnit.toLocaleString('en-US', { minimumFractionDigits: 2 })} per unit. Total consumption recorded is ${unitsUsed} units, resulting in a water bill of KSh ${waterBill.toLocaleString('en-US', { minimumFractionDigits: 2 })}. This invoice also includes the applicable rent, garbage fee and any previous outstanding balance.`;
+  const defaultNotes = `Water charges for ${billingMonthLabel} are calculated from the recorded meter readings using the applicable water rate of KSh ${ratePerUnit.toLocaleString('en-US', { minimumFractionDigits: 2 })} per unit. Total consumption recorded is ${unitsUsed} units, resulting in a water bill of KSh ${waterBill.toLocaleString('en-US', { minimumFractionDigits: 2 })}. This invoice covers water charges only.`;
 
   const notesText = invoice.notes || defaultNotes;
 
@@ -944,14 +940,9 @@ function buildWaterInvoiceHtml(invoice) {
     current_reading: Number(invoice.current_reading).toFixed(2),
     units_used: unitsUsed.toFixed(2),
     rate_per_unit: ratePerUnit.toFixed(2),
-    rent_amount: rentAmount.toLocaleString('en-US', { minimumFractionDigits: 2 }),
-    garbage_fee: garbageFee.toLocaleString('en-US', { minimumFractionDigits: 2 }),
     water_bill: waterBill.toLocaleString('en-US', { minimumFractionDigits: 2 }),
     total_current_charges: totalCurrentCharges.toLocaleString('en-US', { minimumFractionDigits: 2 }),
-    rent_arrears: rentArrears.toLocaleString('en-US', { minimumFractionDigits: 2 }),
     water_arrears: waterArrears.toLocaleString('en-US', { minimumFractionDigits: 2 }),
-    garbage_arrears: garbageArrears.toLocaleString('en-US', { minimumFractionDigits: 2 }),
-    other_arrears: otherArrears.toLocaleString('en-US', { minimumFractionDigits: 2 }),
     total_previous_outstanding: totalPreviousOutstanding.toLocaleString('en-US', { minimumFractionDigits: 2 }),
     total_amount_payable: totalAmountPayable.toLocaleString('en-US', { minimumFractionDigits: 2 }),
     total_amount: totalAmountPayable.toLocaleString('en-US', { minimumFractionDigits: 2 }),

@@ -8372,8 +8372,10 @@ async function createWaterInvoice(data) {
   const waterArrears = Number(data.water_arrears || 0);
   const garbageArrears = Number(data.garbage_arrears || 0);
   const otherArrears = Number(data.other_arrears || 0);
-  const totalPreviousOutstanding = rentArrears + waterArrears + garbageArrears + otherArrears;
-  const totalCurrentCharges = rentAmount + waterBill + garbageFee;
+  // Water Bill invoice = WATER ONLY: the payable figure never includes rent,
+  // garbage or non-water arrears (those are billed by their own invoices).
+  const totalPreviousOutstanding = waterArrears;
+  const totalCurrentCharges = waterBill;
   const totalAmountPayable = totalCurrentCharges + totalPreviousOutstanding;
   const totalAmount = totalAmountPayable;
   const res = await query(
@@ -8446,8 +8448,9 @@ async function updateWaterInvoice(id, patch) {
   const unitsUsed = prev.current_reading - prev.previous_reading;
   if (unitsUsed < 0) throw new Error('Current reading must be >= previous reading');
   const waterBill = unitsUsed * prev.rate_per_unit;
-  const totalPreviousOutstanding = prev.rent_arrears + prev.water_arrears + prev.garbage_arrears + prev.other_arrears;
-  const totalCurrentCharges = prev.rent_amount + waterBill + prev.garbage_fee;
+  // Water-only totals (same rule as createWaterInvoice).
+  const totalPreviousOutstanding = prev.water_arrears;
+  const totalCurrentCharges = waterBill;
   const totalAmountPayable = totalCurrentCharges + totalPreviousOutstanding;
 
   const fields = [];

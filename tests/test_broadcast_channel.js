@@ -190,9 +190,9 @@ async function main() {
 
     // ── 7. Frontend markers ────────────────────────────────────────────────
     const idx = await (await fetch('http://127.0.0.1:3003/')).text();
-    check(idx.includes('id="broadcast-channel"') && idx.includes('value="both"') && idx.includes('app.js?v=73'),
-      '7. channel selector + v73 assets served');
-    const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js?v=73')).text();
+    check(idx.includes('id="broadcast-channel"') && idx.includes('value="both"') && /app\.js\?v=\d+/.test(idx),
+      '7. channel selector + versioned assets served');
+    const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js')).text();
     check(appJs.includes("channel: document.getElementById('broadcast-channel')?.value || 'whatsapp'"),
       '7b. frontend sends the selected channel (default whatsapp)');
 

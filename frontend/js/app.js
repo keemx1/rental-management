@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v73';
+const GEHM_VERSION = 'v74';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -13094,7 +13094,7 @@ function showWaterBillForm(invoice = null) {
 
   document.getElementById('wb-form-id').value = invoice ? invoice.id : '';
   document.getElementById('wb-form-tenant-code').value = invoice ? invoice.tenant_code : '';
-  document.getElementById('wb-form-title').textContent = invoice ? 'Edit Monthly Rent & Utility Invoice' : 'New Monthly Rent & Utility Invoice';
+  document.getElementById('wb-form-title').textContent = invoice ? 'Edit Water Bill Invoice' : 'New Water Bill Invoice';
   document.getElementById('wb-form-submit').textContent = invoice ? 'Update Invoice' : 'Save Invoice';
 
   // Populate property dropdown
@@ -13112,12 +13112,7 @@ function showWaterBillForm(invoice = null) {
     document.getElementById('wb-prev-reading').value = invoice.previous_reading || '';
     document.getElementById('wb-curr-reading').value = invoice.current_reading || '';
     document.getElementById('wb-rate').value = Number(invoice.rate_per_unit).toFixed(2);
-    document.getElementById('wb-rent-amount').value = Number(invoice.rent_amount || 0);
-    document.getElementById('wb-garbage-fee').value = Number(invoice.garbage_fee || 0);
-    document.getElementById('wb-rent-arrears').value = Number(invoice.rent_arrears || 0);
     document.getElementById('wb-water-arrears').value = Number(invoice.water_arrears || 0);
-    document.getElementById('wb-garbage-arrears').value = Number(invoice.garbage_arrears || 0);
-    document.getElementById('wb-other-arrears').value = Number(invoice.other_arrears || 0);
     document.getElementById('wb-notes').value = invoice.notes || '';
     waterBillCurrentTenant = { tenant_code: invoice.tenant_code, name: invoice.tenant_name, property_name: invoice.property_name, unit_label: invoice.unit_label };
     updateWaterBillArrears();
@@ -13129,12 +13124,7 @@ function showWaterBillForm(invoice = null) {
     document.getElementById('wb-prev-reading').value = '';
     document.getElementById('wb-curr-reading').value = '';
     document.getElementById('wb-rate').value = '';
-    document.getElementById('wb-rent-amount').value = '';
-    document.getElementById('wb-garbage-fee').value = '';
-    document.getElementById('wb-rent-arrears').value = '';
     document.getElementById('wb-water-arrears').value = '';
-    document.getElementById('wb-garbage-arrears').value = '';
-    document.getElementById('wb-other-arrears').value = '';
     document.getElementById('wb-notes').value = '';
     document.getElementById('wb-payment-month').value = '';
     document.getElementById('wb-due-date-display').value = '';
@@ -13169,12 +13159,7 @@ document.getElementById('wb-form-unit')?.addEventListener('blur', async function
   if (!housePaybill || !unitLabel) {
     waterBillCurrentTenant = null;
     document.getElementById('wb-tenant-display').textContent = 'Enter property and unit';
-    document.getElementById('wb-rent-amount').value = '';
-    document.getElementById('wb-garbage-fee').value = '';
-    document.getElementById('wb-rent-arrears').value = '';
     document.getElementById('wb-water-arrears').value = '';
-    document.getElementById('wb-garbage-arrears').value = '';
-    document.getElementById('wb-other-arrears').value = '';
     updateWaterBillCalc();
     return;
   }
@@ -13183,14 +13168,8 @@ document.getElementById('wb-form-unit')?.addEventListener('blur', async function
     waterBillCurrentTenant = data.tenant;
     document.getElementById('wb-tenant-display').textContent = waterBillCurrentTenant.name;
     document.getElementById('wb-form-tenant-code').value = waterBillCurrentTenant.tenant_code;
-    // Auto-fill current charges from tenant
-    document.getElementById('wb-rent-amount').value = waterBillCurrentTenant.rent_amount || '';
-    document.getElementById('wb-garbage-fee').value = waterBillCurrentTenant.garbage_fee_amount || '';
-    // Auto-fill outstanding from tenant
-    document.getElementById('wb-rent-arrears').value = waterBillCurrentTenant.arrears || '';
+    // Water arrears only — this invoice never carries rent or garbage.
     document.getElementById('wb-water-arrears').value = '';
-    document.getElementById('wb-garbage-arrears').value = '';
-    document.getElementById('wb-other-arrears').value = '';
     // Fetch latest reading for previous
     try {
       const rData = await api.getLatestWaterReading(waterBillCurrentTenant.tenant_code);
@@ -13201,12 +13180,7 @@ document.getElementById('wb-form-unit')?.addEventListener('blur', async function
     waterBillCurrentTenant = null;
     document.getElementById('wb-tenant-display').textContent = 'No active tenant found';
     document.getElementById('wb-form-tenant-code').value = '';
-    document.getElementById('wb-rent-amount').value = '';
-    document.getElementById('wb-garbage-fee').value = '';
-    document.getElementById('wb-rent-arrears').value = '';
     document.getElementById('wb-water-arrears').value = '';
-    document.getElementById('wb-garbage-arrears').value = '';
-    document.getElementById('wb-other-arrears').value = '';
     updateWaterBillCalc();
   }
 });
@@ -13242,8 +13216,7 @@ function updateWaterBillArrears() {
 }
 
 // Reading/rate changes → recalculate
-['wb-prev-reading', 'wb-curr-reading', 'wb-rate', 'wb-rent-amount', 'wb-garbage-fee',
- 'wb-rent-arrears', 'wb-water-arrears', 'wb-garbage-arrears', 'wb-other-arrears'].forEach(id => {
+['wb-prev-reading', 'wb-curr-reading', 'wb-rate', 'wb-water-arrears'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', updateWaterBillCalc);
 });
 
@@ -13254,14 +13227,9 @@ function updateWaterBillCalc() {
   const rate = Number(rateStr.replace(/[^0-9.]/g, '') || 0);
   const units = curr - prev;
   const waterBill = units * rate;
-  const rentAmount = Number(document.getElementById('wb-rent-amount')?.value || 0);
-  const garbageFee = Number(document.getElementById('wb-garbage-fee')?.value || 0);
-  const totalCurrentCharges = rentAmount + waterBill + garbageFee;
-  const rentArrears = Number(document.getElementById('wb-rent-arrears')?.value || 0);
+  const totalCurrentCharges = waterBill;
   const waterArrears = Number(document.getElementById('wb-water-arrears')?.value || 0);
-  const garbageArrears = Number(document.getElementById('wb-garbage-arrears')?.value || 0);
-  const otherArrears = Number(document.getElementById('wb-other-arrears')?.value || 0);
-  const totalOutstanding = rentArrears + waterArrears + garbageArrears + otherArrears;
+  const totalOutstanding = waterArrears;
   const grandTotal = totalCurrentCharges + totalOutstanding;
 
   const fmt = (v) => `KES ${v.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
@@ -13345,17 +13313,12 @@ document.getElementById('water-bill-form')?.addEventListener('submit', async fun
 
   const unitsUsed = Number(document.getElementById('wb-curr-reading')?.value || 0) - Number(document.getElementById('wb-prev-reading')?.value || 0);
   const waterBill = unitsUsed * rate;
-  const rentAmount = Number(document.getElementById('wb-rent-amount')?.value || 0);
-  const garbageFee = Number(document.getElementById('wb-garbage-fee')?.value || 0);
-  const totalCurrentCharges = rentAmount + waterBill + garbageFee;
-  const rentArrears = Number(document.getElementById('wb-rent-arrears')?.value || 0);
   const waterArrears = Number(document.getElementById('wb-water-arrears')?.value || 0);
-  const garbageArrears = Number(document.getElementById('wb-garbage-arrears')?.value || 0);
-  const otherArrears = Number(document.getElementById('wb-other-arrears')?.value || 0);
-  const totalOutstanding = rentArrears + waterArrears + garbageArrears + otherArrears;
+  const totalCurrentCharges = waterBill;
+  const totalOutstanding = waterArrears;
   const grandTotal = totalCurrentCharges + totalOutstanding;
 
-  const autoNotes = `Water charges for ${billingLabel} are calculated from the recorded meter readings using the applicable water rate of KSh ${rate.toLocaleString('en-US', { minimumFractionDigits: 2 })} per unit. Total consumption recorded is ${unitsUsed} units, resulting in a water bill of KSh ${waterBill.toLocaleString('en-US', { minimumFractionDigits: 2 })}. This invoice also includes the applicable rent, garbage fee and any previous outstanding balance.`;
+  const autoNotes = `Water charges for ${billingLabel} are calculated from the recorded meter readings using the applicable water rate of KSh ${rate.toLocaleString('en-US', { minimumFractionDigits: 2 })} per unit. Total consumption recorded is ${unitsUsed} units, resulting in a water bill of KSh ${waterBill.toLocaleString('en-US', { minimumFractionDigits: 2 })}. This invoice covers water charges only.`;
 
   const body = {
     tenant_code: waterBillCurrentTenant.tenant_code,
@@ -13367,12 +13330,7 @@ document.getElementById('water-bill-form')?.addEventListener('submit', async fun
     due_date: dueDate,
     payment_terms: paymentTerms,
     notes: document.getElementById('wb-notes')?.value?.trim() || autoNotes,
-    rent_amount: rentAmount,
-    garbage_fee: garbageFee,
-    rent_arrears: rentArrears,
     water_arrears: waterArrears,
-    garbage_arrears: garbageArrears,
-    other_arrears: otherArrears,
   };
   const id = document.getElementById('wb-form-id')?.value;
   try {
@@ -13393,14 +13351,9 @@ document.getElementById('water-bill-form')?.addEventListener('submit', async fun
 function showWaterBillReview(body, tenant) {
   const units = body.current_reading - body.previous_reading;
   const waterBill = units * body.rate_per_unit;
-  const rentAmount = Number(body.rent_amount || 0);
-  const garbageFee = Number(body.garbage_fee || 0);
-  const totalCurrentCharges = rentAmount + waterBill + garbageFee;
-  const rentArrears = Number(body.rent_arrears || 0);
   const waterArrears = Number(body.water_arrears || 0);
-  const garbageArrears = Number(body.garbage_arrears || 0);
-  const otherArrears = Number(body.other_arrears || 0);
-  const totalOutstanding = rentArrears + waterArrears + garbageArrears + otherArrears;
+  const totalCurrentCharges = waterBill;
+  const totalOutstanding = waterArrears;
   const grandTotal = totalCurrentCharges + totalOutstanding;
   const billingLabel = new Date(`${body.billing_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
   const paymentLabel = body.payment_month ? new Date(`${body.payment_month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' }) : '';
@@ -13417,21 +13370,16 @@ function showWaterBillReview(body, tenant) {
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Due Date:</span> <span class="text-white">${body.due_date || 'N/A'}</span></div>
     </div>
 
-    <div class="text-xs font-semibold text-cyan-400 uppercase mt-3 mb-2">Current Charges</div>
+    <div class="text-xs font-semibold text-cyan-400 uppercase mt-3 mb-2">Current Charges (Water Only)</div>
     <div class="grid grid-cols-2 gap-3">
-      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Rent:</span> <span class="text-white font-semibold">${fmt(rentAmount)}</span></div>
-      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Garbage Fee:</span> <span class="text-white font-semibold">${fmt(garbageFee)}</span></div>
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Water:</span> <span class="text-cyan-400 font-mono font-bold">${fmt(waterBill)} (${units} units × KES ${Number(body.rate_per_unit).toFixed(2)})</span></div>
       <div class="bg-cyan-900/30 border border-cyan-600 rounded p-2"><span class="text-cyan-300">Total Current:</span> <span class="text-cyan-400 font-bold">${fmt(totalCurrentCharges)}</span></div>
     </div>
 
     <div class="text-xs font-semibold text-amber-400 uppercase mt-3 mb-2">Previous Outstanding</div>
     <div class="grid grid-cols-2 gap-3">
-      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Rent Arrears:</span> <span class="text-white">${fmt(rentArrears)}</span></div>
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Water Arrears:</span> <span class="text-white">${fmt(waterArrears)}</span></div>
-      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Garbage Arrears:</span> <span class="text-white">${fmt(garbageArrears)}</span></div>
-      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Other Arrears:</span> <span class="text-white">${fmt(otherArrears)}</span></div>
-      <div class="bg-amber-900/30 border border-amber-600 rounded p-2 col-span-2"><span class="text-amber-300">Total Outstanding:</span> <span class="text-amber-400 font-bold">${fmt(totalOutstanding)}</span></div>
+      <div class="bg-amber-900/30 border border-amber-600 rounded p-2"><span class="text-amber-300">Total Outstanding:</span> <span class="text-amber-400 font-bold">${fmt(totalOutstanding)}</span></div>
     </div>
 
     <div class="bg-slate-800/50 border-2 border-cyan-600 rounded-lg p-4 text-center mt-3">
@@ -13554,17 +13502,12 @@ async function viewWaterInvoice(id) {
     const statusClass = { Draft: 'text-amber-400', Finalized: 'text-blue-400', Sent: 'text-green-400', Paid: 'text-green-300', Void: 'text-rose-400' }[inv.status] || 'text-slate-400';
     const fmt = (v) => `KES ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
     const waterBill = Number(inv.units_used) * Number(inv.rate_per_unit);
-    const rentAmount = Number(inv.rent_amount || 0);
-    const garbageFee = Number(inv.garbage_fee || 0);
-    const totalCurrentCharges = rentAmount + waterBill + garbageFee;
-    const rentArrears = Number(inv.rent_arrears || 0);
     const waterArrears = Number(inv.water_arrears || 0);
-    const garbageArrears = Number(inv.garbage_arrears || 0);
-    const otherArrears = Number(inv.other_arrears || 0);
-    const totalOutstanding = rentArrears + waterArrears + garbageArrears + otherArrears;
+    const totalCurrentCharges = waterBill;
+    const totalOutstanding = waterArrears;
     const grandTotal = totalCurrentCharges + totalOutstanding;
 
-    document.getElementById('wb-detail-title').textContent = `Monthly Rent & Utility Invoice — ${inv.wtr_number}`;
+    document.getElementById('wb-detail-title').textContent = `Water Bill Invoice — ${inv.wtr_number}`;
     document.getElementById('wb-detail-content').innerHTML = `
       <div class="grid grid-cols-2 gap-3">
         <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Invoice No:</span><br><span class="text-black font-mono font-semibold">${escapeHtml(inv.wtr_number)}</span></div>
@@ -13577,21 +13520,16 @@ async function viewWaterInvoice(id) {
         <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Due Date:</span><br><span class="text-black">${dueDateLabel}</span></div>
       </div>
 
-      <div class="text-xs font-bold text-blue-700 uppercase mt-3 mb-2 border-b-2 border-blue-700 pb-1">Current Charges</div>
+      <div class="text-xs font-bold text-blue-700 uppercase mt-3 mb-2 border-b-2 border-blue-700 pb-1">Current Charges (Water Only)</div>
       <div class="grid grid-cols-2 gap-3">
-        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Rent:</span><br><span class="text-black font-semibold">${fmt(rentAmount)}</span></div>
-        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Garbage Fee:</span><br><span class="text-black font-semibold">${fmt(garbageFee)}</span></div>
         <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Water:</span><br><span class="text-blue-700 font-mono font-bold">${fmt(waterBill)} (${units} units × KES ${rate})</span></div>
         <div class="bg-blue-50 border-2 border-blue-600 rounded p-2"><span class="text-blue-700 text-xs font-bold">Total Current:</span><br><span class="text-blue-800 font-bold text-lg">${fmt(totalCurrentCharges)}</span></div>
       </div>
 
       <div class="text-xs font-bold text-amber-700 uppercase mt-3 mb-2 border-b-2 border-amber-600 pb-1">Previous Outstanding</div>
       <div class="grid grid-cols-2 gap-3">
-        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Rent Arrears:</span><br><span class="text-black">${fmt(rentArrears)}</span></div>
         <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Water Arrears:</span><br><span class="text-black">${fmt(waterArrears)}</span></div>
-        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Garbage Arrears:</span><br><span class="text-black">${fmt(garbageArrears)}</span></div>
-        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Other Arrears:</span><br><span class="text-black">${fmt(otherArrears)}</span></div>
-        <div class="bg-amber-50 border-2 border-amber-500 rounded p-2 col-span-2"><span class="text-amber-700 text-xs font-bold">Total Outstanding:</span><br><span class="text-amber-800 font-bold text-lg">${fmt(totalOutstanding)}</span></div>
+        <div class="bg-amber-50 border-2 border-amber-500 rounded p-2"><span class="text-amber-700 text-xs font-bold">Total Outstanding:</span><br><span class="text-amber-800 font-bold text-lg">${fmt(totalOutstanding)}</span></div>
       </div>
 
       <div class="bg-blue-800 border-2 border-blue-900 rounded-lg p-4 text-center mt-3">

@@ -35,6 +35,7 @@ Run from the repo root (server must be up on port `3003`):
 | Pre-Exit Inspection Inventory | `node tests/test_preexit_inspection.js` | 56 assertions — unit lookup + tenancy disambiguation, item CRUD with server-side totals (spec 14,500 example), Draft/Shared/Agreed, PDF with exact disclaimer + no refund figures, one-time transfer into the Exit Invoice (repeat/partial retry safe, finalized refused 409), transferred items locked, tenancy seal + archive visibility, re-let protection |
 | Statement period integration | `node tests/test_statement_period.js` | 55 assertions — 7-row period summary (opening/rent/full garbage/charges/due/payments/balance) with month arithmetic + continuity, period-scoped payment & charge histories (no all-time mixing, no duplicate rows), period empty-states, design/letterhead preserved, route validation + PDF, frontend period selector |
 | Broadcast channel (SMS option) | `node tests/test_broadcast_channel.js` | 32 assertions — whatsapp/sms/both dispatch with per-channel tallies and log rows, SMS-only 400 when unconfigured, both+unconfigured degrades to WhatsApp with per-recipient SMS failures, honest per-recipient failure reasons, whatsapp_message_log untouched by SMS legs, house scoping, frontend selector |
+| Water invoice water-only scope | `node tests/test_water_invoice_scope.js` | 27 assertions — totals = water bill + WATER arrears only (rent/garbage/other arrears excluded even when supplied), tenant rent never injected, update recomputes water-only, PDF titled WATER BILL INVOICE with no rent/garbage lines + water-only notes, form fields removed, PDF end-to-end |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -538,6 +539,31 @@ SMS / Both — with the same semantics as the tenant message modal.
   per-channel breakdown ("WhatsApp: 12 sent, 0 failed · SMS: 11 sent,
   1 failed"). Stamps → `?v=73`, SW → `gutenberg-v74-irmanage`.
 
+### 20. Water Bill invoice = water only (v74)
+Under Invoices the Water Bill invoice now covers **water only** — rent (and
+garbage / non-water arrears) are no longer part of it anywhere.
+
+- **Math** (create + update + render): `total_current_charges = water bill`
+  (units × rate) and `total_previous_outstanding = water arrears` only;
+  `total_amount_payable = both`. Rent, garbage and rent/garbage/other
+  arrears no longer count (they keep their own invoices).
+- **Create route**: never injects the tenant's `rent_amount` (previously
+  auto-filled into every water invoice) — stored `rent_amount` is 0 unless
+  explicitly supplied, and still excluded from totals regardless.
+- **Invoice document**: title `WATER BILL INVOICE` (was "MONTHLY RENT &
+  UTILITY INVOICE"), the Monthly Rent row and Garbage Fee row removed, the
+  outstanding table shows Water Arrears only, default notes end with "This
+  invoice covers water charges only." Design, readings/calc box, due-date
+  logic, status flow, anomaly gate and payment details unchanged.
+- **Frontend form**: Monthly Rent / Garbage Fee inputs and the rent /
+  garbage / other arrears inputs removed; "Total Current Charges" = water
+  bill, "Total Previous Outstanding" = water arrears, grand total = sum;
+  tenant lookup no longer auto-fills rent or arrears (water arrears only);
+  review + detail modals water-only; titles now "Water Bill Invoice".
+  Stamps → `?v=74`, SW → `gutenberg-v75-irmanage`.
+- Test suites now assert asset versioning with `/app\.js\?v=\d+/` so a
+  future stamp bump cannot break them (statement + broadcast suites).
+
 ---
 
 ## Open items / next
@@ -578,3 +604,4 @@ SMS / Both — with the same semantics as the tenant message modal.
 | 17 | Pre-Exit Inspection Inventory: findings → PDF share → agreed items transferred once into Exit Invoice | v71 |
 | 18 | Statement of Account: selectable period + 7-row monthly summary, period-scoped histories, design preserved | v72 |
 | 19 | Broadcast channel selector: WhatsApp / SMS / Both with per-channel tallies and honest statuses | v73 |
+| 20 | Water Bill invoice covers water only (rent/garbage excluded from totals, document and form) | v74 |
