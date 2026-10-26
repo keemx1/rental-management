@@ -18,7 +18,11 @@ router.post('/generate', async (req, res) => {
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
     const statementNo = await store.generateStatementNumber();
-    const doc = await generateAndStoreTenantStatement(tenant.tenant_code, statementNo);
+    const period = req.body.period; // optional YYYY-MM statement period (default = current month)
+    if (period && !/^\d{4}-(0[1-9]|1[0-2])$/.test(String(period))) {
+      return res.status(400).json({ error: 'period must be in YYYY-MM format' });
+    }
+    const doc = await generateAndStoreTenantStatement(tenant.tenant_code, statementNo, period);
     if (!doc) return res.status(500).json({ error: 'Failed to generate tenant statement' });
 
     const unitText = tenant.tenant_code ? ` for unit ${tenant.tenant_code}` : '';

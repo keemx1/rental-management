@@ -4884,6 +4884,8 @@
       <h3 id="statement-modal-title" class="font-orbitron text-xl text-white mb-1">Tenant Statement</h3>
       <p class="text-slate-400 text-sm mb-4">Generate a statement of account for this tenant. Choose how to deliver it.</p>
       <input type="hidden" id="statement-tenant-id" />
+      <label class="form-label">Statement period</label>
+      <input type="month" id="statement-period" class="cyber-input mb-3" />
       <p id="statement-status" class="hidden text-sm font-mono mb-3"></p>
       <div class="flex flex-col gap-2">
         <button type="button" id="btn-statement-download" class="qc-btn flex-1">⬇ Download PDF</button>
@@ -5586,10 +5588,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=71"></script>
+  <script type="module" src="/js/app.js?v=72"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=71').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=72').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

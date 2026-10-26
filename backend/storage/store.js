@@ -4728,46 +4728,159 @@ async function getTenantExitSummary(tenantCode) {
   };
 }
 
-async function getTenantStatement(tenantCode) {
+async function getTenantStatement(tenantCode, period) {
   const tenant = await getTenant(tenantCode);
   if (!tenant) return null;
   const house = tenant.house_id ? await getHouse(tenant.house_id) : null;
 
+  // ── Statement period (YYYY-MM). Default = current month. ────────────────
+  const now = new Date();
+  const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const stmtPeriod = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(period || '')) ? String(period) : currentPeriod;
+  const [sy, sm] = stmtPeriod.split('-').map(Number);
+  const periodEndDay = new Date(Date.UTC(sy, sm, 0)).getUTCDate();
+  const periodStart = `${stmtPeriod}-01`;
+  const periodEnd = `${stmtPeriod}-${String(periodEndDay).padStart(2, '0')}`;
+  const periodLabel = new Date(sy, sm - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  // pg returns DATE columns as JS Dates — normalise to 'YYYY-MM'.
+  const ymOf = (d) => {
+    if (d == null || d === '') return null;
+    if (typeof d === 'string') {
+      const s = d.slice(0, 7);
+      return /^\d{4}-\d{2}/.test(s) ? s : null;
+    }
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return null;
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  // ── Same records the Tenant Dashboard reads (live tenancy only) ──────────
   const paymentsRes = await query(
     `SELECT p.*, p.payment_date::text AS payment_date
-     FROM payments p
-     WHERE p.tenant_code = $1 AND p.status = 'Approved' AND p.tenancy_id IS NULL
-     ORDER BY p.payment_date ASC, p.id ASC`,
+       FROM payments p
+      WHERE p.tenant_code = $1 AND p.status = 'Approved' AND p.tenancy_id IS NULL
+      ORDER BY p.payment_date ASC, p.id ASC`,
     [tenantCode]
   );
   const payments = paymentsRes.rows.map(r => ({ ...r, amount: Number(r.amount) }));
+  const pens = (await query(
+    `SELECT * FROM penalties WHERE tenant_code = $1 AND tenancy_id IS NULL
+      ORDER BY COALESCE(invoice_date, created_at) ASC, id ASC`,
+    [tenantCode]
+  )).rows;
+  const waters = (await query(
+    `SELECT * FROM water_invoices WHERE tenant_code = $1 AND tenancy_id IS NULL
+      ORDER BY billing_month ASC, id ASC`,
+    [tenantCode]
+  )).rows;
 
-  const invoices = await listPenalties(tenantCode);
-  const pendingInvoices = invoices.filter(i => i.status !== 'Paid');
+  // Monthly buckets — payments split: charge payments (dashboard billing
+  // logic: deposits excluded) vs every receipt (history table).
+  const payChargesByMonth = {};
+  const payAllByMonth = {};
+  for (const p of payments) {
+    const m = ymOf(p.payment_date);
+    if (!m) continue;
+    payAllByMonth[m] = (payAllByMonth[m] || 0) + p.amount;
+    if (p.payment_type !== 'deposit') payChargesByMonth[m] = (payChargesByMonth[m] || 0) + p.amount;
+  }
+  const chargesByMonth = {};
+  for (const p of pens) {
+    const m = ymOf(p.invoice_date || p.created_at);
+    if (!m) continue;
+    chargesByMonth[m] = (chargesByMonth[m] || 0) + Number(p.amount || 0);
+  }
+  for (const w of waters) {
+    const m = w.billing_month ? String(w.billing_month).slice(0, 7) : ymOf(w.created_at);
+    if (!m) continue;
+    chargesByMonth[m] = (chargesByMonth[m] || 0) + Number(w.total_amount || 0);
+  }
 
+  // Billing anchor = earliest month the tenancy was chargeable.
+  const anchorCandidates = [ymOf(tenant.move_in_date), ...Object.keys(payAllByMonth), ...Object.keys(chargesByMonth)]
+    .filter(Boolean).sort();
+  const activeFrom = anchorCandidates[0] || stmtPeriod;
   const rentAmount = Number(tenant.rent_amount || 0);
-  const rentPaidThisMonth = Number(tenant.rent_paid_this_month || 0);
-  const remainingRentForMonth = Math.max(0, rentAmount - rentPaidThisMonth);
-  const arrears = Number(tenant.arrears || 0);
-  const garbageFeeAmount = Number(tenant.garbage_fee_amount || 0);
-  const garbageFeePaid = Number(tenant.garbage_fee_paid || 0);
-  const garbageShortfall = Math.max(0, garbageFeeAmount - garbageFeePaid);
+  const garbageFee = Number(tenant.garbage_fee_amount || 0);
+
+  const monthsBefore = [];
+  {
+    let [y, m] = activeFrom.split('-').map(Number);
+    let guard = 0;
+    while ((y < sy || (y === sy && m < sm)) && guard++ < 240) {
+      monthsBefore.push(`${y}-${String(m).padStart(2, '0')}`);
+      m++; if (m > 12) { m = 1; y++; }
+    }
+  }
+
+  // Opening balance brought forward: cumulative months charged (full rent +
+  // full monthly garbage fee + recorded charges) minus charge payments —
+  // exactly the dashboard's month ledger, reconstructed from records.
+  let opening = 0;
+  for (const m of monthsBefore) {
+    opening += rentAmount + garbageFee + (chargesByMonth[m] || 0) - (payChargesByMonth[m] || 0);
+  }
+
+  const inTenancy = stmtPeriod >= activeFrom;
+  const rentCharged = inTenancy ? rentAmount : 0;        // full rent for the month
+  const garbageCharged = inTenancy ? garbageFee : 0;     // full fee applicable to the month
+  const chargesPeriod = chargesByMonth[stmtPeriod] || 0; // recorded during the month
+  const paymentsPeriod = payChargesByMonth[stmtPeriod] || 0; // received this month (billing payments)
+  const totalDue = opening + rentCharged + garbageCharged + chargesPeriod;
+  const creditBalance = Number(tenant.credit_balance || 0);
+  const advanceRentBalance = Number(tenant.advance_rent_balance || 0);
+  const appliedCredits = creditBalance + advanceRentBalance;
+  const outstandingBalance = Math.max(0, totalDue - paymentsPeriod - appliedCredits);
+
+  // History tables — strictly the selected period (all-time records are NOT
+  // mixed in; deposits appear in history but never in the monthly total).
+  const periodPayments = payments.filter(p => ymOf(p.payment_date) === stmtPeriod);
+
+  const chargeRows = [];
+  for (const p of pens) {
+    const m = ymOf(p.invoice_date || p.created_at);
+    if (m !== stmtPeriod) continue;
+    chargeRows.push({
+      row_key: `P${p.id}`,
+      invoice_number: p.invoice_number || null,
+      invoice_date: p.invoice_date || p.created_at,
+      description: p.description || '',
+      category: p.category || 'penalty',
+      status: p.status || 'Pending',
+      amount: Number(p.amount || 0),
+    });
+  }
+  for (const w of waters) {
+    const m = w.billing_month ? String(w.billing_month).slice(0, 7) : ymOf(w.created_at);
+    if (m !== stmtPeriod) continue;
+    chargeRows.push({
+      row_key: `W${w.id}`,
+      invoice_number: w.wtr_number || null,
+      invoice_date: w.due_date || w.created_at,
+      description: `Water charges ${w.billing_month}${Number(w.units_used || 0) ? ` (${w.units_used} units)` : ''}`,
+      category: 'water',
+      status: w.status || 'Issued',
+      amount: Number(w.total_amount || 0),
+    });
+  }
+  chargeRows.sort((a, b) => String(a.invoice_date).localeCompare(String(b.invoice_date)));
+
+  // Pending breakdown kept for backwards compatibility with existing consumers.
+  const pendingInvoices = pens.filter(i => i.status !== 'Paid');
   const pendingChargesTotal = pendingInvoices.reduce((s, i) => s + Number(i.amount || 0), 0);
   const pendingPenalties = pendingInvoices.filter(i => (i.category || 'penalty') === 'penalty').reduce((s, i) => s + Number(i.amount || 0), 0);
   const pendingMaintenance = pendingInvoices.filter(i => i.category === 'maintenance').reduce((s, i) => s + Number(i.amount || 0), 0);
   const pendingOther = pendingInvoices.filter(i => i.category === 'other').reduce((s, i) => s + Number(i.amount || 0), 0);
+
+  const rentPaidThisMonth = Number(tenant.rent_paid_this_month || 0);
+  const remainingRentForMonth = Math.max(0, rentAmount - rentPaidThisMonth);
+  const garbageFeePaid = Number(tenant.garbage_fee_paid || 0);
+  const garbageShortfall = Math.max(0, garbageFee - garbageFeePaid);
   const depositAmount = Number(tenant.deposit_amount || 0);
   const depositPaid = Number(tenant.deposit_paid || 0);
   const waterChargeAmount = Number(tenant.water_charge_amount || 0);
   const waterChargePaid = Number(tenant.water_charge_paid || 0);
   const waterShortfall = Math.max(0, waterChargeAmount - waterChargePaid);
-  const creditBalance = Number(tenant.credit_balance || 0);
-  const advanceRentUntil = tenant.advance_rent_until || null;
-  const advanceRentBalance = Number(tenant.advance_rent_balance || 0);
-
-  const totalCharges = arrears + remainingRentForMonth + garbageShortfall + waterShortfall + pendingChargesTotal;
-  const paymentsTotal = payments.reduce((s, p) => s + p.amount, 0);
-  const outstandingBalance = Math.max(0, arrears + remainingRentForMonth + garbageShortfall + waterShortfall + pendingChargesTotal);
 
   return {
     tenant: {
@@ -4788,32 +4901,44 @@ async function getTenantStatement(tenantCode) {
       payment_instructions: getPaymentInstructionsText(house, tenant.tenant_code),
     },
     summary: {
-      arrears,
+      period: stmtPeriod,
+      period_start: periodStart,
+      period_end: periodEnd,
+      period_label: periodLabel,
+      // Monthly Financial Summary (rows 1–7, in statement order)
+      arrears: opening,                     // 1. opening balance brought forward
+      opening_balance: opening,
+      rent_due: rentCharged,                // 2. full rent charged for the month
+      garbage_fee: garbageCharged,          // 3. FULL garbage fee applicable this month
+      pending_charges: chargesPeriod,       // 4. charges recorded during the month
+      total_charges: totalDue,              // 5. total amount due
+      total_payments: paymentsPeriod,       // 6. payments received during the month
+      outstanding_balance: outstandingBalance, // 7. balance after payments & credits
+      // Existing dashboard fields (preserved for the rest of the document)
       rent_amount: rentAmount,
       rent_paid_this_month: rentPaidThisMonth,
       remaining_rent_for_month: remainingRentForMonth,
-      garbage_fee_amount: garbageFeeAmount,
+      garbage_fee_amount: garbageFee,
       garbage_fee_paid: garbageFeePaid,
       garbage_fee_balance: garbageShortfall,
       water_charge_amount: waterChargeAmount,
       water_charge_paid: waterChargePaid,
       water_charge_balance: waterShortfall,
-      pending_charges: pendingChargesTotal,
+      pending_charges_all_time: pendingChargesTotal,
       penalty_pending: pendingPenalties,
       maintenance_pending: pendingMaintenance,
       other_charges_pending: pendingOther,
-      total_charges: totalCharges,
-      total_payments: paymentsTotal,
-      outstanding_balance: outstandingBalance,
       deposit_amount: depositAmount,
       deposit_paid: depositPaid,
       deposit_balance: Math.max(0, depositAmount - depositPaid),
       credit_balance: creditBalance,
-      advance_rent_until: advanceRentUntil,
+      advance_rent_until: tenant.advance_rent_until || null,
       advance_rent_balance: advanceRentBalance,
+      applied_credits: appliedCredits,
+      payments_all_time: payments.reduce((s, p) => s + p.amount, 0),
     },
-    payments,
-    invoices,
+    payments: periodPayments,
+    invoices: chargeRows,
   };
 }
 

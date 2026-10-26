@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v71';
+const GEHM_VERSION = 'v72';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -2057,6 +2057,8 @@ async function openStatementModal(tenantId) {
   const modal = document.getElementById('statement-modal');
   const statusEl = document.getElementById('statement-status');
   document.getElementById('statement-tenant-id').value = tenantId;
+  const periodEl = document.getElementById('statement-period');
+  if (periodEl && !periodEl.value) periodEl.value = new Date().toISOString().slice(0, 7);
   statusEl.classList.add('hidden');
   statusEl.textContent = '';
   document.getElementById('btn-statement-download').disabled = false;
@@ -2067,6 +2069,7 @@ async function openStatementModal(tenantId) {
 
 async function runStatementGeneration(mode) {
   const tenantId = document.getElementById('statement-tenant-id').value;
+  const period = document.getElementById('statement-period')?.value || '';
   const statusEl = document.getElementById('statement-status');
   if (!tenantId) return;
   statusEl.classList.remove('hidden');
@@ -2077,8 +2080,8 @@ async function runStatementGeneration(mode) {
   try {
     if (mode === 'download' || mode === 'both') {
       const result = mode === 'download'
-        ? await api.downloadStatement(tenantId)
-        : await api.sendAndDownloadStatement(tenantId);
+        ? await api.downloadStatement(tenantId, period)
+        : await api.sendAndDownloadStatement(tenantId, period);
       if (result.blob) {
         const url = URL.createObjectURL(result.blob);
         const a = document.createElement('a');
@@ -2093,7 +2096,7 @@ async function runStatementGeneration(mode) {
         statusEl.textContent = result.json?.message || (result.json?.error ? `Error: ${result.json.error}` : 'Done.');
       }
     } else {
-      const res = await api.generateStatement(tenantId, 'send');
+      const res = await api.generateStatement(tenantId, 'send', period);
       statusEl.textContent = res?.message || 'Statement sent successfully.';
     }
   } catch (err) {

@@ -423,26 +423,26 @@ async function storeGeneratedPdf({ srcPath, filename, doc_type, doc_number, titl
   }
 }
 
-const CATEGORY_LABELS = { penalty: 'Penalty', maintenance: 'Maintenance', other: 'Other Charge' };
+const CATEGORY_LABELS = { penalty: 'Penalty', maintenance: 'Maintenance', other: 'Other Charge', water: 'Water' };
 
-function statementPaymentRows(payments) {
+function statementPaymentRows(payments, periodLabel) {
   if (!payments || !payments.length) {
-    return '<tr><td colspan="5" class="empty-note">No payments recorded yet.</td></tr>';
+    return `<tr><td colspan="5" class="empty-note">No payments recorded for ${periodLabel || 'this period'}.</td></tr>`;
   }
   return payments.map(p => `
     <tr>
       <td>${formatDate(p.payment_date)}</td>
       <td class="font-mono">${p.receipt_number || '—'}</td>
       <td class="font-mono">${p.mpesa_reference || '—'}</td>
-      <td>${p.payment_type === 'deposit' ? 'Deposit' : 'Rent'}</td>
+      <td>${p.payment_type === 'deposit' ? 'Deposit' : (p.payment_type ? p.payment_type.charAt(0).toUpperCase() + p.payment_type.slice(1) : 'Rent')}</td>
       <td style="text-align: right;">KES ${KES(p.amount)}</td>
     </tr>
   `).join('');
 }
 
-function statementInvoiceRows(invoices) {
+function statementInvoiceRows(invoices, periodLabel) {
   if (!invoices || !invoices.length) {
-    return '<tr><td colspan="6" class="empty-note">No charges / invoices recorded.</td></tr>';
+    return `<tr><td colspan="6" class="empty-note">No charges / invoices recorded for ${periodLabel || 'this period'}.</td></tr>`;
   }
   return invoices.map(i => `
     <tr>
@@ -481,23 +481,24 @@ function buildTenantStatementHtml(statement, statementNo, dateISO) {
     deposit: `${KES(s.deposit_paid)} / ${KES(s.deposit_amount)}`,
     status,
     status_class: statusClass,
+    period_label: s.period_label || '',
     arrears: KES(s.arrears),
-    rent_due: KES(s.rent_amount),
-    garbage_fee: KES(s.garbage_fee_balance),
+    rent_due: KES(s.rent_due != null ? s.rent_due : s.rent_amount),
+    garbage_fee: KES(s.garbage_fee != null ? s.garbage_fee : s.garbage_fee_balance),
     pending_charges: KES(s.pending_charges),
     total_charges: KES(s.total_charges),
     total_payments: KES(s.total_payments),
     next_due: tenant.rent_due_date ? formatDate(tenant.rent_due_date, { monthFull: true }) : '—',
     credit_line: creditLine,
-    payments_html: statementPaymentRows(statement.payments),
-    invoices_html: statementInvoiceRows(statement.invoices),
+    payments_html: statementPaymentRows(statement.payments, s.period_label),
+    invoices_html: statementInvoiceRows(statement.invoices, s.period_label),
     payment_instructions: (house.payment_instructions || 'Kindly settle any outstanding balance at your earliest convenience.').replace(/\{\{TENANT_CODE\}\}/gi, tenant.tenant_code || ''),
   });
 }
 
-async function generateAndStoreTenantStatement(tenantCode, statementNo) {
+async function generateAndStoreTenantStatement(tenantCode, statementNo, period) {
   try {
-    const statement = await store.getTenantStatement(tenantCode);
+    const statement = await store.getTenantStatement(tenantCode, period);
     if (!statement) return null;
 
     const filename = statementDocumentName({

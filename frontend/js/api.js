@@ -581,17 +581,17 @@ export const api = {
   customNotice(body) {
     return request('/documents/letters/custom-notice', { method: 'POST', body: JSON.stringify(body) });
   },
-  generateStatement(tenant_id, mode) {
+  generateStatement(tenant_id, mode, period) {
     return request('/statements/generate', {
       method: 'POST',
-      body: JSON.stringify({ tenant_id, mode }),
+      body: JSON.stringify({ tenant_id, mode, period }),
     });
   },
-  downloadStatement(tenant_id) {
-    return blobRequest('/statements/generate', { tenant_id, mode: 'download' });
+  downloadStatement(tenant_id, period) {
+    return blobRequest('/statements/generate', { tenant_id, mode: 'download', period });
   },
-  sendAndDownloadStatement(tenant_id) {
-    return blobRequest('/statements/generate', { tenant_id, mode: 'both' });
+  sendAndDownloadStatement(tenant_id, period) {
+    return blobRequest('/statements/generate', { tenant_id, mode: 'both', period });
   },
   generateRentInvoice(tenant_id, mode, billing_period) {
     return request('/invoices/rent', {

@@ -257,7 +257,7 @@
     <div class="stmt-date">{{date}}</div>
   </div>
 
-  <span class="stmt-no-bar">STATEMENT NO: {{statement_no}}</span>
+  <span class="stmt-no-bar">STATEMENT NO: {{statement_no}} &nbsp;·&nbsp; STATEMENT PERIOD: {{period_label}}</span>
 
   <div class="customer-info">
     <div style="width: 30px;"><span class="label">To:</span></div>
@@ -298,15 +298,16 @@
     </div>
   </div>
 
-  <div class="section-label">Balance Summary</div>
+  <div class="section-label">Monthly Financial Summary — {{period_label}}</div>
   <table>
     <tbody>
-      <tr><td>Opening arrears / balance brought forward</td><td style="text-align: right;">KES {{arrears}}</td></tr>
-      <tr><td>Rent for the period</td><td style="text-align: right;">KES {{rent_due}}</td></tr>
-      <tr><td>Garbage collection fee (balance)</td><td style="text-align: right;">KES {{garbage_fee}}</td></tr>
-      <tr><td>Outstanding charges (penalties / maintenance / other)</td><td style="text-align: right;">KES {{pending_charges}}</td></tr>
-      <tr><td>Total charges</td><td style="text-align: right;">KES {{total_charges}}</td></tr>
-      <tr><td>Total payments received (all time)</td><td style="text-align: right;">KES {{total_payments}}</td></tr>
+      <tr><td>1. Opening arrears / balance brought forward from previous months</td><td style="text-align: right;">KES {{arrears}}</td></tr>
+      <tr><td>2. Rent charged for the month</td><td style="text-align: right;">KES {{rent_due}}</td></tr>
+      <tr><td>3. Full garbage collection fee applicable to this month</td><td style="text-align: right;">KES {{garbage_fee}}</td></tr>
+      <tr><td>4. Outstanding charges recorded during this month (if any)</td><td style="text-align: right;">KES {{pending_charges}}</td></tr>
+      <tr><td>5. Total amount due (opening arrears + applicable charges)</td><td style="text-align: right; font-weight: 700;">KES {{total_charges}}</td></tr>
+      <tr><td>6. Total payments received during this month</td><td style="text-align: right;">KES {{total_payments}}</td></tr>
+      <tr><td>7. Outstanding balance after payments and credits</td><td style="text-align: right; font-weight: 700;">KES {{outstanding_balance}}</td></tr>
     </tbody>
   </table>
 

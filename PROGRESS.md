@@ -33,6 +33,7 @@ Run from the repo root (server must be up on port `3003`):
 | Message channels | `node tests/test_message_channels.js` | 26 assertions — WhatsApp/SMS/Both dispatch with per-channel status, SMS history in the SMS tab, unconfigured-SMS 400, all-failed 502, idempotent replay, offline channel forwarding |
 | Send retry (session locks) | `node tests/test_send_retry.js` | 11 assertions — transient session-file locks (EPERM-open/EBUSY) retried safely pre-transmission, real failures surfaced immediately, disconnected guard untouched |
 | Pre-Exit Inspection Inventory | `node tests/test_preexit_inspection.js` | 56 assertions — unit lookup + tenancy disambiguation, item CRUD with server-side totals (spec 14,500 example), Draft/Shared/Agreed, PDF with exact disclaimer + no refund figures, one-time transfer into the Exit Invoice (repeat/partial retry safe, finalized refused 409), transferred items locked, tenancy seal + archive visibility, re-let protection |
+| Statement period integration | `node tests/test_statement_period.js` | 55 assertions — 7-row period summary (opening/rent/full garbage/charges/due/payments/balance) with month arithmetic + continuity, period-scoped payment & charge histories (no all-time mixing, no duplicate rows), period empty-states, design/letterhead preserved, route validation + PDF, frontend period selector |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -479,6 +480,41 @@ invoice edit uses) and finalization is never bypassed.
   the correct tenancy's rent/deposit snapshot). Stamps → `?v=71`, SW
   cache → `gutenberg-v72-irmanage`.
 
+### 18. Tenant Statement of Account — period data integration (v72)
+Strictly a data-integration/display enhancement; letterhead, watermark/stamp
+line, statement number, deposit box, payment instructions, signature area
+and footer branding unchanged. No dashboard or workflow changes.
+
+- **Statement period** (`YYYY-MM`, default = current month): new month
+  picker in the statement modal, threaded through
+  `POST /api/statements/generate` (400 on invalid format) →
+  `generateAndStoreTenantStatement(code, no, period)` → `getTenantStatement
+  (code, period)`.
+- **Monthly Financial Summary** (7 rows, in order): (1) opening arrears /
+  balance brought forward, (2) full rent charged for the month, (3) FULL
+  garbage collection fee applicable to the month — explicitly the full fee,
+  not the outstanding balance (the fee is monthly: the system resets
+  `garbage_fee_paid = 0` in its rent rollover), (4) charges recorded during
+  the month, (5) total amount due = 1+2+3+4, (6) payments received during
+  the month (non-deposit billing payments — dashboard logic; deposits never
+  counted), (7) outstanding balance after payments and credits
+  (`credit_balance + advance_rent_balance`, the invoice engine's rule).
+  Opening is reconstructed month-by-month from move-in using the same
+  ledger (rent + garbage + recorded charges − charge payments), so
+  `opening(next) == closing(previous)` — asserted in tests.
+- **Payment History**: strictly the selected month's receipts (Date,
+  Receipt No, M-Pesa ref, Type incl. Deposit, Amount); all-time totals kept
+  separately on the summary and no longer printed as "all time".
+- **Charges / Invoices**: actual recorded rows for the period — penalties
+  (invoice no/date/desc/category/status/amount) merged with `water_invoices`
+  (category Water) — one row each (asserted, no duplicates), previous-month
+  records excluded, and period-specific empty-state messages when none.
+- Bug fixed en route: `ymOf` broke on pg `DATE` Date objects (statements
+  silently dropped penalties/water from buckets) — same class of bug as the
+  preexit date fix; normalises strings and Dates to `YYYY-MM`.
+- Frontend: `statement-period` month input (defaults to current month),
+  api fns accept the period. Stamps → `?v=72`, SW → `gutenberg-v73-irmanage`.
+
 ---
 
 ## Open items / next
@@ -517,3 +553,4 @@ invoice edit uses) and finalization is never bypassed.
 | 15 | Message channel selector: WhatsApp / SMS / Both wired end-to-end (incl. tenants-section modal) | v70 |
 | 16 | WhatsApp false-Failed fix: retry on transient session-file locks + Defender exclusion script | backend |
 | 17 | Pre-Exit Inspection Inventory: findings → PDF share → agreed items transferred once into Exit Invoice | v71 |
+| 18 | Statement of Account: selectable period + 7-row monthly summary, period-scoped histories, design preserved | v72 |
