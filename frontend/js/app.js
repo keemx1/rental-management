@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v72';
+const GEHM_VERSION = 'v73';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -5181,11 +5181,14 @@ document.getElementById('broadcast-form')?.addEventListener('submit', async (e) 
     house_id: form.house_id.value || null,
     template_id: form.template_id.value ? Number(form.template_id.value) : null,
     message_body: form.message_body.value.trim(),
+    channel: document.getElementById('broadcast-channel')?.value || 'whatsapp',
   };
   try {
     const result = await api.sendBroadcast(payload);
-    document.getElementById('broadcast-result').textContent =
-      `Broadcast complete. Sent: ${result.sent}, Failed: ${result.failed}`;
+    const parts = [`Broadcast complete. Sent: ${result.sent}, Failed: ${result.failed}`];
+    if (result.whatsapp) parts.push(`WhatsApp: ${result.whatsapp.sent} sent, ${result.whatsapp.failed} failed`);
+    if (result.sms) parts.push(`SMS: ${result.sms.sent} sent, ${result.sms.failed} failed`);
+    document.getElementById('broadcast-result').textContent = parts.join(' · ');
   } catch (err) {
     document.getElementById('broadcast-result').textContent = `Broadcast failed: ${err.message}`;
   }

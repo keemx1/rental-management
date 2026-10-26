@@ -228,12 +228,12 @@ async function main() {
 
     // ════ 7. Frontend ═══════════════════════════════════════════════════════
     const idx = await (await fetch('http://127.0.0.1:3003/')).text();
-    check(idx.includes('id="statement-period"') && idx.includes('app.js?v=72'),
-      '7. period selector + v72 assets served');
-    const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js?v=72')).text();
+    check(idx.includes('id="statement-period"') && idx.includes('app.js?v=73'),
+      '7. period selector + current assets served');
+    const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js?v=73')).text();
     check(appJs.includes('statement-period') && appJs.includes('downloadStatement(tenantId, period)'),
       '7b. frontend passes the selected period');
-    const apiJs = await (await fetch('http://127.0.0.1:3003/js/api.js?v=72')).text();
+    const apiJs = await (await fetch('http://127.0.0.1:3003/js/api.js?v=73')).text();
     check(apiJs.includes('generateStatement(tenant_id, mode, period)'),
       '7c. api client accepts the period');
   } finally {

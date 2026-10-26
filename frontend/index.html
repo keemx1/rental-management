@@ -1560,6 +1560,14 @@
                 <label class="form-label">Message body</label>
                 <textarea name="message_body" id="broadcast-message-body" rows="5" class="cyber-input"></textarea>
               </div>
+              <div>
+                <label class="form-label">Channel</label>
+                <select id="broadcast-channel" name="channel" class="cyber-input font-mono">
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="sms">SMS</option>
+                  <option value="both">Both (WhatsApp + SMS)</option>
+                </select>
+              </div>
               <button type="submit" class="qc-btn qc-btn-primary w-full">Send broadcast</button>
             </form>
             <p id="broadcast-result" class="text-xs font-mono text-slate-400"></p>
@@ -5588,10 +5596,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=72"></script>
+  <script type="module" src="/js/app.js?v=73"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=72').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=73').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

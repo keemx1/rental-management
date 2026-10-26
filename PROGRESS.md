@@ -34,6 +34,7 @@ Run from the repo root (server must be up on port `3003`):
 | Send retry (session locks) | `node tests/test_send_retry.js` | 11 assertions — transient session-file locks (EPERM-open/EBUSY) retried safely pre-transmission, real failures surfaced immediately, disconnected guard untouched |
 | Pre-Exit Inspection Inventory | `node tests/test_preexit_inspection.js` | 56 assertions — unit lookup + tenancy disambiguation, item CRUD with server-side totals (spec 14,500 example), Draft/Shared/Agreed, PDF with exact disclaimer + no refund figures, one-time transfer into the Exit Invoice (repeat/partial retry safe, finalized refused 409), transferred items locked, tenancy seal + archive visibility, re-let protection |
 | Statement period integration | `node tests/test_statement_period.js` | 55 assertions — 7-row period summary (opening/rent/full garbage/charges/due/payments/balance) with month arithmetic + continuity, period-scoped payment & charge histories (no all-time mixing, no duplicate rows), period empty-states, design/letterhead preserved, route validation + PDF, frontend period selector |
+| Broadcast channel (SMS option) | `node tests/test_broadcast_channel.js` | 32 assertions — whatsapp/sms/both dispatch with per-channel tallies and log rows, SMS-only 400 when unconfigured, both+unconfigured degrades to WhatsApp with per-recipient SMS failures, honest per-recipient failure reasons, whatsapp_message_log untouched by SMS legs, house scoping, frontend selector |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -515,6 +516,28 @@ and footer branding unchanged. No dashboard or workflow changes.
 - Frontend: `statement-period` month input (defaults to current month),
   api fns accept the period. Stamps → `?v=72`, SW → `gutenberg-v73-irmanage`.
 
+### 19. SMS as a broadcast channel (v73)
+The Broadcast center gains a **Channel** selector — WhatsApp (default) /
+SMS / Both — with the same semantics as the tenant message modal.
+
+- `POST /api/broadcasts/send` accepts `channel` (default `whatsapp`):
+  - WhatsApp-only: unchanged behaviour (Baileys → provider fallback,
+    `Broadcast` log rows, `whatsapp_message_log` stats rows).
+  - SMS-only: SMS pre-checked — no API token configured → **400** with
+    "SMS is not configured — save the SMS API token in SMS Settings
+    first." and zero send attempts; configured → `smsBytewave.sendSms`
+    per recipient with `SMS Broadcast` log rows (Sent/Failed +
+    failure_reason), and no `whatsapp_message_log` pollution.
+  - Both: each leg runs independently per recipient — WhatsApp failure
+    never blocks SMS and vice versa; unconfigured SMS marks only the SMS
+    leg Failed with the reason while WhatsApp still delivers.
+  - Response: `channel`, overall `sent/failed`, per-channel
+    `whatsapp: {sent, failed}` / `sms: {sent, failed}` tallies and
+    per-recipient `results[].whatsapp` / `results[].sms` statuses.
+- Frontend: channel select in `#broadcast-form`, result line shows the
+  per-channel breakdown ("WhatsApp: 12 sent, 0 failed · SMS: 11 sent,
+  1 failed"). Stamps → `?v=73`, SW → `gutenberg-v74-irmanage`.
+
 ---
 
 ## Open items / next
@@ -554,3 +577,4 @@ and footer branding unchanged. No dashboard or workflow changes.
 | 16 | WhatsApp false-Failed fix: retry on transient session-file locks + Defender exclusion script | backend |
 | 17 | Pre-Exit Inspection Inventory: findings → PDF share → agreed items transferred once into Exit Invoice | v71 |
 | 18 | Statement of Account: selectable period + 7-row monthly summary, period-scoped histories, design preserved | v72 |
+| 19 | Broadcast channel selector: WhatsApp / SMS / Both with per-channel tallies and honest statuses | v73 |
