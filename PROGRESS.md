@@ -3,7 +3,7 @@
 Living record of every update applied to this repository
 (`origin → https://github.com/keemx1/rental-management`, branch `main`).
 
-**Last updated:** 2026-10-25 · app version `v66` · SW cache `gutenberg-v67-irmanage`
+**Last updated:** 2026-10-25 · app version `v67` · SW cache `gutenberg-v68-irmanage`
 
 ---
 
@@ -320,6 +320,24 @@ load or period change (all proven by the test). The dashboard loads the
 figures whenever it opens and re-fetches when the new billing-period month
 input changes; defaults to the current month.
 
+### 13. Character-encoding repair — mojibake removed, original display restored (app `v67`)
+Buttons/labels started showing `â€“`, `â€œ`, `ðŸ…` (e.g. the `💬 Msg`
+button). Root cause: a version-bump command at v64 used PowerShell 5.1
+`Get-Content -Raw`, which decodes BOM-less UTF-8 files as ANSI — every
+multi-byte character in `index.html`, `app.js` and `sw.js` was rewritten as
+mojibake (no other file was affected; confirmed by full-repo scan).
+
+- `scratch/restore-encoding.ps1` reversed the transformation (UTF-8 text →
+  CP1252 bytes → UTF-8 text) on the three files.
+- Verified **lossless** against the pre-corruption commit `9fd594c`: all
+  22/48/1 original non-ASCII runs (quotes, dashes, ellipses, `💬`/`⬇`/`📲`/`✎`
+  symbols) present again, zero residual mojibake across every tracked file.
+- 13 characters that had been added *after* the corruption (the `—`, `·`,
+  `÷`, `×` in the Collection Position panel/loader) were rewritten
+  explicitly (`scratch/fix-fffd.js`).
+- Version bumped to v67 / SW cache v68 so clients re-precache clean assets;
+  all seven suites re-run green (358/358).
+
 ---
 
 ## Open items / next
@@ -353,3 +371,4 @@ input changes; defaults to the current month.
 | 10 | Archive: clickable tenant name → complete per-tenancy payment history | v64 |
 | 11 | WhatsApp report send: correct .xlsx mimetype + honest stage-based errors | v65 |
 | 12 | House Dashboard: live collection position (expected/collected/remaining/%) | v66 |
+| 13 | Encoding repair: mojibake removed, original symbols/labels restored | v67 |

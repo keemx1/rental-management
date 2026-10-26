@@ -13,14 +13,14 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v66';
+const GEHM_VERSION = 'v67';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
-  if (vEl) vEl.textContent = `app ${GEHM_VERSION} Â· diagnostics`;
+  if (vEl) vEl.textContent = `app ${GEHM_VERSION} · diagnostics`;
 } catch (_) {}
 
-// â”€â”€â”€ Client diagnostics + error collector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Client diagnostics + error collector ────────────────────────────────
 // Records recent JS errors so a failing device can report exactly what broke
 // (open via the version stamp in the sidebar).
 const _gehmErrors = [];
@@ -33,7 +33,7 @@ function _gehmNoteError(source, message) {
 window.addEventListener('error', (e) => _gehmNoteError('error', (e && e.message) || 'window.onerror'));
 window.addEventListener('unhandledrejection', (e) => _gehmNoteError('promise', (e && e.reason && (e.reason.message || e.reason)) || 'unhandled rejection'));
 
-// â”€â”€â”€ Desktop PWA install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Desktop PWA install ─────────────────────────────────────────────────
 let _deferredInstallPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   try { e.preventDefault(); } catch (_) {}
@@ -43,11 +43,11 @@ window.addEventListener('beforeinstallprompt', (e) => {
 window.addEventListener('appinstalled', () => {
   _deferredInstallPrompt = null;
   document.getElementById('btn-install-app')?.classList.add('hidden');
-  try { showToast('GEHPM installed â€” find it in your Start menu / apps.'); } catch (_) {}
+  try { showToast('GEHPM installed — find it in your Start menu / apps.'); } catch (_) {}
 });
 async function installGehmApp() {
   if (!_deferredInstallPrompt) {
-    try { showToast('Install is not offered here â€” open GEHPM via localhost or https, then retry.', 'error'); } catch (_) { alert('Install is not offered by this browser on this address.'); }
+    try { showToast('Install is not offered here — open GEHPM via localhost or https, then retry.', 'error'); } catch (_) { alert('Install is not offered by this browser on this address.'); }
     return;
   }
   try {
@@ -57,7 +57,7 @@ async function installGehmApp() {
   _deferredInstallPrompt = null;
 }
 
-// â”€â”€â”€ Diagnostics report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Diagnostics report ──────────────────────────────────────────────────
 // Builds a plain-text report about THIS device (version, service worker,
 // connectivity, per-view API reachability, recent JS errors) so support can
 // see exactly why a menu shows blank. Opened via the version stamp.
@@ -77,7 +77,7 @@ async function probeEndpoint(path) {
 async function collectDiagnostics() {
   // Reload counter: increments on every full page load in this tab session.
   // If this climbs on its own, something (SW churn / proxy-mutated files)
-  // is reload-looping the tab â€” which alone explains flashing blank views.
+  // is reload-looping the tab — which alone explains flashing blank views.
   let loads = 1;
   try {
     loads = (Number(sessionStorage.getItem('gehm_loads') || 0) || 0) + 1;
@@ -181,7 +181,7 @@ async function collectDiagnostics() {
     report.screen = {};
     const vis = [...document.querySelectorAll('[data-view]')].find((el) => !el.classList.contains('hidden'));
     if (!vis) {
-      report.screen.visible_section = 'NONE â€” every view is hidden!';
+      report.screen.visible_section = 'NONE — every view is hidden!';
     } else {
       const cs = getComputedStyle(vis);
       const r = vis.getBoundingClientRect();
@@ -202,7 +202,7 @@ async function collectDiagnostics() {
         const ccs = getComputedStyle(cell);
         report.screen.sample_text = `${cell.tagName} color=${ccs.color} text=${(cell.innerText || '').trim().slice(0, 60)}`;
       }
-      // Ancestor walk: a 0x0 section means a hidden ancestor â€” find it.
+      // Ancestor walk: a 0x0 section means a hidden ancestor — find it.
       const chain = [];
       let node = vis.parentElement;
       for (let i = 0; i < 6 && node && node !== document.body; i++) {
@@ -234,7 +234,7 @@ async function collectDiagnostics() {
 
 function renderDiagnosticsReport(r) {
   const L = [];
-  L.push(`GEHPM diagnostics â€” ${new Date().toISOString()}`);
+  L.push(`GEHPM diagnostics — ${new Date().toISOString()}`);
   L.push(`app_version: ${r.app_version}`);
   L.push(`origin: ${r.origin}${r.pathname}`);
   L.push(`browser: ${r.user_agent}`);
@@ -286,7 +286,7 @@ async function openDiagnostics() {
   if (!modal || !pre) return;
   modal.classList.remove('hidden');
   modal.classList.add('flex');
-  pre.textContent = 'Collectingâ€¦';
+  pre.textContent = 'Collecting…';
   try {
     const report = await collectDiagnostics();
     pre.textContent = renderDiagnosticsReport(report);
@@ -307,7 +307,7 @@ async function copyDiagnostics() {
   const txt = document.getElementById('diagnostics-modal')?.dataset.report || document.getElementById('diagnostics-report')?.textContent || '';
   try {
     await navigator.clipboard.writeText(txt);
-    showToast('Diagnostics copied â€” paste it back to support.');
+    showToast('Diagnostics copied — paste it back to support.');
   } catch (_) {
     alert('Copy failed. Long-press / select the text and copy manually.');
   }
@@ -319,7 +319,7 @@ async function copyDiagnostics() {
 async function testNavSwitching() {
   const btn = document.getElementById('btn-navtest');
   const pre = document.getElementById('diagnostics-report');
-  if (btn) { btn.disabled = true; btn.textContent = 'Testingâ€¦'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
   const views = ['invoice-register', 'mgmt-expenses-report', 'deposit-refunds', 'reports',
     'monthly-reports', 'documents', 'archive', 'pending-overpayments', 'work-orders', 'users'];
   const lines = [];
@@ -348,7 +348,7 @@ async function testNavSwitching() {
     const modal = document.getElementById('diagnostics-modal');
     if (modal) modal.dataset.report = pre.textContent;
   }
-  if (btn) { btn.disabled = false; btn.textContent = 'â–¶ Test menu switching'; }
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Test menu switching'; }
 }
 
 document.getElementById('gehm-version')?.addEventListener('click', openDiagnostics);
@@ -397,12 +397,12 @@ function debounce(fn, ms) {
   return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
 }
 
-// â”€â”€â”€ Offline-first (Phase 1): sync banner, badges, helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Offline-first (Phase 1): sync banner, badges, helpers ────────────────
 // Statuses shown to agents:
-//   ðŸŸ¢ SYNCED â€” saved on the main server
-//   ðŸŸ  PENDING SYNC â€” saved on this device, waiting for internet
-//   ðŸ”„ SYNCING â€” currently uploading to the server
-//   ðŸ”´ SYNC FAILED â€” could not synchronize; retry required
+//   🟢 SYNCED — saved on the main server
+//   🟠 PENDING SYNC — saved on this device, waiting for internet
+//   🔄 SYNCING — currently uploading to the server
+//   🔴 SYNC FAILED — could not synchronize; retry required
 
 function isNetworkError(err) {
   if (!err) return false;
@@ -431,23 +431,23 @@ function renderSyncBanner(status) {
   const bar = ensureSyncBanner();
   const s = status || getSyncStatus();
   const parts = [];
-  let bg = '#065f46'; // green â€” synced & online
+  let bg = '#065f46'; // green — synced & online
   let fg = '#ecfdf5';
 
   if (!s.online) {
     bg = '#7c2d12'; fg = '#ffedd5';
-    parts.push('ðŸ“´ OFFLINE â€” working from last synced data');
+    parts.push('📴 OFFLINE — working from last synced data');
   } else if (s.syncState === 'syncing') {
     bg = '#1e40af'; fg = '#dbeafe';
-    parts.push('ðŸ”„ SYNCINGâ€¦');
+    parts.push('🔄 SYNCING…');
   } else if (s.syncState === 'failed') {
     bg = '#991b1b'; fg = '#fee2e2';
-    parts.push('ðŸ”´ SYNC FAILED â€” retry required');
+    parts.push('🔴 SYNC FAILED — retry required');
   } else if (s.pending > 0) {
     bg = '#9a3412'; fg = '#ffedd5';
-    parts.push(`ðŸŸ  ${s.pending} PENDING SYNC`);
+    parts.push(`🟠 ${s.pending} PENDING SYNC`);
   } else {
-    parts.push('ðŸŸ¢ SYNCED');
+    parts.push('🟢 SYNCED');
   }
   if (s.lastPull) {
     try {
@@ -457,7 +457,7 @@ function renderSyncBanner(status) {
   bar.style.background = bg;
   bar.style.color = fg;
   bar.style.display = 'flex';
-  bar.innerHTML = `<span>${parts.join(' &nbsp;Â·&nbsp; ')}</span>
+  bar.innerHTML = `<span>${parts.join(' &nbsp;·&nbsp; ')}</span>
     <span style="flex:1"></span>
     ${s.online && s.pending >= 0 ? `<button id="gehm-sync-now" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:3px 12px;color:inherit;font-weight:700;cursor:pointer">Sync now</button>` : ''}`;
   const btn = document.getElementById('gehm-sync-now');
@@ -466,20 +466,20 @@ function renderSyncBanner(status) {
 
 /** Badge HTML for an offline-cached payment row. */
 function offlineSyncBadge(sync) {
-  if (sync === 'pending') return `<span class="status-badge badge-pending" title="Saved on this device. Will upload automatically when internet returns."><span class="status-dot"></span>ðŸŸ  PENDING SYNC</span>`;
-  if (sync === 'failed') return `<span class="status-badge badge-suspended" title="Server rejected this upload. A manager can review it in Sync Conflicts."><span class="status-dot"></span>ðŸ”´ SYNC FAILED</span>`;
-  if (sync === 'dismissed') return `<span class="status-badge" title="A manager reviewed this upload and kept the server record."><span class="status-dot"></span>âšª DISMISSED</span>`;
-  return `<span class="status-badge badge-active"><span class="status-dot"></span>ðŸŸ¢ SYNCED</span>`;
+  if (sync === 'pending') return `<span class="status-badge badge-pending" title="Saved on this device. Will upload automatically when internet returns."><span class="status-dot"></span>🟠 PENDING SYNC</span>`;
+  if (sync === 'failed') return `<span class="status-badge badge-suspended" title="Server rejected this upload. A manager can review it in Sync Conflicts."><span class="status-dot"></span>🔴 SYNC FAILED</span>`;
+  if (sync === 'dismissed') return `<span class="status-badge" title="A manager reviewed this upload and kept the server record."><span class="status-dot"></span>⚪ DISMISSED</span>`;
+  return `<span class="status-badge badge-active"><span class="status-dot"></span>🟢 SYNCED</span>`;
 }
 
 function offlinePaymentRow(p) {
   return `
       <tr style="opacity:.92">
-        <td class="font-mono text-xs text-slate-500">â€”</td>
-        <td class="text-white">${escapeHtml(p.tenant_name || 'â€”')} <span class="text-slate-500 font-mono text-xs">${escapeHtml(p.tenant_code || '')}</span></td>
+        <td class="font-mono text-xs text-slate-500">—</td>
+        <td class="text-white">${escapeHtml(p.tenant_name || '—')} <span class="text-slate-500 font-mono text-xs">${escapeHtml(p.tenant_code || '')}</span></td>
         <td class="font-mono text-green-400">KES ${Number(p.amount || 0).toLocaleString()}</td>
-        <td class="font-mono text-xs">${p.mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.mode)}</span> ` : ''}${escapeHtml(p.mpesa_reference || 'â€”')}</td>
-        <td class="font-mono text-sm text-slate-400">${escapeHtml(p.payment_date || 'â€”')}</td>
+        <td class="font-mono text-xs">${p.mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.mode)}</span> ` : ''}${escapeHtml(p.mpesa_reference || '—')}</td>
+        <td class="font-mono text-sm text-slate-400">${escapeHtml(p.payment_date || '—')}</td>
         <td>${offlineSyncBadge(p.sync)}<div class="text-[10px] text-slate-500 font-mono mt-1">Receipt: ${p.receipt === 'sent' ? 'sent' : 'PENDING WHATSAPP SEND'}</div></td>
         <td><span class="text-xs text-slate-500">Offline record</span></td>
       </tr>`;
@@ -512,7 +512,7 @@ function bootOffline() {
         if (pending === 0 && !modalOpen) {
           window.location.reload();
         } else {
-          try { showToast('New GEHPM version ready â€” refresh when convenient.', 'error'); } catch (_) {}
+          try { showToast('New GEHPM version ready — refresh when convenient.', 'error'); } catch (_) {}
         }
       });
     }
@@ -536,9 +536,9 @@ function pad2(n) {
 }
 
 function fmtDate(iso) {
-  if (!iso) return 'â€”';
+  if (!iso) return '—';
   const d = new Date(iso);
-  if (isNaN(d.getTime())) return 'â€”';
+  if (isNaN(d.getTime())) return '—';
   return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
@@ -658,28 +658,28 @@ function applyRoute() {
 async function loadTenantDashboard(code) {
   if (!code) return;
 
-  // Guardian / emergency contact line (name Â· ID Â· phone Â· relationship).
+  // Guardian / emergency contact line (name · ID · phone · relationship).
   function guardianDisplay(t) {
-    if (!t) return 'â€”';
+    if (!t) return '—';
     const parts = [t.guardian_name, t.guardian_id ? `ID ${t.guardian_id}` : '', t.guardian_phone, t.guardian_relationship ? `(${t.guardian_relationship})` : ''].filter(Boolean);
-    return parts.length ? parts.join(' Â· ') : 'â€”';
+    return parts.length ? parts.join(' · ') : '—';
   }
   // Water charge (refundable deposit): amount / paid / balance / status.
   function waterPaidDisplay(t) {
-    if (!t) return 'â€”';
+    if (!t) return '—';
     const amt = Number(t.water_charge_amount || 0);
-    if (!(amt > 0)) return 'â€”';
+    if (!(amt > 0)) return '—';
     const paid = Number(t.water_charge_paid || 0);
     const bal = Math.max(0, amt - paid);
     const status = bal <= 0 ? 'PAID' : (paid > 0 ? 'PARTIALLY PAID' : 'UNPAID');
-    return `KES ${paid.toLocaleString()} paid / KES ${bal.toLocaleString()} bal Â· ${status}`;
+    return `KES ${paid.toLocaleString()} paid / KES ${bal.toLocaleString()} bal · ${status}`;
   }
 
-  // â”€â”€â”€ Signed tenancy agreements (private per-tenant Supabase storage) â”€â”€â”€
+  // ─── Signed tenancy agreements (private per-tenant Supabase storage) ───
   async function loadTenantAgreements(tenantCode) {
     const tbody = document.getElementById('td-agreements-tbody');
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-6 text-slate-500">Loadingâ€¦</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-6 text-slate-500">Loading…</td></tr>';
     try {
       const { agreements } = await api.listAgreements(tenantCode);
       if (!agreements.length) {
@@ -687,12 +687,12 @@ async function loadTenantDashboard(code) {
         return;
       }
       const kb = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
-      const when = (ts) => { try { return new Date(ts).toLocaleDateString(); } catch (_) { return 'â€”'; } };
+      const when = (ts) => { try { return new Date(ts).toLocaleDateString(); } catch (_) { return '—'; } };
       tbody.innerHTML = agreements.map((a) => `
         <tr>
           <td class="font-mono text-xs">${escapeHtml(a.filename || 'agreement.pdf')}</td>
           <td class="font-mono text-xs">${kb(Number(a.size_bytes || 0))}</td>
-          <td class="text-xs text-slate-400">${when(a.created_at)}${a.uploaded_by ? ` Â· ${escapeHtml(a.uploaded_by)}` : ''}</td>
+          <td class="text-xs text-slate-400">${when(a.created_at)}${a.uploaded_by ? ` · ${escapeHtml(a.uploaded_by)}` : ''}</td>
           <td class="text-right whitespace-nowrap">
             <button type="button" class="action-btn !py-1 !px-2 text-xs" data-ag-preview="${a.id}">Preview</button>
             <button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-ag-delete="${a.id}">Delete</button>
@@ -705,21 +705,21 @@ async function loadTenantDashboard(code) {
 
   // Reset fields to loading state
   const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  setText('td-title', 'Loadingâ€¦');
+  setText('td-title', 'Loading…');
   setText('td-subtitle', '');
-  setText('td-info-name', 'â€¦');
-  setText('td-info-code', 'â€¦');
-  setText('td-info-phone', 'â€¦');
-  setText('td-info-national-id', 'â€¦');
-  setText('td-info-guardian', 'â€¦');
-  setText('td-info-rent', 'â€¦');
-  setText('td-info-due', 'â€¦');
-  setText('td-info-water', 'â€¦');
-  setText('td-house-name', 'â€¦');
-  setText('td-house-paybill', 'â€¦');
-  setText('td-house-units', 'â€¦');
+  setText('td-info-name', '…');
+  setText('td-info-code', '…');
+  setText('td-info-phone', '…');
+  setText('td-info-national-id', '…');
+  setText('td-info-guardian', '…');
+  setText('td-info-rent', '…');
+  setText('td-info-due', '…');
+  setText('td-info-water', '…');
+  setText('td-house-name', '…');
+  setText('td-house-paybill', '…');
+  setText('td-house-units', '…');
   const tbody = document.getElementById('td-payments-tbody');
-  if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-slate-500">Loadingâ€¦</td></tr>';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-slate-500">Loading…</td></tr>';
 
   // Signed tenancy agreements (private per-tenant storage)
   loadTenantAgreements(code).catch(() => {});
@@ -733,31 +733,31 @@ async function loadTenantDashboard(code) {
 
     // Header
     setText('td-title', `${tenant.name || tenant.tenant_code}`);
-    setText('td-subtitle', `Unit ${tenant.tenant_code} â€” ${house ? house.house_name : tenant.property_name || 'â€”'}`);
+    setText('td-subtitle', `Unit ${tenant.tenant_code} — ${house ? house.house_name : tenant.property_name || '—'}`);
 
     // Tenant info
-    setText('td-info-name', tenant.name || 'â€”');
-    setText('td-info-code', tenant.tenant_code || 'â€”');
-    setText('td-info-phone', tenant.phone_number || 'â€”');
-    setText('td-info-national-id', tenant.national_id || 'â€”');
+    setText('td-info-name', tenant.name || '—');
+    setText('td-info-code', tenant.tenant_code || '—');
+    setText('td-info-phone', tenant.phone_number || '—');
+    setText('td-info-national-id', tenant.national_id || '—');
     setText('td-info-guardian', guardianDisplay(tenant));
     setText('td-info-rent', `KES ${Number(tenant.rent_amount || 0).toLocaleString()}`);
 
-    // Format next rent due date dynamically â€” always 5th of next month
+    // Format next rent due date dynamically — always 5th of next month
     const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
     const now = new Date();
     const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 5);
     const day = nextMonth.getDate();
     const suffix = day === 1 || day === 21 || day === 31 ? 'st' : day === 2 || day === 22 ? 'nd' : day === 3 || day === 23 ? 'rd' : 'th';
     setText('td-info-due', `${day}${suffix} ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`);
-    setText('td-info-movein', tenant.move_in_date || 'â€”');
-    setText('td-info-water', tenant.water_charge_amount ? `KES ${Number(tenant.water_charge_amount).toLocaleString()}` : 'â€”');
+    setText('td-info-movein', tenant.move_in_date || '—');
+    setText('td-info-water', tenant.water_charge_amount ? `KES ${Number(tenant.water_charge_amount).toLocaleString()}` : '—');
     setText('td-info-water-paid', waterPaidDisplay(tenant));
 
     // House info
-    setText('td-house-name', house ? house.house_name : 'â€”');
-    setText('td-house-paybill', house ? house.paybill_number : 'â€”');
-    setText('td-house-units', house ? house.total_units : 'â€”');
+    setText('td-house-name', house ? house.house_name : '—');
+    setText('td-house-paybill', house ? house.paybill_number : '—');
+    setText('td-house-units', house ? house.total_units : '—');
 
     // Payment status bar
     const payStatus = s.payment_status || 'Not Paid';
@@ -892,14 +892,14 @@ async function loadTenantDashboard(code) {
       }
     }
 
-    // Tenant info â€” agreement fee
+    // Tenant info — agreement fee
     const agreementChargeInfo = Number(tenant.agreement_charge || 0);
     const agreementPaidInfo = Number(tenant.agreement_paid || 0);
     const agreementOutstandingInfo = Number(tenant.agreement_outstanding || 0);
     if (agreementChargeInfo > 0) {
       setText('td-info-agreement', `KES ${Number(agreementChargeInfo).toLocaleString()} ${agreementOutstandingInfo > 0 ? `(Outstanding: KES ${agreementOutstandingInfo.toLocaleString()})` : '(Paid)'}`);
     } else {
-      setText('td-info-agreement', 'â€”');
+      setText('td-info-agreement', '—');
     }
 
     // Credit balance and advance rent
@@ -936,10 +936,10 @@ async function loadTenantDashboard(code) {
       } else {
         tbody.innerHTML = payments.map(p => `
           <tr>
-            <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.receipt_number || 'â€”')}</td>
+            <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.receipt_number || '—')}</td>
             <td class="font-mono text-green-400">KES ${Number(p.amount).toLocaleString()}</td>
-            <td class="font-mono text-xs">${p.payment_mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.payment_mode)}</span> ` : ''}${escapeHtml(p.mpesa_reference || p.cheque_number || 'â€”')}</td>
-            <td class="text-slate-400 text-xs">${p.payment_date ? new Date(p.payment_date).toLocaleDateString() : 'â€”'}</td>
+            <td class="font-mono text-xs">${p.payment_mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.payment_mode)}</span> ` : ''}${escapeHtml(p.mpesa_reference || p.cheque_number || '—')}</td>
+            <td class="text-slate-400 text-xs">${p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '—'}</td>
             <td>${statusBadge(p.status)}</td>
             <td><div class="flex items-center gap-2">${p.status === 'Approved' ? `<button type="button" class="action-btn !py-1 !px-2 text-xs" data-td-view-receipt="${p.id}">Receipt</button><button type="button" class="action-btn !py-1 !px-2 text-xs" data-td-download-receipt="${p.id}">PDF</button>` : ''}<button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-td-delete-payment="${p.id}">Delete</button></div></td>
           </tr>`).join('');
@@ -954,7 +954,7 @@ async function loadTenantDashboard(code) {
     document.getElementById('btn-td-statement')?.addEventListener('click', () => openStatementModal(tenant.tenant_code), { once: true });
     // Wire up Notice to Vacate button
     document.getElementById('btn-td-notice')?.addEventListener('click', async () => {
-      const date = prompt('Notice to Vacate â€” date given by tenant? (YYYY-MM-DD, informational only; unit stays OCCUPIED until exit is completed)', new Date().toISOString().slice(0, 10));
+      const date = prompt('Notice to Vacate — date given by tenant? (YYYY-MM-DD, informational only; unit stays OCCUPIED until exit is completed)', new Date().toISOString().slice(0, 10));
       if (date == null) return;
       const reason = prompt('Reason (optional):', '') || null;
       try {
@@ -964,9 +964,9 @@ async function loadTenantDashboard(code) {
         alert(err.message);
       }
     }, { once: true });
-    // Wire up Exit Invoice button â€” navigate to Invoice Command Center
+    // Wire up Exit Invoice button — navigate to Invoice Command Center
     document.getElementById('btn-td-exit-invoice')?.addEventListener('click', () => {
-      // Navigate to Invoice Center â†’ Exit Invoice
+      // Navigate to Invoice Center → Exit Invoice
       setHash('invoices');
       showView('invoices');
       // Load invoices center and then trigger exit invoice for this tenant
@@ -1081,12 +1081,12 @@ function loadTenantMaintenanceCharges(tenantCode, charges) {
     }
     const statusClass = isPaid ? 'text-green-400' : (mc.recovery_status === 'Pending' ? 'text-amber-400' : 'text-slate-400');
     return `<tr>
-      <td class="font-mono text-xs">${escapeHtml(mc.wo_number_ref || mc.wo_number || 'â€”')}</td>
-      <td>${mc.issue_no || 'â€”'}</td>
-      <td>${escapeHtml(mc.problem || 'â€”')}</td>
-      <td>${escapeHtml(mc.responsible_party || 'â€”')}</td>
+      <td class="font-mono text-xs">${escapeHtml(mc.wo_number_ref || mc.wo_number || '—')}</td>
+      <td>${mc.issue_no || '—'}</td>
+      <td>${escapeHtml(mc.problem || '—')}</td>
+      <td>${escapeHtml(mc.responsible_party || '—')}</td>
       <td class="font-mono text-right">${money(cost)}</td>
-      <td class="${statusClass}">${escapeHtml(mc.recovery_status || mc.status || 'â€”')}</td>
+      <td class="${statusClass}">${escapeHtml(mc.recovery_status || mc.status || '—')}</td>
     </tr>`;
   }).join('');
 
@@ -1129,11 +1129,11 @@ async function loadTenantPenalties(tenantCode) {
     const catLabel = (c) => ({ penalty: 'Penalty', maintenance: 'Maintenance', other: 'Other' }[c] || 'Penalty');
     tbody.innerHTML = penalties.map(p => `
       <tr>
-        <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.invoice_number || 'â€”')}</td>
+        <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.invoice_number || '—')}</td>
         <td class="text-slate-400 text-xs">${catLabel(p.category)}</td>
         <td class="text-slate-300">${escapeHtml(p.description)}</td>
         <td class="font-mono text-rose-400">KES ${Number(p.amount).toLocaleString()}</td>
-        <td class="text-slate-400 text-xs">${p.invoice_date ? new Date(p.invoice_date).toLocaleDateString() : 'â€”'}</td>
+        <td class="text-slate-400 text-xs">${p.invoice_date ? new Date(p.invoice_date).toLocaleDateString() : '—'}</td>
         <td>${statusBadge(p.status)}</td>
         <td>
           ${p.status === 'Pending'
@@ -1305,7 +1305,7 @@ document.getElementById('btn-advance-months-confirm')?.addEventListener('click',
     hint.textContent = 'Select at least one future month.';
     return;
   }
-  hint.textContent = 'Allocatingâ€¦';
+  hint.textContent = 'Allocating…';
   try {
     const pendingId = document.getElementById('advance-months-pending-id').value;
     let result;
@@ -1391,7 +1391,7 @@ document.getElementById('btn-overpayment-credit')?.addEventListener('click', asy
   const paymentId = document.getElementById('overpayment-payment-id').value;
   const overpayment = document.getElementById('overpayment-value').value;
   const hint = document.getElementById('overpayment-hint');
-  hint.textContent = 'Processingâ€¦';
+  hint.textContent = 'Processing…';
   try {
     const result = await api.resolveOverpayment(tenantId, {
       payment_id: paymentId,
@@ -1435,7 +1435,7 @@ document.getElementById('btn-skip-overpayment-confirm')?.addEventListener('click
   const tenantId = document.getElementById('skip-overpayment-tenant-id').value;
   const paymentId = document.getElementById('skip-overpayment-payment-id').value;
   const overpayment = Number(document.getElementById('skip-overpayment-value').value);
-  hint.textContent = 'Approving payment and recording pending overpaymentâ€¦';
+  hint.textContent = 'Approving payment and recording pending overpayment…';
   try {
     const result = await api.skipOverpayment(paymentId, overpayment);
     skipModal.style.display = 'none';
@@ -1464,14 +1464,14 @@ function showOverpaymentReview(messageBody, tenantId, whatsapp) {
   if (whatsapp) {
     if (whatsapp.status === 'Sent') {
       if (hint) {
-        hint.textContent = 'âœ“ Confirmation sent to tenant via WhatsApp automatically.';
+        hint.textContent = '✓ Confirmation sent to tenant via WhatsApp automatically.';
         hint.style.color = '#16a34a';
       }
-      // Already delivered â€” hide manual send to prevent duplicates.
+      // Already delivered — hide manual send to prevent duplicates.
       if (sendBtn) sendBtn.style.display = 'none';
     } else {
       if (hint) {
-        hint.textContent = `âš  Automatic send ${whatsapp.status || 'failed'}${whatsapp.failureReason ? ': ' + whatsapp.failureReason : ''}. Press Send to retry.`;
+        hint.textContent = `⚠ Automatic send ${whatsapp.status || 'failed'}${whatsapp.failureReason ? ': ' + whatsapp.failureReason : ''}. Press Send to retry.`;
         hint.style.color = '#dc2626';
       }
       if (sendBtn) sendBtn.style.display = '';
@@ -1490,7 +1490,7 @@ document.getElementById('btn-overpayment-review-send')?.addEventListener('click'
   const hint = document.getElementById('overpayment-review-hint');
   const btn = document.getElementById('btn-overpayment-review-send');
   if (!tenantId || !messageBody) return;
-  hint.textContent = 'Sendingâ€¦';
+  hint.textContent = 'Sending…';
   btn.disabled = true;
   try {
     const result = await api.sendMessage(tenantId, messageBody);
@@ -1533,7 +1533,7 @@ document.getElementById('btn-apply-credit')?.addEventListener('click', async () 
   if (!confirm(`Are you sure you want to apply this credit balance of KES ${amount.toLocaleString()} towards ${target}?\n\nThe amount, reason, date and approving user will be recorded.`)) {
     return;
   }
-  hint.textContent = 'Applyingâ€¦';
+  hint.textContent = 'Applying…';
   try {
     await api.applyCredit(tenantCode, { target, amount, reason: reason || null });
     document.getElementById('apply-credit-modal').style.display = 'none';
@@ -1581,7 +1581,7 @@ function paymentStatusBadge(p) {
   }
   if (p.status === 'Approved') {
     const failed = p.sync_status === 'sync_failed';
-    const label = failed ? 'Approved Â· Sync Failed' : 'Approved Â· Syncing';
+    const label = failed ? 'Approved · Sync Failed' : 'Approved · Syncing';
     const cls = failed ? 'badge-suspended' : 'badge-pending';
     return `<span class="status-badge ${cls}" title="${escapeHtml('Payment pending full module synchronization.')}"><span class="status-dot"></span>${escapeHtml(label)}</span>`;
   }
@@ -1600,10 +1600,10 @@ function renderWhatsappPanel(wa) {
   const cls = { ready: 'beacon-green', syncing: 'beacon-amber', offline: 'beacon-red' };
 
   const statusNote = status === 'ready'
-    ? '<p class="text-green-400 font-mono text-sm mt-3">âœ“ Cloud API connected</p>'
+    ? '<p class="text-green-400 font-mono text-sm mt-3">✓ Cloud API connected</p>'
     : status === 'syncing'
-      ? '<p class="text-amber-400 font-mono text-sm mt-3">âŸ³ Validating credentialsâ€¦</p>'
-      : '<p class="text-rose-400 font-mono text-sm mt-3">âœ— Not configured</p>';
+      ? '<p class="text-amber-400 font-mono text-sm mt-3">⟳ Validating credentials…</p>'
+      : '<p class="text-rose-400 font-mono text-sm mt-3">✗ Not configured</p>';
 
   const resetBtn = isAdmin()
     ? `<button type="button" id="btn-wa-reset" class="qc-btn mt-3">Re-validate connection</button>`
@@ -1661,9 +1661,9 @@ async function loadDashboard() {
     document.getElementById('metric-pending').textContent = r.pending_count ?? 0;
     document.getElementById('metric-revenue').textContent = `KES ${Number(r.revenue_mtd || 0).toLocaleString()}`;
     document.getElementById('metric-arrears').textContent = `KES ${Number(r.total_arrears || 0).toLocaleString()}`;
-    // Collection Progress panel â€” expected / collected / outstanding / percent
+    // Collection Progress panel — expected / collected / outstanding / percent
     const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    setTxt('cp-period', c.period_label || 'â€”');
+    setTxt('cp-period', c.period_label || '—');
     setTxt('cp-expected', `KES ${Number(c.expected || 0).toLocaleString()}`);
     setTxt('cp-collected', `KES ${Number(c.collected || 0).toLocaleString()}`);
     setTxt('cp-outstanding', `KES ${Number(c.outstanding || 0).toLocaleString()}`);
@@ -1684,7 +1684,7 @@ async function loadDashboard() {
 
 const ksh = (v) => `KES ${Number(v || 0).toLocaleString()}`;
 const dashDate = (iso) => {
-  if (!iso) return 'â€”';
+  if (!iso) return '—';
   try {
     return new Date(String(iso).slice(0, 10) + 'T12:00:00Z')
       .toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -1694,15 +1694,15 @@ const dashDate = (iso) => {
 };
 const dashTenantCell = (name, code) => code
   ? `<a href="#tenant/${encodeURIComponent(code)}" class="text-sky-600 hover:underline" data-tenant-link>${escapeHtml(name || code)}</a>`
-  : escapeHtml(name || 'â€”');
-const dashCell = (v) => escapeHtml(v || 'â€”');
+  : escapeHtml(name || '—');
+const dashCell = (v) => escapeHtml(v || '—');
 
 const DASH_DRILLS = {
   vacant: {
     title: 'Vacant Units',
     cols: ['Property / House', 'Unit'],
     row: (r) => [dashCell(r.property_name), dashCell(r.unit_display)],
-    totals: (s) => `${s.units} vacant unit(s) Â· live occupancy status`,
+    totals: (s) => `${s.units} vacant unit(s) · live occupancy status`,
     empty: 'No vacant units right now.',
   },
   overdue: {
@@ -1713,10 +1713,10 @@ const DASH_DRILLS = {
       dashCell(r.unit_display),
       dashTenantCell(r.name, r.tenant_code),
       ksh(r.outstanding_balance),
-      `${Number(r.overdue_days || 0)} day(s) Â· since ${dashDate(r.overdue_since)}`,
+      `${Number(r.overdue_days || 0)} day(s) · since ${dashDate(r.overdue_since)}`,
     ],
-    totals: (s) => `${s.units} unit(s) Â· overdue rent ${ksh(s.overdue_rent)} Â· total outstanding ${ksh(s.outstanding)}`,
-    empty: 'No overdue units â€” every rent balance is up to date.',
+    totals: (s) => `${s.units} unit(s) · overdue rent ${ksh(s.overdue_rent)} · total outstanding ${ksh(s.outstanding)}`,
+    empty: 'No overdue units — every rent balance is up to date.',
   },
   due7: {
     title: 'Rent Due in 7 Days',
@@ -1728,7 +1728,7 @@ const DASH_DRILLS = {
       dashDate(r.rent_due_date),
       ksh(r.amount_due),
     ],
-    totals: (s) => `${s.units} unit(s) Â· ${ksh(s.amount_due)} due within 7 days`,
+    totals: (s) => `${s.units} unit(s) · ${ksh(s.amount_due)} due within 7 days`,
     empty: 'No rent falls due in the next 7 days (fully paid rent is excluded).',
   },
   pending: {
@@ -1742,7 +1742,7 @@ const DASH_DRILLS = {
       ksh(r.paid_amount),
       ksh(r.remaining_balance),
     ],
-    totals: (s) => `${s.records} record(s) Â· ${ksh(s.pending_amount)} awaiting approval Â· unpaid rent obligations appear under Total Arrears`,
+    totals: (s) => `${s.records} record(s) · ${ksh(s.pending_amount)} awaiting approval · unpaid rent obligations appear under Total Arrears`,
     empty: 'No pending payment records. Unpaid rent obligations appear under Total Arrears.',
   },
   arrears: {
@@ -1757,11 +1757,11 @@ const DASH_DRILLS = {
       ksh(Number(r.penalties_pending || 0) + Number(r.garbage_due || 0) + Number(r.water_due || 0)),
       ksh(r.outstanding_balance),
     ],
-    totals: (s) => `${s.units} unit(s) with a balance Â· total ${ksh(s.outstanding)} = arrears ${ksh(s.arrears_bf)} + unpaid rent ${ksh(s.unpaid_rent)} + charges ${ksh(Number(s.penalties || 0) + Number(s.garbage || 0) + Number(s.water || 0))}`,
-    empty: 'No outstanding balances â€” every tenant account is clear.',
+    totals: (s) => `${s.units} unit(s) with a balance · total ${ksh(s.outstanding)} = arrears ${ksh(s.arrears_bf)} + unpaid rent ${ksh(s.unpaid_rent)} + charges ${ksh(Number(s.penalties || 0) + Number(s.garbage || 0) + Number(s.water || 0))}`,
+    empty: 'No outstanding balances — every tenant account is clear.',
   },
   revenue: {
-    title: 'Collected Rent â€” This Month',
+    title: 'Collected Rent — This Month',
     cols: ['Date', 'Property', 'Unit', 'Tenant', 'Amount', 'Reference'],
     row: (r) => [
       dashDate(r.payment_date),
@@ -1771,7 +1771,7 @@ const DASH_DRILLS = {
       ksh(r.amount),
       dashCell(r.mpesa_reference || r.receipt_number),
     ],
-    totals: (s) => `${s.records} approved payment(s) Â· ${ksh(s.total)} received this month (matches the Collected MTD card)`,
+    totals: (s) => `${s.records} approved payment(s) · ${ksh(s.total)} received this month (matches the Collected MTD card)`,
     empty: 'No approved payments recorded this month.',
   },
   progress: {
@@ -1785,7 +1785,7 @@ const DASH_DRILLS = {
       ksh(r.collected),
       ksh(r.outstanding),
     ],
-    totals: (s) => `${s.units} unit(s) Â· ${ksh(s.collected)} of ${ksh(s.expected)} collected Â· ${ksh(s.outstanding)} outstanding Â· ${Number(s.percent || 0)}%`,
+    totals: (s) => `${s.units} unit(s) · ${ksh(s.collected)} of ${ksh(s.expected)} collected · ${ksh(s.outstanding)} outstanding · ${Number(s.percent || 0)}%`,
     empty: 'No occupied units.',
   },
 };
@@ -1798,8 +1798,8 @@ async function openDashDrill(kind) {
   const sub = document.getElementById('dash-drill-sub');
   const body = document.getElementById('dash-drill-body');
   title.textContent = conf.title;
-  sub.textContent = 'Loadingâ€¦';
-  body.innerHTML = '<p class="text-slate-400">Loading recordsâ€¦</p>';
+  sub.textContent = 'Loading…';
+  body.innerHTML = '<p class="text-slate-400">Loading records…</p>';
   modal.classList.remove('hidden');
   try {
     const data = await api.dashboardDrill(kind);
@@ -1820,9 +1820,9 @@ async function openDashDrill(kind) {
           <tbody>${bodyRows}</tbody>
         </table>
       </div>
-      <p class="text-slate-400 text-xs font-mono mt-2">Updated ${new Date(data.generated_at).toLocaleTimeString()} Â· click a tenant name to open their account</p>`;
+      <p class="text-slate-400 text-xs font-mono mt-2">Updated ${new Date(data.generated_at).toLocaleTimeString()} · click a tenant name to open their account</p>`;
   } catch (err) {
-    sub.textContent = 'â€”';
+    sub.textContent = '—';
     body.innerHTML = `<p class="text-rose-500">${escapeHtml(err.message)}</p>`;
   }
 }
@@ -1850,12 +1850,12 @@ async function loadTenants() {
         <td class="font-mono text-sm">${escapeHtml(t.phone_number)}</td>
         <td class="text-slate-400">${escapeHtml(t.property_name)}</td>
         <td class="font-mono text-green-400">${Number(t.rent_amount).toLocaleString()}</td>
-        <td class="font-mono text-sm">${t.agreement_outstanding > 0 ? `<span class="text-amber-400 font-semibold">KES ${Number(t.agreement_outstanding).toLocaleString()}</span>` : `<span class="text-emerald-400">âœ“</span>`}</td>
+        <td class="font-mono text-sm">${t.agreement_outstanding > 0 ? `<span class="text-amber-400 font-semibold">KES ${Number(t.agreement_outstanding).toLocaleString()}</span>` : `<span class="text-emerald-400">✓</span>`}</td>
         <td class="font-mono text-sm text-slate-400">${escapeHtml(formatExpiryDisplay(t))}</td>
         <td>${statusBadge(t.status)}</td>
         <td class="space-x-1">
           <button type="button" class="action-btn" data-tenant-profile="${t.id}">Profile</button>
-          <button type="button" class="action-btn action-btn-wa" data-message-tenant="${t.id}">ðŸ’¬ Msg</button>
+          <button type="button" class="action-btn action-btn-wa" data-message-tenant="${t.id}">💬 Msg</button>
           <button type="button" class="action-btn" data-edit-tenant="${t.id}">Edit</button>
           <button type="button" class="action-btn action-btn-danger" data-delete-tenant="${t.id}">Delete</button>
         </td>
@@ -1867,15 +1867,15 @@ async function loadTenants() {
       tbody.innerHTML = `<tr><td colspan="9" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
       return;
     }
-    // Offline â€” tenants from the last synced snapshot (read-only).
+    // Offline — tenants from the last synced snapshot (read-only).
     const q = (document.getElementById('tenant-search')?.value?.trim() || '').toLowerCase();
     const cached = await offlineDb.getAll('tenants').catch(() => []);
     const filtered = (cached || []).filter((t) => !q || `${t.name || ''} ${t.tenant_code || ''} ${t.phone_number || ''}`.toLowerCase().includes(q));
     if (!filtered.length) {
-      tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500">Offline â€” no synced tenant data on this device yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500">Offline — no synced tenant data on this device yet.</td></tr>`;
       return;
     }
-    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-2 text-amber-500 text-xs font-mono">ðŸ“´ Offline â€” showing last synced data (read-only)</td></tr>` + filtered
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-2 text-amber-500 text-xs font-mono">📴 Offline — showing last synced data (read-only)</td></tr>` + filtered
       .map(
         (t) => `
       <tr style="opacity:.92">
@@ -1886,12 +1886,12 @@ async function loadTenants() {
         <td class="font-mono text-sm">${escapeHtml(t.phone_number)}</td>
         <td class="text-slate-400">${escapeHtml(t.property_name)}</td>
         <td class="font-mono text-green-400">${Number(t.rent_amount).toLocaleString()}</td>
-        <td class="font-mono text-sm">${t.agreement_outstanding > 0 ? `<span class="text-amber-400 font-semibold">KES ${Number(t.agreement_outstanding).toLocaleString()}</span>` : `<span class="text-emerald-400">âœ“</span>`}</td>
+        <td class="font-mono text-sm">${t.agreement_outstanding > 0 ? `<span class="text-amber-400 font-semibold">KES ${Number(t.agreement_outstanding).toLocaleString()}</span>` : `<span class="text-emerald-400">✓</span>`}</td>
         <td class="font-mono text-sm text-slate-400">${escapeHtml(formatExpiryDisplay(t))}</td>
         <td>${statusBadge(t.status)}</td>
         <td class="space-x-1">
           <button type="button" class="action-btn" data-tenant-profile="${t.id}">Profile</button>
-          <button type="button" class="action-btn action-btn-wa" data-message-tenant="${t.id}">ðŸ’¬ Msg</button>
+          <button type="button" class="action-btn action-btn-wa" data-message-tenant="${t.id}">💬 Msg</button>
         </td>
       </tr>`
       )
@@ -1920,10 +1920,10 @@ async function loadPayments() {
       .map(
         (p) => `
       <tr>
-        <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.receipt_number || 'â€”')}</td>
-        <td class="text-white">${escapeHtml(p.tenant_name || 'â€”')} <span class="text-slate-500 font-mono text-xs">${escapeHtml(p.tenant_code || '')}</span></td>
+        <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.receipt_number || '—')}</td>
+        <td class="text-white">${escapeHtml(p.tenant_name || '—')} <span class="text-slate-500 font-mono text-xs">${escapeHtml(p.tenant_code || '')}</span></td>
         <td class="font-mono text-green-400">KES ${Number(p.amount).toLocaleString()}</td>
-        <td class="font-mono text-xs">${p.payment_type === 'deposit' ? '<span class="text-cyan-400">DEPOSIT</span> ' : ''}${p.payment_mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.payment_mode)}</span>` : ''} ${escapeHtml(p.mpesa_reference || p.cheque_number || 'â€”')}</td>
+        <td class="font-mono text-xs">${p.payment_type === 'deposit' ? '<span class="text-cyan-400">DEPOSIT</span> ' : ''}${p.payment_mode ? `<span class="text-purple-400 text-[10px]">${escapeHtml(p.payment_mode)}</span>` : ''} ${escapeHtml(p.mpesa_reference || p.cheque_number || '—')}</td>
         <td class="font-mono text-sm text-slate-400">${escapeHtml(p.payment_date)}</td>
         <td>${paymentStatusBadge(p)}</td>
         <td>
@@ -1941,14 +1941,14 @@ async function loadPayments() {
       tbody.innerHTML = `<tr><td colspan="7" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
       return;
     }
-    // Fully offline â€” render the on-device cache (pending first).
+    // Fully offline — render the on-device cache (pending first).
     const cached = await offlineDb.getAll('payments').catch(() => []);
     if (!cached.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">Offline â€” no synced payment data on this device yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">Offline — no synced payment data on this device yet.</td></tr>`;
       return;
     }
     const sorted = [...cached].sort((a, b) => (a.sync === b.sync ? 0 : a.sync === 'pending' ? -1 : 1));
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-2 text-amber-500 text-xs font-mono">ðŸ“´ Offline â€” showing last synced data${cachedPending.length ? ` + ${cachedPending.length} pending` : ''}</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-2 text-amber-500 text-xs font-mono">📴 Offline — showing last synced data${cachedPending.length ? ` + ${cachedPending.length} pending` : ''}</td></tr>`
       + sorted.map(offlinePaymentRow).join('');
   }
 }
@@ -2035,7 +2035,7 @@ async function openTenantModal(id = null) {
       if (t.status === 'Vacant') {
         form.status.value = 'Active';
         form.dataset.occupyMode = '1';
-        document.getElementById('tenant-modal-title').textContent = `Mark Occupied â€” Assign Tenant to Unit ${t.tenant_code}`;
+        document.getElementById('tenant-modal-title').textContent = `Mark Occupied — Assign Tenant to Unit ${t.tenant_code}`;
       } else {
         form.status.value = t.status;
         form.dataset.occupyMode = '';
@@ -2069,7 +2069,7 @@ async function runStatementGeneration(mode) {
   const statusEl = document.getElementById('statement-status');
   if (!tenantId) return;
   statusEl.classList.remove('hidden');
-  statusEl.textContent = mode === 'download' ? 'Generating statementâ€¦' : (mode === 'both' ? 'Generating and sending statementâ€¦' : 'Sending statement via WhatsAppâ€¦');
+  statusEl.textContent = mode === 'download' ? 'Generating statement…' : (mode === 'both' ? 'Generating and sending statement…' : 'Sending statement via WhatsApp…');
   document.getElementById('btn-statement-download').disabled = true;
   document.getElementById('btn-statement-send').disabled = true;
   document.getElementById('btn-statement-both').disabled = true;
@@ -2120,7 +2120,7 @@ function renderEiLines(lines) {
       </select></td>
       <td><input type="text" class="qc-input text-sm w-56" data-ei-desc value="${escapeHtml(l.description || '')}" ${locked ? 'disabled' : ''} /></td>
       <td><input type="number" min="0" class="qc-input text-sm w-32 text-right" data-ei-amt value="${Number(l.amount || 0)}" ${locked ? 'disabled' : ''} /></td>
-      <td>${locked ? '' : '<button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-ei-del>âœ•</button>'}</td>
+      <td>${locked ? '' : '<button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-ei-del>✕</button>'}</td>
     </tr>`).join('');
   tbody.innerHTML = rows || '<tr><td colspan="4" class="text-center py-4 text-slate-500">No deductions yet. Add charges below.</td></tr>';
   tbody.querySelectorAll('[data-ei-amt], [data-ei-desc]').forEach((el) => {
@@ -2202,7 +2202,7 @@ function renderEiActions(invoice) {
   document.querySelectorAll('input[name="ei-rent-treatment"], input[name="ei-deposit-treatment"]').forEach(r => {
     r.disabled = finalized;
   });
-  setTextEl('ei-number', invoice ? (invoice.exit_number || 'â€”') : 'New Invoice');
+  setTextEl('ei-number', invoice ? (invoice.exit_number || '—') : 'New Invoice');
   const badge = document.getElementById('ei-status-badge');
   if (badge) {
     badge.textContent = finalized ? 'FINALIZED' : 'DRAFT';
@@ -2251,12 +2251,12 @@ async function openExitInvoiceModal(tenantCode, invoiceId = null, displayOverrid
   document.getElementById('ei-exit-reason').value = '';
   document.getElementById('ei-mark-vacant-panel')?.classList.add('hidden');
   setEiStatusMsg('');
-  setTextEl('ei-number', 'Loadingâ€¦');
-  setTextEl('ei-status-badge', 'â€”');
-  setTextEl('ei-deposit-paid', 'KES â€”');
-  setTextEl('ei-rent', 'KES â€”');
-  setTextEl('ei-tenant-name', 'Loadingâ€¦');
-  setTextEl('ei-tenant-unit', 'Loadingâ€¦');
+  setTextEl('ei-number', 'Loading…');
+  setTextEl('ei-status-badge', '—');
+  setTextEl('ei-deposit-paid', 'KES —');
+  setTextEl('ei-rent', 'KES —');
+  setTextEl('ei-tenant-name', 'Loading…');
+  setTextEl('ei-tenant-unit', 'Loading…');
 
   let summary = null;
   if (!displayOverride) {
@@ -2295,8 +2295,8 @@ async function openExitInvoiceModal(tenantCode, invoiceId = null, displayOverrid
     ? (displayOverride.name || tenantCode)
     : (summary ? summary.tenant.name : tenantCode));
   setTextEl('ei-tenant-unit', displayOverride
-    ? `${displayOverride.unit || tenantCode} â€” ${displayOverride.property || ''}`
-    : (summary ? `${summary.tenant.unit_label || tenantCode} â€” ${summary.tenant.property_name || ''}` : tenantCode));
+    ? `${displayOverride.unit || tenantCode} — ${displayOverride.property || ''}`
+    : (summary ? `${summary.tenant.unit_label || tenantCode} — ${summary.tenant.property_name || ''}` : tenantCode));
 
   if (existing) {
     _lastEiInvoice = existing;
@@ -2376,7 +2376,7 @@ async function saveEiDraft() {
     }
     const clientTxnId = offlineDb.newClientTxnId();
     await queueOutboxOp({ type: 'exit_create', payload: { ...body, client_txn_id: clientTxnId } });
-    setEiStatusMsg('ðŸŸ  Move-out settlement saved offline â€” PENDING SYNC. Will upload when internet returns.');
+    setEiStatusMsg('🟠 Move-out settlement saved offline — PENDING SYNC. Will upload when internet returns.');
     showToast('Exit settlement saved offline (PENDING SYNC)');
     return { offline: true, client_txn_id: clientTxnId };
   }
@@ -2427,7 +2427,7 @@ async function runExitInvoiceAction(mode) {
   const tenantCode = document.getElementById('ei-tenant-code').value;
   const markPanel = document.getElementById('ei-mark-vacant-panel');
   if (!id) return setEiStatusMsg('No exit invoice. Create and finalize it first.');
-  setEiStatusMsg(mode === 'download' ? 'Generating exit invoice PDFâ€¦' : mode === 'both' ? 'Sending and generating exit invoiceâ€¦' : 'Sending exit invoice via WhatsAppâ€¦');
+  setEiStatusMsg(mode === 'download' ? 'Generating exit invoice PDF…' : mode === 'both' ? 'Sending and generating exit invoice…' : 'Sending exit invoice via WhatsApp…');
   try {
     if (mode === 'download' || mode === 'both') {
       const result = await api.downloadExitInvoice(id);
@@ -2460,13 +2460,13 @@ async function markVacantFromEi() {
   const reason = document.getElementById('ei-exit-reason').value.trim() || null;
   if (!tenantCode) return;
   if (!confirm('Mark unit ' + tenantCode + ' as VACANT? The tenancy will be permanently archived.')) return;
-  setEiStatusMsg('Marking unit vacant and archiving tenancyâ€¦');
+  setEiStatusMsg('Marking unit vacant and archiving tenancy…');
   try {
     await api.markUnitVacant(tenantCode, { exit_invoice_id: id || null, move_out_date: moveOut, reason });
     document.getElementById('exit-invoice-modal').classList.add('hidden');
     alert(`Unit ${tenantCode} marked VACANT. The tenancy has been permanently archived.`);
     if (currentView === 'tenant-dashboard') {
-      // Tenant is now vacant â€” go back to the houses view
+      // Tenant is now vacant — go back to the houses view
       setHash('houses');
       showView('houses');
     } else if (currentView === 'house-dashboard') {
@@ -2527,7 +2527,7 @@ async function saveFinalizedEi() {
     settlement_decision_reason: settlementReason,
   };
   try {
-    setEiStatusMsg('Saving changesâ€¦');
+    setEiStatusMsg('Saving changes…');
     const res = await api.updateExitInvoice(id, body);
     const updated = res.exit_invoice;
     _lastEiInvoice = updated;
@@ -2550,7 +2550,7 @@ async function deleteExitInvoice() {
   if (!id) return;
   if (!confirm('Are you sure you want to delete this Exit Invoice? This will also cancel the associated deposit refund process.')) return;
   try {
-    setEiStatusMsg('Deleting exit invoiceâ€¦');
+    setEiStatusMsg('Deleting exit invoice…');
     await api.deleteExitInvoice(id);
     document.getElementById('exit-invoice-modal').classList.add('hidden');
     window._eiEditing = false;
@@ -2593,7 +2593,7 @@ async function loadArchive() {
   if (exitDate) params.to = exitDate;
   const tbody = document.getElementById('archive-tbody');
   const countEl = document.getElementById('archive-count');
-  if (countEl) countEl.textContent = 'Searchingâ€¦';
+  if (countEl) countEl.textContent = 'Searching…';
   try {
     const { archives } = await api.archives(params);
     if (countEl) countEl.textContent = `${archives.length} record${archives.length === 1 ? '' : 's'}`;
@@ -2603,17 +2603,17 @@ async function loadArchive() {
       tbody.innerHTML = archives.map(a => `
         <tr>
           <td>
-            <button type="button" class="font-semibold text-white hover:text-cyan-300 underline underline-offset-4 decoration-cyan-700/70 hover:decoration-cyan-300 text-left" data-archive-history="${a.id}" title="Open complete payment history for this tenancy">${escapeHtml(a.tenant_name || 'â€”')}</button>
+            <button type="button" class="font-semibold text-white hover:text-cyan-300 underline underline-offset-4 decoration-cyan-700/70 hover:decoration-cyan-300 text-left" data-archive-history="${a.id}" title="Open complete payment history for this tenancy">${escapeHtml(a.tenant_name || '—')}</button>
             <div class="text-xs text-slate-500 font-mono">${escapeHtml(a.phone_number || '')}</div>
           </td>
-          <td class="font-mono text-purple-300">${escapeHtml(a.tenant_code || 'â€”')}</td>
-          <td class="text-slate-300 text-xs">${escapeHtml(a.property_name || 'â€”')}</td>
+          <td class="font-mono text-purple-300">${escapeHtml(a.tenant_code || '—')}</td>
+          <td class="text-slate-300 text-xs">${escapeHtml(a.property_name || '—')}</td>
           <td class="text-slate-400 text-xs font-mono">${fmtDate(a.move_in_date)}</td>
           <td class="text-slate-400 text-xs font-mono">${fmtDate(a.move_out_date)}</td>
-          <td class="font-mono text-xs">${escapeHtml(a.exit_invoice_number || 'â€”')}</td>
+          <td class="font-mono text-xs">${escapeHtml(a.exit_invoice_number || '—')}</td>
           <td class="font-mono text-right">KES ${Number(a.deposit_paid || 0).toLocaleString()}</td>
           <td class="font-mono text-right text-cyan-400">KES ${Number(a.deposit_refund || 0).toLocaleString()}</td>
-          <td class="text-xs text-slate-400 max-w-[180px] truncate">${escapeHtml(a.exit_reason || 'â€”')}</td>
+          <td class="text-xs text-slate-400 max-w-[180px] truncate">${escapeHtml(a.exit_reason || '—')}</td>
           <td>
             <div class="flex gap-1">
               <button type="button" class="action-btn !py-1 !px-2 text-xs" data-archive-view="${a.id}">View</button>
@@ -2644,12 +2644,12 @@ async function loadOccupancyHistory() {
     }
     tbody.innerHTML = history.flatMap(u => u.occupants.map((o, i) => `
       <tr class="${o.status === 'Current' ? 'bg-emerald-500/5' : ''}">
-        <td class="font-mono text-purple-300">${escapeHtml(u.unit_code || 'â€”')}</td>
-        <td class="text-white font-semibold">${escapeHtml(o.tenant_name || o.name || 'â€”')}</td>
+        <td class="font-mono text-purple-300">${escapeHtml(u.unit_code || '—')}</td>
+        <td class="text-white font-semibold">${escapeHtml(o.tenant_name || o.name || '—')}</td>
         <td>${statusBadge(o.status)}</td>
         <td class="text-xs font-mono text-slate-400">${fmtDate(o.move_in_date)}</td>
         <td class="text-xs font-mono text-slate-400">${fmtDate(o.move_out_date)}</td>
-        <td class="text-xs font-mono text-slate-500">${o.status === 'Current' ? 'â€”' : (o.exit_invoice_number ? o.exit_invoice_number : '')}</td>
+        <td class="text-xs font-mono text-slate-500">${o.status === 'Current' ? '—' : (o.exit_invoice_number ? o.exit_invoice_number : '')}</td>
       </tr>`).join('')).join('');
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-rose-400">${escapeHtml(err.message)}</td></tr>`;
@@ -2661,7 +2661,7 @@ async function openArchiveDetail(id) {
   const body = document.getElementById('archive-detail-body');
   if (!modal || !body) return;
   modal.classList.remove('hidden');
-  body.innerHTML = '<p class="text-slate-400">Loadingâ€¦</p>';
+  body.innerHTML = '<p class="text-slate-400">Loading…</p>';
   try {
     const { archive: a } = await api.archive(id);
     const pays = Array.isArray(a.payments) ? a.payments : [];
@@ -2671,17 +2671,17 @@ async function openArchiveDetail(id) {
     const stmts = Array.isArray(a.statements) ? a.statements : [];
     const exitInv = a.exit_invoice ? (typeof a.exit_invoice === 'string' ? JSON.parse(a.exit_invoice) : a.exit_invoice) : null;
     const fin = a.financial_snapshot ? (typeof a.financial_snapshot === 'string' ? JSON.parse(a.financial_snapshot) : a.financial_snapshot) : null;
-    setTextEl('archive-detail-title', `Archived Tenancy â€” ${a.tenant_name}`);
-    setTextEl('archive-detail-sub', `Unit ${a.tenant_code} Â· ${a.property_name || 'â€”'} Â· Archived ${a.archived_at ? new Date(a.archived_at).toLocaleString() : 'â€”'}`);
+    setTextEl('archive-detail-title', `Archived Tenancy — ${a.tenant_name}`);
+    setTextEl('archive-detail-sub', `Unit ${a.tenant_code} · ${a.property_name || '—'} · Archived ${a.archived_at ? new Date(a.archived_at).toLocaleString() : '—'}`);
 
     const ksh = (v) => `KES ${Number(v || 0).toLocaleString()}`;
     body.innerHTML = `
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div class="bg-slate-900 border border-slate-700 rounded p-3">
-          <p class="text-xs text-slate-500 font-mono">Phone</p><p class="font-mono text-sm">${escapeHtml(a.phone_number || 'â€”')}</p>
+          <p class="text-xs text-slate-500 font-mono">Phone</p><p class="font-mono text-sm">${escapeHtml(a.phone_number || '—')}</p>
         </div>
         <div class="bg-slate-900 border border-slate-700 rounded p-3">
-          <p class="text-xs text-slate-500 font-mono">National ID</p><p class="font-mono text-sm">${escapeHtml(a.national_id || 'â€”')}</p>
+          <p class="text-xs text-slate-500 font-mono">National ID</p><p class="font-mono text-sm">${escapeHtml(a.national_id || '—')}</p>
         </div>
         <div class="bg-slate-900 border border-slate-700 rounded p-3">
           <p class="text-xs text-slate-500 font-mono">Move In</p><p class="font-mono text-sm">${fmtDate(a.move_in_date)}</p>
@@ -2711,7 +2711,7 @@ async function openArchiveDetail(id) {
         <p class="text-xs text-slate-500 font-mono mb-2">Exit Invoice ${escapeHtml(exitInv.exit_number || a.exit_invoice_number || '')}</p>
         <table class="w-full text-sm cyber-table">
           <thead><tr><th>Item</th><th class="text-right">Amount</th></tr></thead>
-          <tbody>${(exitInv.lines || []).map(l => `<tr><td>${escapeHtml(l.description || l.category || 'â€”')}</td><td class="text-right font-mono">${ksh(l.amount)}</td></tr>`).join('')}
+          <tbody>${(exitInv.lines || []).map(l => `<tr><td>${escapeHtml(l.description || l.category || '—')}</td><td class="text-right font-mono">${ksh(l.amount)}</td></tr>`).join('')}
           </tbody>
           <tfoot>
             <tr><td class="text-slate-400">Total Deductions</td><td class="text-right font-mono text-rose-400">${ksh(exitInv.deductions_total)}</td></tr>
@@ -2727,11 +2727,11 @@ async function openArchiveDetail(id) {
           <div>Deposit Paid: <span class="text-cyan-400" id="arch-dr-deposit">KES 0</span></div>
           <div>Deductions: <span class="text-rose-400" id="arch-dr-deductions">KES 0</span></div>
           <div>Refundable: <span class="text-green-400" id="arch-dr-refundable">KES 0</span></div>
-          <div>Status: <span class="font-bold" id="arch-dr-status">â€”</span></div>
-          <div>Due Date: <span class="text-amber-400" id="arch-dr-due">â€”</span></div>
+          <div>Status: <span class="font-bold" id="arch-dr-status">—</span></div>
+          <div>Due Date: <span class="text-amber-400" id="arch-dr-due">—</span></div>
           <div>Refunded: <span class="text-green-400" id="arch-dr-refunded">KES 0</span></div>
-          <div>Method: <span class="text-slate-300" id="arch-dr-method">â€”</span></div>
-          <div>Reference: <span class="text-cyan-400" id="arch-dr-ref">â€”</span></div>
+          <div>Method: <span class="text-slate-300" id="arch-dr-method">—</span></div>
+          <div>Reference: <span class="text-cyan-400" id="arch-dr-ref">—</span></div>
         </div>
       </div>
 
@@ -2750,11 +2750,11 @@ async function openArchiveDetail(id) {
         <table class="data-grid w-full min-w-[500px]">
           <thead><tr><th>Receipt</th><th>Amount</th><th>Type</th><th>Date</th><th>Ref</th></tr></thead>
           <tbody>${pays.length ? pays.map(p => `<tr>
-            <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.receipt_number || 'â€”')}</td>
+            <td class="font-mono text-xs text-cyan-400">${escapeHtml(p.receipt_number || '—')}</td>
             <td class="font-mono text-green-400">${ksh(p.amount)}</td>
             <td class="text-xs">${escapeHtml(p.payment_type || 'rent')}</td>
             <td class="text-xs font-mono text-slate-400">${fmtDate(p.payment_date)}</td>
-            <td class="text-xs font-mono">${escapeHtml(p.mpesa_reference || 'â€”')}</td>
+            <td class="text-xs font-mono">${escapeHtml(p.mpesa_reference || '—')}</td>
           </tr>`).join('') : '<tr><td colspan="5" class="text-center py-4 text-slate-500">No payments</td></tr>'}
           </tbody>
         </table>
@@ -2766,10 +2766,10 @@ async function openArchiveDetail(id) {
           <table class="data-grid w-full">
             <thead><tr><th>No</th><th>Desc</th><th class="text-right">Amount</th><th>Status</th></tr></thead>
             <tbody>${pens.length ? pens.map(p => `<tr>
-              <td class="font-mono text-xs">${escapeHtml(p.invoice_number || 'â€”')}</td>
-              <td class="text-xs">${escapeHtml(p.description || 'â€”')}</td>
+              <td class="font-mono text-xs">${escapeHtml(p.invoice_number || '—')}</td>
+              <td class="text-xs">${escapeHtml(p.description || '—')}</td>
               <td class="font-mono text-right">${ksh(p.amount)}</td>
-              <td class="text-xs">${escapeHtml(p.status || 'â€”')}</td>
+              <td class="text-xs">${escapeHtml(p.status || '—')}</td>
             </tr>`).join('') : '<tr><td colspan="4" class="text-center py-4 text-slate-500">None</td></tr>'}
             </tbody>
           </table>
@@ -2779,9 +2779,9 @@ async function openArchiveDetail(id) {
           <table class="data-grid w-full">
             <thead><tr><th>Type</th><th>Status</th><th>Date</th></tr></thead>
             <tbody>${msgs.length ? msgs.map(m => `<tr>
-              <td class="text-xs">${escapeHtml(m.message_type || 'â€”')}</td>
-              <td class="text-xs">${escapeHtml(m.status || 'â€”')}</td>
-              <td class="text-xs font-mono text-slate-400">${m.sent_at ? new Date(m.sent_at).toLocaleDateString() : 'â€”'}</td>
+              <td class="text-xs">${escapeHtml(m.message_type || '—')}</td>
+              <td class="text-xs">${escapeHtml(m.status || '—')}</td>
+              <td class="text-xs font-mono text-slate-400">${m.sent_at ? new Date(m.sent_at).toLocaleDateString() : '—'}</td>
             </tr>`).join('') : '<tr><td colspan="3" class="text-center py-4 text-slate-500">None</td></tr>'}
             </tbody>
           </table>
@@ -2791,8 +2791,8 @@ async function openArchiveDetail(id) {
       ${docs.length ? `<div class="bg-slate-900 border border-slate-700 rounded p-3">
         <p class="text-xs text-slate-500 font-mono mb-2">Documents (${docs.length})</p>
         <div class="flex flex-wrap gap-2 text-xs font-mono">${docs.map(d => (d.id && d.file_path)
-          ? `<button type="button" class="bg-slate-800 rounded px-2 py-1 text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline" data-doc-dl="${d.id}" title="Download this tenancy's document">${escapeHtml(d.doc_number || d.filename || d.doc_type || 'Document')} â¬‡</button>`
-          : `<span class="bg-slate-800 rounded px-2 py-1">${escapeHtml(d.doc_number || d.document_number || d.filename || d.doc_type || 'â€”')}</span>`
+          ? `<button type="button" class="bg-slate-800 rounded px-2 py-1 text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline" data-doc-dl="${d.id}" title="Download this tenancy's document">${escapeHtml(d.doc_number || d.filename || d.doc_type || 'Document')} ⬇</button>`
+          : `<span class="bg-slate-800 rounded px-2 py-1">${escapeHtml(d.doc_number || d.document_number || d.filename || d.doc_type || '—')}</span>`
         ).join('')}</div>
       </div>` : ''}
 
@@ -2807,7 +2807,7 @@ async function openArchiveDetail(id) {
     });
 
     // Deposit refund for THIS tenancy: prefer the row bound to this archive
-    // (server-provided), then archive_id / exit-invoice matches â€” never a
+    // (server-provided), then archive_id / exit-invoice matches — never a
     // plain tenant_code match, which could hit a later tenant's refund.
     let dr = a.deposit_refund_row || null;
     if (!dr && a.tenant_code) {
@@ -2829,8 +2829,8 @@ async function openArchiveDetail(id) {
       sEl.className = 'font-bold ' + (dr.refund_status === 'refunded' ? 'text-green-400' : dr.refund_status === 'overdue' ? 'text-rose-400' : 'text-amber-400');
       setTextEl('arch-dr-due', fmtDate(dr.refund_due_date));
       setTextEl('arch-dr-refunded', ksh(dr.amount_refunded));
-      setTextEl('arch-dr-method', dr.payment_method || 'â€”');
-      setTextEl('arch-dr-ref', dr.transaction_reference || 'â€”');
+      setTextEl('arch-dr-method', dr.payment_method || '—');
+      setTextEl('arch-dr-ref', dr.transaction_reference || '—');
     } else {
       document.getElementById('archive-dr-section')?.classList.add('hidden');
     }
@@ -2848,10 +2848,10 @@ async function openTenancyHistory(archiveId) {
   if (!modal || !wrap) return;
   modal.classList.remove('hidden');
   setTextEl('th-title', 'Tenancy Payment History');
-  setTextEl('th-sub', 'Loadingâ€¦');
+  setTextEl('th-sub', 'Loading…');
   document.getElementById('th-info').innerHTML = '';
   document.getElementById('th-summary').innerHTML = '';
-  wrap.innerHTML = '<p class="text-slate-400">Loading recordsâ€¦</p>';
+  wrap.innerHTML = '<p class="text-slate-400">Loading records…</p>';
   document.getElementById('th-charges-wrap').innerHTML = '';
   document.getElementById('th-count').textContent = '';
   document.getElementById('th-note').textContent = '';
@@ -2865,22 +2865,22 @@ async function openTenancyHistory(archiveId) {
     const ksh = (v) => `KES ${Number(v || 0).toLocaleString()}`;
     window._thContext = { ...t, exit_invoice: h.exit_invoice };
 
-    setTextEl('th-title', `Payment History â€” ${t.tenant_name || 'â€”'}`);
-    setTextEl('th-sub', `${t.unit || 'â€”'} Â· ${t.property_name || 'â€”'} Â· ${fmtDate(t.move_in_date)} â†’ ${fmtDate(t.move_out_date)} Â· Tenancy #${t.id}`);
+    setTextEl('th-title', `Payment History — ${t.tenant_name || '—'}`);
+    setTextEl('th-sub', `${t.unit || '—'} · ${t.property_name || '—'} · ${fmtDate(t.move_in_date)} → ${fmtDate(t.move_out_date)} · Tenancy #${t.id}`);
     if (h.exit_invoice && exitBtn) exitBtn.style.display = '';
 
     const info = [
-      ['Tenant', escapeHtml(t.tenant_name || 'â€”')],
-      ['Unit', escapeHtml(String(t.unit || 'â€”'))],
-      ['Property', escapeHtml(t.property_name || 'â€”')],
+      ['Tenant', escapeHtml(t.tenant_name || '—')],
+      ['Unit', escapeHtml(String(t.unit || '—'))],
+      ['Property', escapeHtml(t.property_name || '—')],
       ['Status', escapeHtml(t.status || 'Archived')],
       ['Move-in Date', fmtDate(t.move_in_date)],
       ['Move-out Date', fmtDate(t.move_out_date)],
       ['Monthly Rent', ksh(t.rent_amount)],
       ['Deposit Paid', ksh(t.deposit_paid)],
-      ['Water Deposit', t.water_deposit != null ? ksh(t.water_deposit) : 'â€”'],
+      ['Water Deposit', t.water_deposit != null ? ksh(t.water_deposit) : '—'],
       ['Exit Date', fmtDate(t.exit_date)],
-      ['Exit Reason', escapeHtml(t.exit_reason || 'â€”')],
+      ['Exit Reason', escapeHtml(t.exit_reason || '—')],
       ['Archived', `${fmtDate(String(t.archived_at || '').slice(0, 10))}${t.archived_by ? ' by ' + escapeHtml(t.archived_by) : ''}`],
     ];
     document.getElementById('th-info').innerHTML = info.map(([label, val]) => `
@@ -2905,7 +2905,7 @@ async function openTenancyHistory(archiveId) {
       ['Deposit Refundable', ksh(s.deposit_refundable), 'text-cyan-300'],
       ['Deposit Refunded', ksh(s.deposit_refunded), 'text-cyan-300'],
       ['Final Outstanding Balance', ksh(s.final_outstanding), s.final_outstanding > 0 ? 'text-rose-400' : 'text-green-400'],
-      ['Final Exit Invoice Amount', h.exit_invoice ? ksh(s.exit_invoice_amount) : 'â€”', 'text-white'],
+      ['Final Exit Invoice Amount', h.exit_invoice ? ksh(s.exit_invoice_amount) : '—', 'text-white'],
       ['Total Payments Received', `${ksh(s.total_payments)} (${h.payments.length})`, 'text-green-400'],
       ['Balance After Last Payment', ksh(s.balance_after_last_payment), s.balance_after_last_payment > 0 ? 'text-rose-400' : 'text-green-400'],
     ];
@@ -2915,7 +2915,7 @@ async function openTenancyHistory(archiveId) {
         <p class="font-mono text-sm font-semibold ${cls}">${val}</p>
       </div>`).join('');
 
-    setTextEl('th-count', `${h.payments.length} payment(s) Â· ${h.charges.length} charge posting(s)`);
+    setTextEl('th-count', `${h.payments.length} payment(s) · ${h.charges.length} charge posting(s)`);
     setTextEl('th-note', h.note || '');
 
     const allocCell = (p) => {
@@ -2928,7 +2928,7 @@ async function openTenancyHistory(archiveId) {
       if (!parts.length) return '<span class="text-slate-500">No allocation recorded (legacy entry)</span>';
       const badge = p.allocation_recorded === false
         ? ' <span class="text-amber-500 text-[10px]">(legacy)</span>' : '';
-      return `<div class="text-xs font-mono space-y-0.5">${parts.map((x) => `<div class="text-slate-300">â€¢ ${escapeHtml(x)}</div>`).join('')}${badge}</div>`;
+      return `<div class="text-xs font-mono space-y-0.5">${parts.map((x) => `<div class="text-slate-300">• ${escapeHtml(x)}</div>`).join('')}${badge}</div>`;
     };
 
     if (!h.payments.length) {
@@ -2945,11 +2945,11 @@ async function openTenancyHistory(archiveId) {
             ${h.payments.map((p) => `
               <tr>
                 <td class="whitespace-nowrap">${escapeHtml(fmtDate(p.payment_date))}</td>
-                <td class="font-mono text-xs">${escapeHtml(p.reference || 'â€”')}</td>
+                <td class="font-mono text-xs">${escapeHtml(p.reference || '—')}</td>
                 <td class="text-right font-mono font-semibold">${ksh(p.amount)}</td>
-                <td class="text-xs">${escapeHtml(p.payment_mode || 'â€”')}</td>
-                <td class="text-xs">${escapeHtml(p.payment_type || 'â€”')}</td>
-                <td class="font-mono text-xs">${escapeHtml(p.billing_period || 'â€”')}</td>
+                <td class="text-xs">${escapeHtml(p.payment_mode || '—')}</td>
+                <td class="text-xs">${escapeHtml(p.payment_type || '—')}</td>
+                <td class="font-mono text-xs">${escapeHtml(p.billing_period || '—')}</td>
                 <td>${allocCell(p)}</td>
                 <td class="text-right font-mono text-slate-300">${ksh(p.balance_before)}</td>
                 <td class="text-right font-mono font-semibold ${p.balance_after > 0 ? 'text-rose-400' : 'text-green-400'}">${ksh(p.balance_after)}</td>
@@ -3006,12 +3006,12 @@ async function loadPendingOverpayments() {
             : `<span class="text-xs font-mono text-slate-500">${escapeHtml(r.resolution_type === 'advance_rent' ? 'Advance Rent' : (r.resolution_type === 'credit_balance' ? 'Credit Balance' : 'Resolved'))}</span>`;
           return `<tr>
             <td class="font-mono text-xs text-cyan-400">${escapeHtml(r.tenant_name)}</td>
-            <td class="font-mono text-xs">${escapeHtml(r.tenant_code)}${r.unit_code && r.unit_code !== r.tenant_code ? ` Â· ${escapeHtml(r.unit_code)}` : ''}</td>
-            <td class="text-xs">${escapeHtml(r.property_name || 'â€”')}</td>
+            <td class="font-mono text-xs">${escapeHtml(r.tenant_code)}${r.unit_code && r.unit_code !== r.tenant_code ? ` · ${escapeHtml(r.unit_code)}` : ''}</td>
+            <td class="text-xs">${escapeHtml(r.property_name || '—')}</td>
             <td class="text-right font-mono text-xs">${ksh(r.payment_amount)}</td>
             <td class="text-right font-mono text-xs text-amber-400 font-bold">${ksh(r.overpayment_amount)}</td>
-            <td class="font-mono text-xs">${escapeHtml(r.receipt_number || 'â€”')}</td>
-            <td class="font-mono text-xs">${escapeHtml(r.transaction_reference || 'â€”')}</td>
+            <td class="font-mono text-xs">${escapeHtml(r.receipt_number || '—')}</td>
+            <td class="font-mono text-xs">${escapeHtml(r.transaction_reference || '—')}</td>
             <td class="font-mono text-xs">${fmtDate(r.payment_date)}</td>
             <td>${statusBadge(r.status)}</td>
             <td>${actionCell}</td>
@@ -3047,7 +3047,7 @@ async function resolvePendingOp(choice) {
   const hint = document.getElementById('pending-op-resolve-hint');
   const tenantCode = modal.dataset.tenantCode || '';
   const overpayment = Number(modal.dataset.overpayment || 0);
-  hint.textContent = 'Resolvingâ€¦';
+  hint.textContent = 'Resolving…';
   try {
     const result = await api.resolvePendingOverpayment(id, { choice });
     modal.style.display = 'none';
@@ -3115,7 +3115,7 @@ async function openMessageModal(tenantId) {
   modal.classList.remove('hidden');
 
   try {
-    // Profile endpoint (not GET /tenants/:id) â€” only it computes the live
+    // Profile endpoint (not GET /tenants/:id) — only it computes the live
     // balance summary (arrears + rent due + penalties + shortfalls).
     const { tenant: t, summary } = await api.tenantProfile(tenantId);
     document.getElementById('message-modal-title').textContent = `Send WhatsApp: ${t.name} (${t.tenant_code})`;
@@ -3215,30 +3215,30 @@ async function loadHouses() {
       tbody.innerHTML = `<tr><td colspan="7" class="text-rose-400 text-center py-8">${escapeHtml(err.message)}</td></tr>`;
       return;
     }
-    // Offline â€” houses from the last synced snapshot (read-only).
+    // Offline — houses from the last synced snapshot (read-only).
     const cached = await offlineDb.getAll('houses').catch(() => []);
     if (!cached.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">Offline â€” no synced property data on this device yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">Offline — no synced property data on this device yet.</td></tr>`;
       return;
     }
     housesCache = cached;
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-2 text-amber-500 text-xs font-mono">ðŸ“´ Offline â€” showing last synced data (read-only)</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-2 text-amber-500 text-xs font-mono">📴 Offline — showing last synced data (read-only)</td></tr>`
       + cached.map((h) => renderHouseRow(h)).join('');
   }
 }
 
 function renderHouseRow(h) {
-  const payMethod = h.payment_method === 'till' ? `Till ${escapeHtml(h.till_number || '')}${h.till_name ? ` (${escapeHtml(h.till_name)})` : ''}` : (h.payment_paybill ? `Paybill ${escapeHtml(h.payment_paybill)}` : 'â€”');
+  const payMethod = h.payment_method === 'till' ? `Till ${escapeHtml(h.till_number || '')}${h.till_name ? ` (${escapeHtml(h.till_name)})` : ''}` : (h.payment_paybill ? `Paybill ${escapeHtml(h.payment_paybill)}` : '—');
   return `<tr data-house-row="${h.id}">
     <td class="font-mono text-purple-300 house-cell-display">${escapeHtml(h.paybill_number)}</td>
     <td class="text-white house-cell-display">${escapeHtml(h.house_name)}</td>
     <td class="font-mono house-cell-display">${escapeHtml(h.total_units)}</td>
     <td class="font-mono text-cyan-300">${Number(h.clients_count || 0)}</td>
     <td class="font-mono house-cell-display" style="font-size:12px">${payMethod}</td>
-    <td class="house-cell-display">${escapeHtml(h.notes || 'â€”')}</td>
+    <td class="house-cell-display">${escapeHtml(h.notes || '—')}</td>
     <td class="space-x-1 house-row-actions">
       <button type="button" class="action-btn" data-open-house-dashboard="${h.id}">Dashboard</button>
-      <button type="button" class="action-btn house-inline-edit-btn" data-inline-edit-house="${h.id}">âœ Edit</button>
+      <button type="button" class="action-btn house-inline-edit-btn" data-inline-edit-house="${h.id}">✏ Edit</button>
       <button type="button" class="action-btn action-btn-danger" data-delete-house="${h.id}">Delete</button>
     </td>
   </tr>`;
@@ -3260,8 +3260,8 @@ function activateInlineEdit(houseId) {
 
   const actionsCell = row.querySelector('td.house-row-actions');
   actionsCell.innerHTML = `
-    <button type="button" class="action-btn action-btn-save" data-inline-save-house="${houseId}">ðŸ’¾ Save</button>
-    <button type="button" class="action-btn" data-inline-cancel-house="${houseId}">âœ• Cancel</button>
+    <button type="button" class="action-btn action-btn-save" data-inline-save-house="${houseId}">💾 Save</button>
+    <button type="button" class="action-btn" data-inline-cancel-house="${houseId}">✕ Cancel</button>
   `;
 
   payCell.querySelector('input')?.focus();
@@ -3293,7 +3293,7 @@ async function saveInlineHouseEdit(houseId) {
   if (!valid) return;
 
   const saveBtn = row.querySelector(`[data-inline-save-house="${houseId}"]`);
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Savingâ€¦'; }
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
 
   try {
     const { house } = await api.updateHouse(houseId, patch);
@@ -3306,16 +3306,16 @@ async function saveInlineHouseEdit(houseId) {
     }
     await refreshHouseOptions();
   } catch (err) {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'ðŸ’¾ Save'; }
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Save'; }
     alert(`Save failed: ${err.message}`);
   }
 }
 
 function renderDashboardTenantRow(t, isModal) {
   const isVacant = t.status === 'Vacant';
-  const name = isVacant ? 'â€”' : t.name;
-  const phone = isVacant ? 'â€”' : t.phone_number;
-  const payment = isVacant ? 'â€”' : statusBadge(t.payment_state);
+  const name = isVacant ? '—' : t.name;
+  const phone = isVacant ? '—' : t.phone_number;
+  const payment = isVacant ? '—' : statusBadge(t.payment_state);
 
   const actionButton = isVacant
     ? `<button type="button" class="qc-btn !py-0.5 !px-1.5 text-[10px] qc-btn-primary" data-house-tenant-occupy="${t.id}">Mark Occupied</button>`
@@ -3348,7 +3348,7 @@ function renderDashboardTenantRow(t, isModal) {
     <td>${statusBadge(t.status)}</td>
     <td>${payment}</td>
     <td class="space-x-1">
-      ${isVacant ? '' : `<button type="button" class="action-btn action-btn-wa" data-message-tenant="${t.id}">ðŸ’¬ Msg</button>`}
+      ${isVacant ? '' : `<button type="button" class="action-btn action-btn-wa" data-message-tenant="${t.id}">💬 Msg</button>`}
       <button type="button" class="action-btn" data-house-tenant-edit="${t.id}">Edit</button>
       <button type="button" class="action-btn action-btn-danger" data-house-tenant-delete="${t.id}">Delete</button>
     </td>
@@ -3396,23 +3396,23 @@ async function loadHouseDashboardPage(houseId) {
   if (!titleEl || !tenantsTbody) return;
 
   titleEl.textContent = 'House dashboard';
-  if (subtitleEl) subtitleEl.textContent = 'Loadingâ€¦';
+  if (subtitleEl) subtitleEl.textContent = 'Loading…';
   tenantsTbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-500">Loading...</td></tr>`;
 
   try {
     const [{ house }, dash] = await Promise.all([api.house(houseId), api.houseDashboard(houseId)]);
     const b = dash.building || {};
 
-    titleEl.textContent = `${house.house_name} â€” ${house.total_units} unit${house.total_units !== 1 ? 's' : ''}`;
+    titleEl.textContent = `${house.house_name} — ${house.total_units} unit${house.total_units !== 1 ? 's' : ''}`;
     if (subtitleEl) {
       let payLabel = '';
       if (house.payment_method === 'till') {
-        payLabel = `Buy Goods Till ${house.till_number || 'â€”'}${house.till_name ? ` (${house.till_name})` : ''}`;
+        payLabel = `Buy Goods Till ${house.till_number || '—'}${house.till_name ? ` (${house.till_name})` : ''}`;
       } else if (house.payment_paybill) {
         const acct = house.account_number_format ? house.account_number_format.replace(/\{\{tenant_code\}\}/g, 'X') : '';
         payLabel = `M-PESA Paybill ${house.payment_paybill}${acct ? `, Account ${acct}` : ''}`;
       } else {
-        payLabel = 'M-PESA Paybill â€” (not configured)';
+        payLabel = 'M-PESA Paybill — (not configured)';
       }
       subtitleEl.textContent = `House: ${house.paybill_number} | ${payLabel}`;
     }
@@ -3529,7 +3529,7 @@ async function openHouseModal(id = null) {
   showView('house-edit');
 }
 
-// â”€â”€â”€ House Charges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── House Charges ──────────────────────────────────────────────────────────
 
 let _currentHousePaybill = null;
 
@@ -3727,7 +3727,7 @@ async function initSession() {
     document.getElementById('nav-settings-link')?.classList.toggle('hidden', !isAdmin());
         document.getElementById('nav-conflicts-link')?.classList.toggle('hidden', !isAdmin());
       } catch (_) {}
-      showToast(`Offline mode â€” session valid for ${offlineSessionDaysLeft()} more day(s). Showing last synced data.`, 'error');
+      showToast(`Offline mode — session valid for ${offlineSessionDaysLeft()} more day(s). Showing last synced data.`, 'error');
       const routed = applyRoute();
       if (!routed) showView('dashboard');
       finishBoot();
@@ -3762,7 +3762,7 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
     startPolls();
     // Seed the on-device cache right after login for offline use.
     pullSnapshot().catch(() => {});
-    showToast(`Welcome back, ${result.user.display_name || result.user.username} âœ“`);
+    showToast(`Welcome back, ${result.user.display_name || result.user.username} ✓`);
   } catch (err) {
     errEl.textContent = err.message;
     errEl.classList.remove('hidden');
@@ -3842,7 +3842,7 @@ document.querySelectorAll('.nav-jump').forEach((btn) => {
   btn.addEventListener('click', () => showView(btn.dataset.nav));
 });
 
-// Dashboard metric cards / collection panel â†’ open the records behind the
+// Dashboard metric cards / collection panel → open the records behind the
 // figure (Total Tenants jumps to the existing Tenants on Board list).
 document.querySelectorAll('[data-drill]').forEach((el) => {
   const fire = () => {
@@ -3862,7 +3862,7 @@ document.getElementById('dash-drill-modal')?.addEventListener('click', (e) => {
   const modal = document.getElementById('dash-drill-modal');
   if (!modal) return;
   if (e.target === modal) modal.classList.add('hidden');
-  // Tenant account link â†’ close the overlay so the tenant dashboard is visible
+  // Tenant account link → close the overlay so the tenant dashboard is visible
   else if (e.target.closest?.('a[data-tenant-link]')) modal.classList.add('hidden');
 });
 
@@ -3963,7 +3963,7 @@ document.getElementById('tenant-form')?.addEventListener('submit', async (e) => 
   };
   try {
     // New tenant registrations and edits need live validation (codes,
-    // duplicates) â€” online only. Move-in (Mark Occupied) works offline.
+    // duplicates) — online only. Move-in (Mark Occupied) works offline.
     if (effectiveOffline() && !(id && form.dataset.occupyMode === '1')) {
       alert('Adding or editing tenant records requires an internet connection. Move-in (Mark Occupied) and payments work offline.');
       return;
@@ -4270,7 +4270,7 @@ document.getElementById('broadcast-template-select')?.addEventListener('change',
 let lastParsedPayment = null;
 
 /**
- * Offline PARSE â€” same fields as the server parser, tenant lookup against
+ * Offline PARSE — same fields as the server parser, tenant lookup against
  * the last synced snapshot, duplicate check against cached payments.
  * The receipt preview is generated server-side on sync (allocation needs
  * live balances), so the message box shows a placeholder until then.
@@ -4318,16 +4318,16 @@ async function parsePaymentMessageOfflineFlow({ raw, hint, tenantSel, amountEl, 
         .map((t) => {
           const houseName = t.linked_house_name || t.property_name || '';
           const houseNo = t.linked_house_number || t.unit_label || '';
-          const label = `${t.name} (${t.tenant_code}) â€” ${houseName}${houseNo ? ` ${houseNo}` : ''}`;
+          const label = `${t.name} (${t.tenant_code}) — ${houseName}${houseNo ? ` ${houseNo}` : ''}`;
           return `<option value="${escapeHtml(t.tenant_code || t.id || '')}">${escapeHtml(label)}</option>`;
         })
         .join('');
       tenantSel.disabled = false;
     }
-    if (msgEl) msgEl.value = 'ðŸ“´ Offline â€” receipt preview will be generated automatically when this payment syncs.';
+    if (msgEl) msgEl.value = '📴 Offline — receipt preview will be generated automatically when this payment syncs.';
     if (copyBtn) copyBtn.disabled = true;
     if (approveBtn) approveBtn.disabled = false;
-    if (hint) hint.textContent = `Offline parse OK (last synced data) â€” ${matches.length > 1 ? 'multiple matches, select the correct tenant.' : 'tenant matched.'} Receipt: PENDING WHATSAPP SEND.`;
+    if (hint) hint.textContent = `Offline parse OK (last synced data) — ${matches.length > 1 ? 'multiple matches, select the correct tenant.' : 'tenant matched.'} Receipt: PENDING WHATSAPP SEND.`;
     lastParsedPayment = { offline: true, parsed, matches };
   } catch (err) {
     if (hint) hint.textContent = `Offline parse failed: ${err.message}`;
@@ -4362,13 +4362,13 @@ async function parsePaymentMessageFlow() {
   }
 
   try {
-    if (hint) hint.textContent = 'Parsingâ€¦';
+    if (hint) hint.textContent = 'Parsing…';
     let result;
     try {
       result = await api.parsePaymentMessage(raw);
     } catch (apiErr) {
       if (!isNetworkError(apiErr)) throw apiErr;
-      if (hint) hint.textContent = 'No internet â€” parsing offlineâ€¦';
+      if (hint) hint.textContent = 'No internet — parsing offline…';
       return parsePaymentMessageOfflineFlow({ raw, hint, tenantSel, amountEl, refEl, msgEl, copyBtn, approveBtn });
     }
     lastParsedPayment = result;
@@ -4382,8 +4382,8 @@ async function parsePaymentMessageFlow() {
 
     if (result.duplicate) {
       const d = result.duplicate;
-      const approvedOn = d.approved_at ? new Date(d.approved_at).toLocaleDateString() : (d.payment_date || 'â€”');
-      if (hint) hint.innerHTML = `Approval Failed: M-Pesa Reference <b>${result.parsed?.mpesa_reference || d.mpesa_reference || 'â€”'}</b> has already been used for an approved payment.<br>Existing Record â€” Tenant: ${d.tenant_name || 'â€”'}, Property: ${d.property_name || 'â€”'}, Unit: ${d.unit_number || 'â€”'}, Amount: KES ${Number(d.amount || 0).toLocaleString()}, Date Approved: ${approvedOn}, Receipt Number: ${d.receipt_number || 'â€”'}.`;
+      const approvedOn = d.approved_at ? new Date(d.approved_at).toLocaleDateString() : (d.payment_date || '—');
+      if (hint) hint.innerHTML = `Approval Failed: M-Pesa Reference <b>${result.parsed?.mpesa_reference || d.mpesa_reference || '—'}</b> has already been used for an approved payment.<br>Existing Record — Tenant: ${d.tenant_name || '—'}, Property: ${d.property_name || '—'}, Unit: ${d.unit_number || '—'}, Amount: KES ${Number(d.amount || 0).toLocaleString()}, Date Approved: ${approvedOn}, Receipt Number: ${d.receipt_number || '—'}.`;
       hint.style.color = '#dc2626';
       if (approveBtn) approveBtn.disabled = true;
       lastParsedPayment = null;
@@ -4402,14 +4402,14 @@ async function parsePaymentMessageFlow() {
         .map((t) => {
           const houseName = t.linked_house_name || t.property_name || '';
           const houseNo = t.linked_house_number || t.unit_label || '';
-          const label = `${t.name} (${t.tenant_code}) â€” ${houseName}${houseNo ? ` ${houseNo}` : ''}`;
+          const label = `${t.name} (${t.tenant_code}) — ${houseName}${houseNo ? ` ${houseNo}` : ''}`;
           return `<option value="${t.id}">${escapeHtml(label)}</option>`;
         })
         .join('');
       tenantSel.disabled = false;
     }
 
-    if (hint) hint.textContent = matches.length > 1 ? 'Multiple matches found â€” select the correct tenant.' : 'Tenant matched.';
+    if (hint) hint.textContent = matches.length > 1 ? 'Multiple matches found — select the correct tenant.' : 'Tenant matched.';
     if (copyBtn) copyBtn.disabled = !result.generated_message;
     if (approveBtn) approveBtn.disabled = false;
   } catch (err) {
@@ -4434,17 +4434,17 @@ function renderParsedOutstandingInvoices(invoices) {
   }
   const total = invoices.reduce((s, r) => s + Number(r.balance_due ?? r.amount ?? 0), 0);
   box.innerHTML = `<div class="mt-2 rounded border border-slate-700 bg-slate-900 p-2 text-xs font-mono">
-    <div class="text-slate-400 mb-1">Outstanding invoices auto-retrieved (${invoices.length}) â€” total due ${formatKes(total)}:</div>
+    <div class="text-slate-400 mb-1">Outstanding invoices auto-retrieved (${invoices.length}) — total due ${formatKes(total)}:</div>
     ${invoices.map((r) => `<div class="flex justify-between gap-2 py-0.5">
-      <span class="text-slate-300">${escapeHtml(r.invoice_type || '')} Â· ${escapeHtml(r.invoice_number || '')}</span>
+      <span class="text-slate-300">${escapeHtml(r.invoice_type || '')} · ${escapeHtml(r.invoice_number || '')}</span>
       <span class="text-amber-400">${formatKes(r.balance_due ?? r.amount)}</span>
     </div>`).join('')}
-    <div class="text-slate-500 mt-1">They will be settled automatically on approve â€” no need to re-enter them.</div>
+    <div class="text-slate-500 mt-1">They will be settled automatically on approve — no need to re-enter them.</div>
   </div>`;
 }
 
 /**
- * Offline APPROVE & SEND â€” saves the payment locally as PENDING SYNC with a
+ * Offline APPROVE & SEND — saves the payment locally as PENDING SYNC with a
  * device UUID (`client_txn_id`). The receipt is marked PENDING WHATSAPP SEND.
  * On reconnect the sync engine uploads it; the server then runs the normal
  * allocation + WhatsApp workflow. Nothing about that workflow changes.
@@ -4452,7 +4452,7 @@ function renderParsedOutstandingInvoices(invoices) {
 async function approvePaymentOfflineFlow({ raw, tenantId, hint, approveBtn }) {
   try {
     if (approveBtn) approveBtn.disabled = true;
-    if (hint) hint.textContent = 'Saving offlineâ€¦';
+    if (hint) hint.textContent = 'Saving offline…';
     let parsed = (lastParsedPayment && lastParsedPayment.parsed) || null;
     let matches = (lastParsedPayment && lastParsedPayment.matches) || [];
     if (!parsed) {
@@ -4461,7 +4461,7 @@ async function approvePaymentOfflineFlow({ raw, tenantId, hint, approveBtn }) {
       matches = matchTenantsOffline(parsed, tenants);
     }
     if (parsed.amount == null) {
-      if (hint) hint.textContent = 'Could not detect the amount â€” cannot save offline.';
+      if (hint) hint.textContent = 'Could not detect the amount — cannot save offline.';
       return;
     }
     const tenant = matches.find((t) => String(t.tenant_code || t.id || '') === String(tenantId)) || matches[0] || null;
@@ -4511,7 +4511,7 @@ async function approvePaymentOfflineFlow({ raw, tenantId, hint, approveBtn }) {
     });
     if (hint) {
       hint.style.color = '';
-      hint.textContent = 'ðŸŸ  Saved offline â€” PENDING SYNC. Receipt: PENDING WHATSAPP SEND. Will upload + send automatically when internet returns.';
+      hint.textContent = '🟠 Saved offline — PENDING SYNC. Receipt: PENDING WHATSAPP SEND. Will upload + send automatically when internet returns.';
     }
     showToast('Payment saved offline (PENDING SYNC)');
     try { await loadPayments(); } catch (_) {}
@@ -4538,7 +4538,7 @@ async function approvePaymentFromMessageFlow() {
 
   try {
     if (approveBtn) approveBtn.disabled = true;
-    if (hint) hint.textContent = 'Approvingâ€¦';
+    if (hint) hint.textContent = 'Approving…';
     const result = await api.approvePaymentFromMessage({ raw_message: raw, tenant_id: tenantId });
     const msgEl = document.getElementById('payment-generated-message');
     if (msgEl && result.generated_message) msgEl.value = result.generated_message;
@@ -4565,7 +4565,7 @@ async function approvePaymentFromMessageFlow() {
     if (hint) {
       if (isNetworkError(err)) {
         hint.style.color = '#b45309';
-        hint.textContent = 'Connection lost during approval. The payment may already be saved on the server â€” check Payment History after reconnect. If it is missing, paste + approve again: duplicate M-Pesa codes are rejected automatically, so it cannot post twice.';
+        hint.textContent = 'Connection lost during approval. The payment may already be saved on the server — check Payment History after reconnect. If it is missing, paste + approve again: duplicate M-Pesa codes are rejected automatically, so it cannot post twice.';
       } else {
         hint.textContent = `Approve failed: ${detail}`;
         hint.style.color = err.status === 409 ? '#dc2626' : '';
@@ -4614,24 +4614,24 @@ document.getElementById('payment-mode-select')?.addEventListener('change', async
     try {
       const data = await api.tenants();
       const tenants = data.tenants || data || [];
-      tenantSel.innerHTML = '<option value="">Select tenantâ€¦</option>' + tenants.map(t => {
+      tenantSel.innerHTML = '<option value="">Select tenant…</option>' + tenants.map(t => {
         const houseName = t.linked_house_name || t.property_name || '';
         const houseNo = t.linked_house_number || t.unit_label || '';
-        return `<option value="${t.id}">${escapeHtml(t.name)} (${escapeHtml(t.tenant_code)}) â€” ${escapeHtml(houseName)} ${escapeHtml(houseNo)}</option>`;
+        return `<option value="${t.id}">${escapeHtml(t.name)} (${escapeHtml(t.tenant_code)}) — ${escapeHtml(houseName)} ${escapeHtml(houseNo)}</option>`;
       }).join('');
       tenantSel.disabled = false;
     } catch (_) {}
   }
 });
 
-// Cash / Pesa Link approve â€” offline variant queues to the outbox (PENDING SYNC).
+// Cash / Pesa Link approve — offline variant queues to the outbox (PENDING SYNC).
 async function approveCashOfflineFlow({ payment_mode, amount, date, time, tenantRef, hint }) {
   try {
-    if (hint) hint.textContent = 'Saving offlineâ€¦';
+    if (hint) hint.textContent = 'Saving offline…';
     const tenants = await offlineDb.getAll('tenants').catch(() => []);
     const tenant = (tenants || []).find((t) => String(t.tenant_code || t.id || '').toUpperCase() === String(tenantRef || '').toUpperCase()) || null;
     if (!tenant) {
-      if (hint) hint.textContent = 'Tenant not found in synced data â€” connect once to download tenants, or check the code.';
+      if (hint) hint.textContent = 'Tenant not found in synced data — connect once to download tenants, or check the code.';
       return;
     }
     const clientTxnId = offlineDb.newClientTxnId();
@@ -4663,7 +4663,7 @@ async function approveCashOfflineFlow({ payment_mode, amount, date, time, tenant
     });
     if (hint) {
       hint.style.color = '';
-      hint.textContent = 'ðŸŸ  Saved offline â€” PENDING SYNC. Receipt: PENDING WHATSAPP SEND. Will upload + send automatically when internet returns.';
+      hint.textContent = '🟠 Saved offline — PENDING SYNC. Receipt: PENDING WHATSAPP SEND. Will upload + send automatically when internet returns.';
     }
     showToast(`${payment_mode} payment saved offline (PENDING SYNC)`);
     try { await loadPayments(); } catch (_) {}
@@ -4694,7 +4694,7 @@ document.getElementById('btn-parse-payment-message')?.addEventListener('click', 
     }
     if (!confirm(`Approve KES ${Number(amount).toLocaleString()} cash payment?`)) return;
     try {
-      if (hint) hint.textContent = 'Approvingâ€¦';
+      if (hint) hint.textContent = 'Approving…';
       const result = await api.approveCashPesaLink({ payment_mode: 'Cash', amount, payment_date: date, payment_time: time, tenant_id: tenantSel.value });
       if (msgEl && result.generated_message) msgEl.value = result.generated_message;
       if (hint) hint.textContent = 'Cash payment approved and WhatsApp sent.';
@@ -4715,7 +4715,7 @@ document.getElementById('btn-parse-payment-message')?.addEventListener('click', 
     }
     if (!confirm(`Approve KES ${Number(amount).toLocaleString()} Pesa Link payment?`)) return;
     try {
-      if (hint) hint.textContent = 'Approvingâ€¦';
+      if (hint) hint.textContent = 'Approving…';
       const result = await api.approveCashPesaLink({ payment_mode: 'Pesa Link', amount, payment_date: date, payment_time: time, tenant_code: tenantCode.trim() });
       if (msgEl && result.generated_message) msgEl.value = result.generated_message;
       if (hint) hint.textContent = 'Pesa Link payment approved and WhatsApp sent.';
@@ -4746,7 +4746,7 @@ document.getElementById('broadcast-form')?.addEventListener('submit', async (e) 
 document.getElementById('btn-sync-historical-payments')?.addEventListener('click', async () => {
   if (!confirm('Run historical payment synchronization? This recomputes every tenant\'s balances from approved payment history and marks all approved payments as fully synced (Approved & Sent).')) return;
   const btn = document.getElementById('btn-sync-historical-payments');
-  if (btn) { btn.disabled = true; btn.textContent = 'Syncingâ€¦'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
   try {
     const result = await api.syncHistoricalPayments();
     let msg = `${result.message}\n\nApproved payments: ${result.totalApproved}\nMarked synced: ${result.syncedPayments}\nTenants recomputed: ${result.tenantsRepaired}`;
@@ -5593,7 +5593,7 @@ document.getElementById('payments-tbody')?.addEventListener('click', async (e) =
       alert(err.message);
     }
   } else if (deleteId) {
-    // Permanently deleting a financial record requires a live connection (Â§14).
+    // Permanently deleting a financial record requires a live connection (§14).
     if (!requireOnline('deleteFinancial', effectiveOffline, showToast)) return;
     if (!confirm('Are you sure you want to delete this payment record? All of its allocations (rent, deposit, garbage, water, charges, balances) will be rolled back.')) return;
     try {
@@ -5641,17 +5641,17 @@ function showDeleteWarnings(result) {
   if (!result) return;
   const warnings = result.warnings || [];
   if (result.fallback) {
-    warnings.unshift('This payment predates allocation tracking, so balances were rebuilt from remaining payments â€” verify the account.');
+    warnings.unshift('This payment predates allocation tracking, so balances were rebuilt from remaining payments — verify the account.');
   }
   if (warnings.length) {
-    showToast('Payment deleted with notes â€” see alert.', 'error');
+    showToast('Payment deleted with notes — see alert.', 'error');
     alert('Payment deleted and allocations rolled back.\n\nPlease verify:\n- ' + warnings.join('\n- '));
   } else {
-    showToast('Payment deleted â€” all allocations rolled back.');
+    showToast('Payment deleted — all allocations rolled back.');
   }
 }
 
-// â”€â”€â”€ Signed tenancy agreement upload / preview / delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Signed tenancy agreement upload / preview / delete ────────────────────
 
 document.getElementById('btn-td-agreement-upload')?.addEventListener('click', () => {
   if (!activeTenantCode) return showToast('Open a tenant first.', 'error');
@@ -5671,10 +5671,10 @@ async function handleAgreementFiles(fileList) {
   const btn = document.getElementById('btn-td-agreement-upload');
   const scanBtn = document.getElementById('btn-td-scan-doc');
   try {
-    if (btn) { btn.disabled = true; btn.textContent = 'Compressingâ€¦'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Compressing…'; }
     if (scanBtn) scanBtn.disabled = true;
     const { blob, filename, approxKB } = await prepareAgreementFiles(fileList, code);
-    if (btn) btn.textContent = `Uploading (${approxKB} KB)â€¦`;
+    if (btn) btn.textContent = `Uploading (${approxKB} KB)…`;
     await api.uploadAgreement(code, blob, filename);
     showToast(`Agreement saved (${approxKB} KB).`);
     loadTenantDashboard(code);
@@ -5696,7 +5696,7 @@ document.getElementById('td-agreement-file')?.addEventListener('change', async (
 document.getElementById('td-agreement-scan')?.addEventListener('change', async (e) => {
   const input = e.target;
   if (!input.files || !input.files.length) { input.value = ''; return; }
-  showToast(`Compressing ${input.files.length} scanned page(s)â€¦`);
+  showToast(`Compressing ${input.files.length} scanned page(s)…`);
   await handleAgreementFiles(input.files);
   input.value = '';
 });
@@ -5712,7 +5712,7 @@ document.getElementById('td-agreements-tbody')?.addEventListener('click', async 
       const { url } = await api.previewAgreement(code, prevBtn.dataset.agPreview);
       const frame = document.getElementById('td-agreement-frame');
       if (frame) frame.src = url;
-      // Links expire in ~2 minutes â€” note it so a stale tab isn't confusing.
+      // Links expire in ~2 minutes — note it so a stale tab isn't confusing.
       const note = document.getElementById('td-agreement-preview-note');
       if (note) note.textContent = 'Preview link expires shortly; reopen Preview if it stops loading.';
       document.getElementById('td-agreement-modal')?.classList.remove('hidden');
@@ -5786,7 +5786,7 @@ function addInvoiceItem() {
     <td><input type="text" class="cyber-input p-1 w-full" name="desc[]" placeholder="Item description" required /></td>
     <td><input type="number" class="cyber-input p-1 w-full text-right invoice-calc" name="price[]" value="0" min="0" /></td>
     <td class="text-right font-mono text-slate-300 align-middle">KES <span class="item-total">0</span></td>
-    <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeInvoiceItem(${id})">Ã—</button></td>
+    <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeInvoiceItem(${id})">×</button></td>
   `;
   tbody.appendChild(tr);
   
@@ -5807,7 +5807,7 @@ function addDeductionItem() {
     <td><input type="text" class="cyber-input p-1 w-full text-rose-400" name="desc[]" placeholder="Deduction (e.g. Painting)" required /></td>
     <td><input type="number" class="cyber-input p-1 w-full text-right invoice-calc text-rose-400 deduction-price" name="price[]" value="0" step="any" placeholder="Deduction amount" /></td>
     <td class="text-right font-mono text-rose-400 align-middle">KES <span class="item-total">0</span></td>
-    <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeInvoiceItem(${id})">Ã—</button></td>
+    <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeInvoiceItem(${id})">×</button></td>
   `;
   tbody.appendChild(tr);
 
@@ -5962,7 +5962,7 @@ async function autoLoadOutstandingMaintenance() {
           <td><input type="text" class="cyber-input p-1 w-full" name="desc[]" value="${escapeHtml(o.description)}" required /></td>
           <td><input type="number" class="cyber-input p-1 w-full text-right invoice-calc" name="price[]" value="${Number(o.amount || 0)}" min="0" /></td>
           <td class="text-right font-mono text-slate-300 align-middle">KES <span class="item-total">0</span></td>
-          <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeInvoiceItem(${id})">Ã—</button></td>
+          <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeInvoiceItem(${id})">×</button></td>
         `;
         tbody.appendChild(tr);
         tr.querySelectorAll('.invoice-calc').forEach(inp => inp.addEventListener('input', calculateInvoiceTotals));
@@ -6090,7 +6090,7 @@ async function loadExitSummary() {
     set('exit-info-name', summary.tenant.name);
     set('exit-info-unit', `${summary.tenant.property_name} / ${summary.tenant.unit_label || summary.tenant.tenant_code}`);
     set('exit-info-rent', money(summary.tenant.rent_amount));
-    set('exit-info-phone', summary.tenant.phone_number || 'â€”');
+    set('exit-info-phone', summary.tenant.phone_number || '—');
     set('exit-deposit-required', money(summary.deposit.amount));
     set('exit-deposit-balance', money(summary.deposit.balance));
     const depPaid = document.getElementById('exit-deposit-paid');
@@ -6139,7 +6139,7 @@ function addExitDeduction() {
   tr.innerHTML = `
     <td><input type="text" class="cyber-input p-1 w-full" name="exit-desc[]" placeholder="e.g. Repairs, Cleaning, Painting" required /></td>
     <td><input type="number" class="cyber-input p-1 w-full text-right exit-deduction-amount" name="exit-amount[]" value="0" min="0" required /></td>
-    <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeExitDeduction(${id})">Ã—</button></td>
+    <td class="text-center align-middle"><button type="button" class="text-rose-400 hover:text-rose-300 px-2" onclick="removeExitDeduction(${id})">×</button></td>
   `;
   tbody.appendChild(tr);
   tr.querySelector('.exit-deduction-amount').addEventListener('input', calculateExitSettlement);
@@ -6259,7 +6259,7 @@ function loadRentInvoiceTenantInfo() {
   set('rent-invoice-info-name', match.name);
   set('rent-invoice-info-unit', `${match.property_name || ''} / ${match.unit_label || match.tenant_code}`);
   set('rent-invoice-info-rent', money(match.rent_amount));
-  set('rent-invoice-info-phone', match.phone_number || 'â€”');
+  set('rent-invoice-info-phone', match.phone_number || '—');
 }
 
 function buildRentInvoicePayload() {
@@ -6445,7 +6445,7 @@ function addPlotExpenseRow(plotName = '', amount = '', description = '') {
       <input type="text" class="cyber-input plot-desc" placeholder="e.g. Plumbing repairs" value="${escapeHtml(description)}" />
     </div>
     <div class="md:col-span-1 flex justify-center">
-      <button type="button" class="text-rose-400 hover:text-rose-300 text-sm remove-plot-row" title="Remove">âœ•</button>
+      <button type="button" class="text-rose-400 hover:text-rose-300 text-sm remove-plot-row" title="Remove">✕</button>
     </div>
   `;
   row.querySelector('.remove-plot-row')?.addEventListener('click', () => { row.remove(); updatePlotTotal(); });
@@ -6616,7 +6616,7 @@ async function saveMaintenanceInvoice(e) {
   resEl.textContent = 'Saving...';
   resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
   // Offline creates (contractor invoices, repair costs, materials) queue to
-  // the outbox. Updates to synced records stay online-only (Â§13).
+  // the outbox. Updates to synced records stay online-only (§13).
   if (!id && effectiveOffline()) {
     try {
       const clientTxnId = offlineDb.newClientTxnId();
@@ -6632,7 +6632,7 @@ async function saveMaintenanceInvoice(e) {
         sync: 'pending',
         created_at: new Date().toISOString(),
       });
-      resEl.textContent = 'ðŸŸ  Expense saved offline â€” PENDING SYNC. Will upload when internet returns.';
+      resEl.textContent = '🟠 Expense saved offline — PENDING SYNC. Will upload when internet returns.';
       resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
       showToast('Expense saved offline (PENDING SYNC)');
       document.getElementById('maintenance-invoice-form-wrap').classList.add('hidden');
@@ -6745,11 +6745,11 @@ async function loadMaintenanceInvoices() {
     '<tr style="opacity:.92">' +
     '<td class="font-mono">' + escapeHtml(r.mnt_number || '(pending)') + '</td>' +
     '<td>' + escapeHtml((r.created_at || '').slice(0, 10)) + '</td>' +
-    '<td colspan="2">' + escapeHtml(r.property_name || 'â€”') + '</td>' +
+    '<td colspan="2">' + escapeHtml(r.property_name || '—') + '</td>' +
     '<td><span class="text-slate-400">Offline</span></td>' +
-    '<td>' + escapeHtml(r.property_name || 'â€”') + '</td>' +
+    '<td>' + escapeHtml(r.property_name || '—') + '</td>' +
     '<td class="text-right font-mono">' + money(r.grand_total) + '</td>' +
-    '<td class="text-right font-mono text-green-400">â€”</td>' +
+    '<td class="text-right font-mono text-green-400">—</td>' +
     '<td class="text-right font-mono text-rose-400">' + money(r.grand_total) + '</td>' +
     '<td>' + offlineSyncBadge(r.sync) + '</td>' +
     '<td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td></tr>'
@@ -6764,7 +6764,7 @@ async function loadMaintenanceInvoices() {
       const item = Array.isArray(inv.items) && inv.items.length ? inv.items[0] : {};
       const catKey = item.work_required || 'other';
       const category = MNT_CATEGORY_LABELS[catKey] || catKey;
-      const description = item.problem || 'â€”';
+      const description = item.problem || '—';
       const amount = Number(inv.grand_total || 0);
       const paid = Number(inv.paid_total || 0);
       const outstanding = Math.max(0, amount - paid);
@@ -6774,14 +6774,14 @@ async function loadMaintenanceInvoices() {
       const sourceDetail = isWoSource ? notes.replace('WO Source: ', '').split(' ')[0] : '';
       return '<tr>' +
         '<td class="font-mono">' + escapeHtml(inv.mnt_number) + '</td>' +
-        '<td>' + ((inv.date_reported || '').slice(0, 10) || 'â€”') + '</td>' +
+        '<td>' + ((inv.date_reported || '').slice(0, 10) || '—') + '</td>' +
         '<td>' + escapeHtml(category) + '</td>' +
         '<td>' + escapeHtml(description) + '</td>' +
         '<td><span class="' + (isWoSource ? 'text-emerald-400' : 'text-slate-400') + '">' + sourceLabel + '</span>' + (sourceDetail ? ' <span class="text-slate-500 text-xs">' + escapeHtml(sourceDetail) + '</span>' : '') + '</td>' +
         '<td>' + escapeHtml(inv.property_name || inv.unit_codes || 'All Properties') + '</td>' +
         '<td class="text-right font-mono">' + money(amount) + '</td>' +
-        '<td class="text-right font-mono text-green-400">' + (paid > 0 ? money(paid) : 'â€”') + '</td>' +
-        '<td class="text-right font-mono ' + (outstanding > 0 ? 'text-rose-400' : 'text-green-400') + '">' + (outstanding > 0 ? money(outstanding) : 'â€”') + '</td>' +
+        '<td class="text-right font-mono text-green-400">' + (paid > 0 ? money(paid) : '—') + '</td>' +
+        '<td class="text-right font-mono ' + (outstanding > 0 ? 'text-rose-400' : 'text-green-400') + '">' + (outstanding > 0 ? money(outstanding) : '—') + '</td>' +
         '<td>' + escapeHtml(inv.status || 'Pending') + '</td>' +
         '<td class="text-right whitespace-nowrap">' +
         '<button type="button" class="action-btn px-2 py-1 text-xs" onclick="editMaintenanceInvoice(' + inv.id + ')">Edit</button> ' +
@@ -6798,18 +6798,18 @@ async function loadMaintenanceInvoices() {
     }
     const cached = await offlineDb.getAll('maintenance').catch(() => []);
     if (!cached.length) {
-      tbody.innerHTML = '<tr><td colspan="11" class="text-center text-slate-500 py-6">Offline â€” no synced expenses on this device yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="text-center text-slate-500 py-6">Offline — no synced expenses on this device yet.</td></tr>';
       return;
     }
-    tbody.innerHTML = '<tr><td colspan="11" class="text-center text-amber-500 text-xs font-mono py-2">ðŸ“´ Offline â€” showing last synced data</td></tr>' + cached.map((r) =>
+    tbody.innerHTML = '<tr><td colspan="11" class="text-center text-amber-500 text-xs font-mono py-2">📴 Offline — showing last synced data</td></tr>' + cached.map((r) =>
       '<tr style="opacity:.92">' +
       '<td class="font-mono">' + escapeHtml(r.mnt_number || '(pending)') + '</td>' +
       '<td>' + escapeHtml((r.created_at || r.synced_at || '').slice(0, 10)) + '</td>' +
-      '<td colspan="2">' + escapeHtml(r.property_name || 'â€”') + '</td>' +
+      '<td colspan="2">' + escapeHtml(r.property_name || '—') + '</td>' +
       '<td><span class="text-slate-400">Offline</span></td>' +
-      '<td>' + escapeHtml(r.property_name || 'â€”') + '</td>' +
+      '<td>' + escapeHtml(r.property_name || '—') + '</td>' +
       '<td class="text-right font-mono">' + money(r.grand_total) + '</td>' +
-      '<td class="text-right font-mono text-green-400">â€”</td>' +
+      '<td class="text-right font-mono text-green-400">—</td>' +
       '<td class="text-right font-mono text-rose-400">' + money(r.grand_total) + '</td>' +
       '<td>' + offlineSyncBadge(r.sync) + '</td>' +
       '<td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td></tr>'
@@ -6862,12 +6862,12 @@ function renderWoExpenseList(expenses) {
     `<div class="border border-slate-700 rounded p-3 mb-2 hover:border-cyan-500 cursor-pointer transition-colors" onclick="selectWoExpense(${e.wo_id}, '${escapeHtml(e.wo_number || '')}', '${escapeHtml((e.issue_nos || []).join(','))}', '${escapeHtml(e.property_name || '')}')">
       <div class="flex justify-between items-start">
         <div>
-          <p class="text-sm font-medium text-white">WO: ${escapeHtml(e.wo_number || 'â€”')}</p>
-          <p class="text-xs text-slate-400">Property: ${escapeHtml(e.property_name || 'â€”')}</p>
-          <p class="text-xs text-slate-400">Description: ${escapeHtml(e.description || 'â€”')}</p>
-          <p class="text-xs text-slate-400">Technician: ${escapeHtml(e.technician_name || 'â€”')}</p>
+          <p class="text-sm font-medium text-white">WO: ${escapeHtml(e.wo_number || '—')}</p>
+          <p class="text-xs text-slate-400">Property: ${escapeHtml(e.property_name || '—')}</p>
+          <p class="text-xs text-slate-400">Description: ${escapeHtml(e.description || '—')}</p>
+          <p class="text-xs text-slate-400">Technician: ${escapeHtml(e.technician_name || '—')}</p>
           ${e.materials ? `<p class="text-xs text-slate-400">Materials: ${escapeHtml(e.materials)}</p>` : ''}
-          <p class="text-xs text-slate-400">Responsible: ${escapeHtml(e.responsible_party || 'â€”')}</p>
+          <p class="text-xs text-slate-400">Responsible: ${escapeHtml(e.responsible_party || '—')}</p>
         </div>
         <p class="text-sm font-mono text-cyan-400">${money(e.amount)}</p>
       </div>
@@ -6971,11 +6971,11 @@ async function loadSalaryDashboard() {
       return `<tr>
         <td class="font-medium text-white">${escapeHtml(r.employee_name)}</td>
         <td class="font-mono">${escapeHtml(r.salary_month)}</td>
-        <td class="text-right font-mono">${r.previous_balance > 0 ? money(r.previous_balance) : 'â€”'}</td>
+        <td class="text-right font-mono">${r.previous_balance > 0 ? money(r.previous_balance) : '—'}</td>
         <td class="text-right font-mono">${money(r.expected_salary)}</td>
         <td class="text-right font-mono text-cyan-400">${money(totalObligation)}</td>
         <td class="text-right font-mono text-green-400">${money(r.total_paid)}</td>
-        <td class="text-right font-mono ${r.outstanding > 0 ? 'text-rose-400' : 'text-green-400'}">${r.outstanding > 0 ? money(r.outstanding) : 'â€”'}</td>
+        <td class="text-right font-mono ${r.outstanding > 0 ? 'text-rose-400' : 'text-green-400'}">${r.outstanding > 0 ? money(r.outstanding) : '—'}</td>
         <td class="${statusClass}">${escapeHtml(r.status)}</td>
         <td class="text-right whitespace-nowrap">
           <button type="button" class="action-btn px-2 py-1 text-xs" onclick="editSalaryRecord(${r.id})">Edit</button>
@@ -7030,7 +7030,7 @@ async function openSalaryPaymentModal(recordId, employeeName, totalObligation, t
   document.getElementById('spm-notes').value = '';
   document.getElementById('spm-result').textContent = '';
   document.getElementById('sal-pay-title').textContent = 'Record Salary Payment';
-  document.getElementById('sal-pay-subtitle').textContent = employeeName + ' â€” Outstanding: ' + money(outstanding);
+  document.getElementById('sal-pay-subtitle').textContent = employeeName + ' — Outstanding: ' + money(outstanding);
 
   // Load payment history
   const histDiv = document.getElementById('spm-payment-history');
@@ -7044,8 +7044,8 @@ async function openSalaryPaymentModal(recordId, employeeName, totalObligation, t
         payments.map(p => `<tr>
           <td>${(p.payment_date || '').slice(0, 10)}</td>
           <td class="text-right font-mono">${money(p.amount)}</td>
-          <td>${escapeHtml(p.payment_method || 'â€”')}</td>
-          <td>${escapeHtml(p.reference || 'â€”')}</td>
+          <td>${escapeHtml(p.payment_method || '—')}</td>
+          <td>${escapeHtml(p.reference || '—')}</td>
           <td class="text-right"><button type="button" class="text-rose-400 text-xs hover:underline" onclick="deleteSalaryPaymentFromModal(${recordId}, ${p.id})">Del</button></td>
         </tr>`).join('') +
         '</tbody></table>';
@@ -7072,7 +7072,7 @@ async function deleteSalaryPaymentFromModal(recordId, paymentId) {
 async function showSalaryHistory(employee) {
   const modal = document.getElementById('salary-history-modal');
   const content = document.getElementById('sal-hist-content');
-  document.getElementById('sal-hist-title').textContent = 'Salary History â€” ' + employee;
+  document.getElementById('sal-hist-title').textContent = 'Salary History — ' + employee;
   content.innerHTML = 'Loading...';
   modal.style.display = 'flex';
   try {
@@ -7085,9 +7085,9 @@ async function showSalaryHistory(employee) {
       history.map(r => `<tr>
         <td class="font-mono">${escapeHtml(r.salary_month)}</td>
         <td class="text-right font-mono">${money(r.expected_salary)}</td>
-        <td class="text-right font-mono">${r.previous_balance > 0 ? money(r.previous_balance) : 'â€”'}</td>
+        <td class="text-right font-mono">${r.previous_balance > 0 ? money(r.previous_balance) : '—'}</td>
         <td class="text-right font-mono text-green-400">${money(r.total_paid)}</td>
-        <td class="text-right font-mono ${r.outstanding > 0 ? 'text-rose-400' : 'text-green-400'}">${r.outstanding > 0 ? money(r.outstanding) : 'â€”'}</td>
+        <td class="text-right font-mono ${r.outstanding > 0 ? 'text-rose-400' : 'text-green-400'}">${r.outstanding > 0 ? money(r.outstanding) : '—'}</td>
         <td>${escapeHtml(r.status)}</td>
       </tr>`).join('') +
       '</tbody></table>';
@@ -7237,22 +7237,22 @@ async function searchManagementExpensesHistory() {
       return;
     }
     tbody.innerHTML = expenses.map(e => {
-      const date = e.date_reported ? String(e.date_reported).slice(0, 10) : (e.date_month || 'â€”');
-      const invNum = e.invoice_number || 'â€”';
-      const desc = e.description || 'â€”';
-      const prop = e.property_name || e.employee || 'â€”';
+      const date = e.date_reported ? String(e.date_reported).slice(0, 10) : (e.date_month || '—');
+      const invNum = e.invoice_number || '—';
+      const desc = e.description || '—';
+      const prop = e.property_name || e.employee || '—';
       const srcBadge = e.source === 'Work Order' ? '<span class="text-emerald-400">WO</span>' :
                        e.source === 'Salary' ? '<span class="text-purple-400">Salary</span>' :
                        '<span class="text-slate-400">Manual</span>';
       return '<tr>' +
         '<td>' + date + '</td>' +
         '<td class="font-mono text-xs">' + escapeHtml(invNum) + '</td>' +
-        '<td>' + escapeHtml(e.category || 'â€”') + '</td>' +
+        '<td>' + escapeHtml(e.category || '—') + '</td>' +
         '<td>' + escapeHtml(desc) + '</td>' +
         '<td>' + escapeHtml(prop) + '</td>' +
         '<td>' + srcBadge + '</td>' +
         '<td class="text-right font-mono">' + money(e.amount) + '</td>' +
-        '<td>' + escapeHtml(e.status || 'â€”') + '</td>' +
+        '<td>' + escapeHtml(e.status || '—') + '</td>' +
         '</tr>';
     }).join('');
   } catch (err) {
@@ -7287,7 +7287,7 @@ async function searchPropertyExpenseReport() {
       reportDiv.classList.remove('hidden');
       return;
     }
-    let html = '<h4 class="text-sm font-semibold text-white mb-3">' + escapeHtml(report.property) + ' â€” Total: ' + money(report.total) + '</h4>';
+    let html = '<h4 class="text-sm font-semibold text-white mb-3">' + escapeHtml(report.property) + ' — Total: ' + money(report.total) + '</h4>';
     html += '<table class="w-full text-left cyber-table text-sm"><thead><tr><th>Category</th><th class="text-right">Total</th><th class="text-right">Count</th></tr></thead><tbody>';
     report.categories.forEach(c => {
       html += '<tr><td>' + escapeHtml(c.category) + '</td><td class="text-right font-mono">' + money(c.total) + '</td><td class="text-right">' + c.expenses.length + '</td></tr>';
@@ -7365,9 +7365,9 @@ async function generateMgmtExpensesReport() {
         const totalObligation = Number(s.amount || 0) + Number(s.previous_balance || 0);
         return '<tr><td>' + escapeHtml(s.employee || s.description) + '</td>' +
           '<td class="text-right font-mono">' + money(s.amount) + '</td>' +
-          '<td class="text-right font-mono">' + (s.previous_balance > 0 ? money(s.previous_balance) : 'â€”') + '</td>' +
+          '<td class="text-right font-mono">' + (s.previous_balance > 0 ? money(s.previous_balance) : '—') + '</td>' +
           '<td class="text-right font-mono text-green-400">' + money(s.total_paid) + '</td>' +
-          '<td class="text-right font-mono ' + (s.outstanding > 0 ? 'text-rose-400' : 'text-green-400') + '">' + (s.outstanding > 0 ? money(s.outstanding) : 'â€”') + '</td>' +
+          '<td class="text-right font-mono ' + (s.outstanding > 0 ? 'text-rose-400' : 'text-green-400') + '">' + (s.outstanding > 0 ? money(s.outstanding) : '—') + '</td>' +
           '<td>' + escapeHtml(s.status) + '</td></tr>';
       }).join('');
     } else {
@@ -7377,20 +7377,20 @@ async function generateMgmtExpensesReport() {
     // Full expense list
     const expTbody = document.getElementById('mer-expenses-tbody');
     expTbody.innerHTML = report.expenses.map(e => {
-      const date = e.date_reported ? String(e.date_reported).slice(0, 10) : (e.date_month || 'â€”');
+      const date = e.date_reported ? String(e.date_reported).slice(0, 10) : (e.date_month || '—');
       const srcBadge = e.source === 'Work Order' ? '<span class="text-emerald-400">WO</span>' :
                        e.source === 'Salary' ? '<span class="text-purple-400">Salary</span>' :
                        '<span class="text-slate-400">Manual</span>';
       return '<tr><td>' + date + '</td>' +
-        '<td class="font-mono text-xs">' + escapeHtml(e.invoice_number || 'â€”') + '</td>' +
-        '<td>' + escapeHtml(e.category || 'â€”') + '</td>' +
-        '<td>' + escapeHtml(e.description || 'â€”') + '</td>' +
-        '<td>' + escapeHtml(e.property_name || e.employee || 'â€”') + '</td>' +
+        '<td class="font-mono text-xs">' + escapeHtml(e.invoice_number || '—') + '</td>' +
+        '<td>' + escapeHtml(e.category || '—') + '</td>' +
+        '<td>' + escapeHtml(e.description || '—') + '</td>' +
+        '<td>' + escapeHtml(e.property_name || e.employee || '—') + '</td>' +
         '<td>' + srcBadge + '</td>' +
         '<td class="text-right font-mono">' + money(e.amount) + '</td>' +
-        '<td class="text-right font-mono text-green-400">' + (e.paid ? money(e.paid) : 'â€”') + '</td>' +
-        '<td class="text-right font-mono ' + ((e.outstanding || 0) > 0 ? 'text-rose-400' : 'text-green-400') + '">' + ((e.outstanding || 0) > 0 ? money(e.outstanding) : 'â€”') + '</td>' +
-        '<td>' + escapeHtml(e.status || 'â€”') + '</td></tr>';
+        '<td class="text-right font-mono text-green-400">' + (e.paid ? money(e.paid) : '—') + '</td>' +
+        '<td class="text-right font-mono ' + ((e.outstanding || 0) > 0 ? 'text-rose-400' : 'text-green-400') + '">' + ((e.outstanding || 0) > 0 ? money(e.outstanding) : '—') + '</td>' +
+        '<td>' + escapeHtml(e.status || '—') + '</td></tr>';
     }).join('');
 
   } catch (err) {
@@ -7504,7 +7504,7 @@ async function populatePropertyDropdowns() {
         propertyNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
       sel.value = current;
     });
-  } catch (_) { /* ignore â€” dropdowns will stay as "All Properties" */ }
+  } catch (_) { /* ignore — dropdowns will stay as "All Properties" */ }
 }
 
 let woItemCount = 0;
@@ -7526,11 +7526,11 @@ function renderWoMaterialsList(id) {
   let h = '<table class="w-full text-xs mt-1"><thead><tr class="text-slate-600"><th class="text-left py-1">Material</th><th class="w-16 text-right">Qty</th><th class="w-24 text-right">Unit Cost</th><th class="w-24 text-right">Total</th><th class="w-8"></th></tr></thead><tbody>';
   mats.forEach((m, mi) => {
     h += `<tr class="border-t border-slate-200">
-      <td class="py-1 text-slate-900">${escapeHtml(m.name || 'â€”')}</td>
+      <td class="py-1 text-slate-900">${escapeHtml(m.name || '—')}</td>
       <td class="text-right text-slate-700">${m.quantity}</td>
       <td class="text-right text-slate-700">${Number(m.unit_cost).toLocaleString()}</td>
       <td class="text-right text-blue-700 font-mono">${Number(m.total).toLocaleString()}</td>
-      <td class="text-center"><button type="button" class="text-rose-500 hover:text-rose-700" data-wo-rm-mat="${id}-${mi}">Ã—</button></td>
+      <td class="text-center"><button type="button" class="text-rose-500 hover:text-rose-700" data-wo-rm-mat="${id}-${mi}">×</button></td>
     </tr>`;
   });
   const matTotal = mats.reduce((s, m) => s + Number(m.total || 0), 0);
@@ -7593,7 +7593,7 @@ function addWoItem(unitVal, problemVal, partyVal, costVal, paymentStatusVal, mat
     `<option${(partyVal || 'Pending Assessment') === p ? ' selected' : ''}>${p}</option>`
   ).join('');
   const tradeOptions = WO_TRADES.map(t =>
-    `<option${(tradeVal || '') === t ? ' selected' : ''}>${t || 'â€” Select â€”'}</option>`
+    `<option${(tradeVal || '') === t ? ' selected' : ''}>${t || '— Select —'}</option>`
   ).join('');
 
   const costValNum = Number(costVal || 0);
@@ -7622,8 +7622,8 @@ function addWoItem(unitVal, problemVal, partyVal, costVal, paymentStatusVal, mat
       <option>New</option><option>Assigned</option><option>In Progress</option><option>Completed</option><option>Closed</option>
     </select></td>
     <td class="text-center">
-      <button type="button" class="text-slate-400 hover:text-white px-1 text-xs" data-wo-toggle="${id}" title="Materials & notes">â–¼</button>
-      <button type="button" class="text-rose-400 hover:text-rose-300 px-1 text-xs" data-wo-del-item="${id}">Ã—</button>
+      <button type="button" class="text-slate-400 hover:text-white px-1 text-xs" data-wo-toggle="${id}" title="Materials & notes">▼</button>
+      <button type="button" class="text-rose-400 hover:text-rose-300 px-1 text-xs" data-wo-del-item="${id}">×</button>
     </td>
   `;
   tbody.appendChild(tr);
@@ -7640,7 +7640,7 @@ function addWoItem(unitVal, problemVal, partyVal, costVal, paymentStatusVal, mat
     toggleNote(); // initial state
   }
 
-  // Detail panel row (hidden by default) â€” for materials and notes
+  // Detail panel row (hidden by default) — for materials and notes
   const detail = document.createElement('tr');
   detail.id = `wo-detail-${id}`;
   detail.className = 'hidden';
@@ -7754,15 +7754,15 @@ function parseWoBulkInput() {
   for (const line of lines) {
     if (!line) continue; // skip blank lines
 
-    // Format: "1. B602" â€” numbered unit header
+    // Format: "1. B602" — numbered unit header
     const unitHeader = line.match(/^\d+[\.\)]\s+([A-Za-z][A-Za-z0-9\-]{1,15})\s*$/);
     if (unitHeader) {
       currentUnit = unitHeader[1].trim();
       continue;
     }
 
-    // Format: "- Kitchen sink blocked." â€” bullet issue for current unit
-    const bullet = line.match(/^[\-â€¢]\s+(.+)$/);
+    // Format: "- Kitchen sink blocked." — bullet issue for current unit
+    const bullet = line.match(/^[\-•]\s+(.+)$/);
     if (bullet && currentUnit) {
       const problem = bullet[1].trim().replace(/\.$/, ''); // remove trailing period
       addWoItem(currentUnit, problem);
@@ -7770,7 +7770,7 @@ function parseWoBulkInput() {
       continue;
     }
 
-    // Format: "A401: Guest toilet shaking" â€” unit colon issue
+    // Format: "A401: Guest toilet shaking" — unit colon issue
     const unitColon = line.match(/^([A-Za-z][A-Za-z0-9\-]{1,15})\s*[:\-]\s+(.+)$/);
     if (unitColon) {
       currentUnit = unitColon[1].trim();
@@ -7779,14 +7779,14 @@ function parseWoBulkInput() {
       continue;
     }
 
-    // Format: "A401:" â€” unit-only with colon (sets current unit)
+    // Format: "A401:" — unit-only with colon (sets current unit)
     const unitOnlyColon = line.match(/^([A-Za-z][A-Za-z0-9\-]{1,15})\s*:?\s*$/);
     if (unitOnlyColon && /\d/.test(unitOnlyColon[1])) {
       currentUnit = unitOnlyColon[1].trim();
       continue;
     }
 
-    // Format: "1. Guest toilet shaking" â€” numbered issue (uses current unit)
+    // Format: "1. Guest toilet shaking" — numbered issue (uses current unit)
     const numberedIssue = line.match(/^\d+[\.\)]\s+(.+)$/);
     if (numberedIssue && currentUnit) {
       addWoItem(currentUnit, numberedIssue[1].trim().replace(/\.$/, ''));
@@ -7794,7 +7794,7 @@ function parseWoBulkInput() {
       continue;
     }
 
-    // Format: "Kitchen sink blocked" â€” plain text issue (uses current unit)
+    // Format: "Kitchen sink blocked" — plain text issue (uses current unit)
     if (currentUnit && line.length > 3 && !line.match(/^[A-Za-z][A-Za-z0-9\-]{1,15}:?\s*$/)) {
       addWoItem(currentUnit, line.replace(/\.$/, ''));
       issueCount++;
@@ -7822,7 +7822,7 @@ async function resetWoForm() {
   if (propSelect && propSelect.tagName === 'SELECT') {
     try {
       const { houses } = await api.houses();
-      propSelect.innerHTML = '<option value="">â€” Select Property â€”</option>';
+      propSelect.innerHTML = '<option value="">— Select Property —</option>';
       (houses || []).forEach(h => {
         const opt = document.createElement('option');
         opt.value = h.paybill_number || h.id || '';
@@ -7926,7 +7926,7 @@ async function saveWorkOrder(e) {
   resEl.textContent = 'Saving...';
   resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
   // Offline creates queue to the outbox (PENDING SYNC). Updates to existing
-  // server records stay online-only to avoid blind overwrites (Â§13).
+  // server records stay online-only to avoid blind overwrites (§13).
   if (!id && effectiveOffline()) {
     try {
       const clientTxnId = offlineDb.newClientTxnId();
@@ -7942,7 +7942,7 @@ async function saveWorkOrder(e) {
         sync: 'pending',
         created_at: new Date().toISOString(),
       });
-      resEl.textContent = 'ðŸŸ  Saved offline â€” PENDING SYNC. Will upload when internet returns.';
+      resEl.textContent = '🟠 Saved offline — PENDING SYNC. Will upload when internet returns.';
       resEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
       showToast('Work order saved offline (PENDING SYNC)');
       document.getElementById('work-order-form-wrap').classList.add('hidden');
@@ -7987,7 +7987,7 @@ async function editWorkOrder(id) {
     if (propSelect && propSelect.tagName === 'SELECT') {
       try {
         const { houses } = await api.houses();
-        propSelect.innerHTML = '<option value="">â€” Select Property â€”</option>';
+        propSelect.innerHTML = '<option value="">— Select Property —</option>';
         (houses || []).forEach(h => {
           const opt = document.createElement('option');
           opt.value = h.paybill_number || h.id || '';
@@ -8088,10 +8088,10 @@ async function loadWorkOrders() {
   const pendingRows = cachedPending.map((r) => `
       <tr style="opacity:.92">
         <td class="font-mono">${escapeHtml(r.wo_number || '(pending)')}</td>
-        <td>${escapeHtml(r.property_name || 'â€”')}</td>
-        <td>â€”</td><td>â€”</td><td>â€”</td>
+        <td>${escapeHtml(r.property_name || '—')}</td>
+        <td>—</td><td>—</td><td>—</td>
         <td>${offlineSyncBadge(r.sync)}</td>
-        <td class="text-right font-mono">â€”</td>
+        <td class="text-right font-mono">—</td>
         <td>${escapeHtml((r.created_at || '').slice(0, 10))}</td>
         <td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td>
       </tr>`).join('');
@@ -8104,9 +8104,9 @@ async function loadWorkOrders() {
     tbody.innerHTML = pendingRows + orders.map(wo => `
       <tr>
         <td class="font-mono">${escapeHtml(wo.wo_number)}</td>
-        <td>${escapeHtml(wo.property_name || 'â€”')}</td>
-        <td>${escapeHtml(wo.unit_codes || 'â€”')}</td>
-        <td>${escapeHtml(wo.technician_name || 'â€”')}</td>
+        <td>${escapeHtml(wo.property_name || '—')}</td>
+        <td>${escapeHtml(wo.unit_codes || '—')}</td>
+        <td>${escapeHtml(wo.technician_name || '—')}</td>
         <td>${escapeHtml(wo.priority || 'Medium')}</td>
         <td>${escapeHtml(wo.status || 'Pending')}</td>
         <td class="text-right font-mono">${money(wo.total_cost)}</td>
@@ -8126,23 +8126,23 @@ async function loadWorkOrders() {
     }
     const cached = await offlineDb.getAll('work_orders').catch(() => []);
     if (!cached.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">Offline â€” no synced work orders on this device yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">Offline — no synced work orders on this device yet.</td></tr>';
       return;
     }
-    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-amber-500 text-xs font-mono py-2">ðŸ“´ Offline â€” showing last synced data</td></tr>` + cached.map((r) => `
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-amber-500 text-xs font-mono py-2">📴 Offline — showing last synced data</td></tr>` + cached.map((r) => `
       <tr style="opacity:.92">
         <td class="font-mono">${escapeHtml(r.wo_number || '(pending)')}</td>
-        <td>${escapeHtml(r.property_name || 'â€”')}</td>
-        <td>â€”</td><td>â€”</td><td>â€”</td>
+        <td>${escapeHtml(r.property_name || '—')}</td>
+        <td>—</td><td>—</td><td>—</td>
         <td>${offlineSyncBadge(r.sync)}</td>
-        <td class="text-right font-mono">â€”</td>
+        <td class="text-right font-mono">—</td>
         <td>${escapeHtml((r.created_at || r.synced_at || '').slice(0, 10))}</td>
         <td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td>
       </tr>`).join('');
   }
 }
 
-// â”€â”€â”€ Property inspections (offline-capable, Phase 2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Property inspections (offline-capable, Phase 2) ──────────────────────
 
 const INSP_ITEMS = [
   ['plumbing', 'Plumbing'], ['electrical', 'Electrical'], ['carpentry', 'Carpentry'],
@@ -8186,7 +8186,7 @@ async function openInspectionModal() {
     else throw err;
   }
   const propSel = document.getElementById('insp-property');
-  propSel.innerHTML = '<option value="">â€” Select Property â€”</option>' + (houses || []).map((h) =>
+  propSel.innerHTML = '<option value="">— Select Property —</option>' + (houses || []).map((h) =>
     `<option value="${escapeHtml(h.paybill_number || '')}">${escapeHtml(h.house_name || h.paybill_number || '')}</option>`).join('');
   let tenants = [];
   try {
@@ -8195,7 +8195,7 @@ async function openInspectionModal() {
   } catch (err) {
     if (isNetworkError(err)) tenants = await offlineDb.getAll('tenants').catch(() => []);
   }
-  document.getElementById('insp-tenant').innerHTML = '<option value="">â€”</option>' + (tenants || []).map((t) =>
+  document.getElementById('insp-tenant').innerHTML = '<option value="">—</option>' + (tenants || []).map((t) =>
     `<option value="${escapeHtml(t.tenant_code || '')}">${escapeHtml(t.name || '')} (${escapeHtml(t.tenant_code || '')})</option>`).join('');
   document.getElementById('insp-offline-tag')?.classList.toggle('hidden', !effectiveOffline());
   modal.classList.remove('hidden');
@@ -8214,7 +8214,7 @@ async function refreshInspPhotoList() {
   const el = document.getElementById('insp-photo-list');
   if (!el || !uuid) return;
   const staged = await stagedMediaFor(uuid).catch(() => []);
-  el.textContent = staged.length ? `${staged.length} photo(s) staged${effectiveOffline() ? ' â€” will upload on sync' : ''}` : '';
+  el.textContent = staged.length ? `${staged.length} photo(s) staged${effectiveOffline() ? ' — will upload on sync' : ''}` : '';
 }
 
 async function saveInspection() {
@@ -8258,7 +8258,7 @@ async function saveInspection() {
         sync: 'pending',
         created_at: new Date().toISOString(),
       });
-      resEl.textContent = 'ðŸŸ  Inspection saved offline â€” PENDING SYNC (photos will upload on sync).';
+      resEl.textContent = '🟠 Inspection saved offline — PENDING SYNC (photos will upload on sync).';
       resEl.className = 'text-sm font-mono text-amber-400 text-right mb-2';
       showToast('Inspection saved offline (PENDING SYNC)');
       setTimeout(() => { closeInspectionModal(); loadInspections(); }, 1200);
@@ -8298,8 +8298,8 @@ async function loadInspections() {
     .catch(() => []);
   const pendingRows = cachedPending.map((r) => `
       <tr style="opacity:.92">
-        <td>${escapeHtml(r.property_name || 'â€”')}</td>
-        <td>${escapeHtml(r.unit_label || 'â€”')}</td>
+        <td>${escapeHtml(r.property_name || '—')}</td>
+        <td>${escapeHtml(r.unit_label || '—')}</td>
         <td>${offlineSyncBadge(r.sync)}</td>
         <td>${escapeHtml((r.created_at || '').slice(0, 10))}</td>
       </tr>`).join('');
@@ -8311,8 +8311,8 @@ async function loadInspections() {
     }
     tbody.innerHTML = pendingRows + inspections.map((i) => `
       <tr>
-        <td>${escapeHtml(i.property_name || 'â€”')}</td>
-        <td>${escapeHtml(i.unit_label || 'â€”')}</td>
+        <td>${escapeHtml(i.property_name || '—')}</td>
+        <td>${escapeHtml(i.unit_label || '—')}</td>
         <td>${escapeHtml(i.status || 'Draft')}</td>
         <td>${escapeHtml((i.inspection_date || i.created_at || '').slice(0, 10))}</td>
       </tr>`).join('');
@@ -8322,11 +8322,11 @@ async function loadInspections() {
       return;
     }
     const cached = await offlineDb.getAll('inspections').catch(() => []);
-    tbody.innerHTML = (cached.length ? '' : '<tr><td colspan="4" class="text-center text-slate-500 py-4">Offline â€” no synced inspections yet.</td></tr>')
+    tbody.innerHTML = (cached.length ? '' : '<tr><td colspan="4" class="text-center text-slate-500 py-4">Offline — no synced inspections yet.</td></tr>')
       + cached.map((r) => `
       <tr style="opacity:.92">
-        <td>${escapeHtml(r.property_name || 'â€”')}</td>
-        <td>${escapeHtml(r.unit_label || 'â€”')}</td>
+        <td>${escapeHtml(r.property_name || '—')}</td>
+        <td>${escapeHtml(r.unit_label || '—')}</td>
         <td>${offlineSyncBadge(r.sync)}</td>
         <td>${escapeHtml((r.created_at || r.synced_at || '').slice(0, 10))}</td>
       </tr>`).join('');
@@ -8354,7 +8354,7 @@ document.getElementById('insp-photos')?.addEventListener('change', async (e) => 
   refreshInspPhotoList();
 });
 
-// â”€â”€â”€ Sync conflicts â€” manager review queue (Phase 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sync conflicts — manager review queue (Phase 3) ──────────────────────
 
 let _conflictsFilter = 'pending';
 
@@ -8373,31 +8373,31 @@ const CONFLICT_TYPE_LABELS = {
 async function loadConflicts() {
   const tbody = document.getElementById('conflicts-tbody');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="7" class="text-center text-slate-500 py-6">Loadingâ€¦</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center text-slate-500 py-6">Loading…</td></tr>';
   try {
     const { conflicts } = await api.listConflicts(_conflictsFilter === 'resolved' ? 'resolved' : 'pending');
     if (!conflicts.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-slate-500 py-6">${_conflictsFilter === 'resolved' ? 'No resolved conflicts.' : 'No pending conflicts. Offline uploads are syncing cleanly. ðŸŸ¢'}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-slate-500 py-6">${_conflictsFilter === 'resolved' ? 'No resolved conflicts.' : 'No pending conflicts. Offline uploads are syncing cleanly. 🟢'}</td></tr>`;
       return;
     }
     tbody.innerHTML = conflicts.map((c) => {
       const summary = c.summary || {};
       const existing = c.existing_ref || null;
-      const who = summary.tenant_name || c.tenant_code || 'â€”';
+      const who = summary.tenant_name || c.tenant_code || '—';
       const detail = summary.mpesa_reference || summary.billing_month || summary.name || summary.property_name || c.client_txn_id || '';
       const existingTxt = existing
-        ? `${existing.tenant_name || ''} ${existing.amount != null ? 'KES ' + Number(existing.amount).toLocaleString() : ''} ${existing.receipt_number ? '(' + existing.receipt_number + ')' : ''}`.trim() || 'â€”'
-        : 'â€”';
+        ? `${existing.tenant_name || ''} ${existing.amount != null ? 'KES ' + Number(existing.amount).toLocaleString() : ''} ${existing.receipt_number ? '(' + existing.receipt_number + ')' : ''}`.trim() || '—'
+        : '—';
       const statusBadge = c.status === 'resolved'
         ? `<span class="status-badge badge-active">${escapeHtml(c.resolution || 'resolved')}</span>`
         : `<span class="status-badge badge-suspended"><span class="status-dot"></span>pending review</span>`;
       const actions = c.status === 'resolved'
-        ? `<span class="text-xs text-slate-500">by ${escapeHtml(c.resolved_by || 'â€”')}</span>`
+        ? `<span class="text-xs text-slate-500">by ${escapeHtml(c.resolved_by || '—')}</span>`
         : `<button type="button" class="action-btn px-2 py-1 text-xs" data-conflict-dismiss="${c.id}">Dismiss</button>
            <button type="button" class="action-btn px-2 py-1 text-xs text-amber-400 border-amber-400" data-conflict-retry="${c.id}">Retry upload</button>`;
       return `<tr>
         <td class="font-mono text-xs">${escapeHtml((c.created_at || '').slice(0, 16).replace('T', ' '))}</td>
-        <td>${escapeHtml(CONFLICT_TYPE_LABELS[c.op_type] || c.op_type || 'â€”')}</td>
+        <td>${escapeHtml(CONFLICT_TYPE_LABELS[c.op_type] || c.op_type || '—')}</td>
         <td>${escapeHtml(who)} <span class="text-slate-500 font-mono text-xs">${escapeHtml(String(detail))}</span></td>
         <td class="text-rose-300 text-xs max-w-xs">${escapeHtml(c.reason || '')}</td>
         <td class="text-xs text-slate-300">${escapeHtml(existingTxt)}</td>
@@ -8441,7 +8441,7 @@ document.getElementById('btn-conflicts-pending')?.addEventListener('click', () =
 document.getElementById('btn-conflicts-resolved')?.addEventListener('click', () => { _conflictsFilter = 'resolved'; loadConflicts(); });
 document.getElementById('btn-conflicts-refresh')?.addEventListener('click', () => loadConflicts());
 
-// â”€â”€â”€ Commissions (agent commission per house per month) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commissions (agent commission per house per month) ───────────────────
 
 const fmtKes0 = (v) => 'KES ' + Number(v || 0).toLocaleString('en-KE', { maximumFractionDigits: 0 });
 
@@ -8465,7 +8465,7 @@ async function runCommissionReport() {
   const resEl = document.getElementById('cm-result');
   const month = document.getElementById('cm-month')?.value || new Date().toISOString().slice(0, 7);
   const house = document.getElementById('cm-house-filter')?.value || null;
-  if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">Calculatingâ€¦</td></tr>';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="text-center text-slate-500 py-6">Calculating…</td></tr>';
   try {
     const report = await api.commissionReport({ month, house_paybill: house });
     const rows = report.rows || [];
@@ -8481,7 +8481,7 @@ async function runCommissionReport() {
     }
     tbody.innerHTML = rows.map((r) => `
       <tr>
-        <td>${escapeHtml(r.property_name || r.house_paybill_number || 'â€”')} <span class="text-slate-500 font-mono text-xs">${escapeHtml(r.house_paybill_number || '')}</span>
+        <td>${escapeHtml(r.property_name || r.house_paybill_number || '—')} <span class="text-slate-500 font-mono text-xs">${escapeHtml(r.house_paybill_number || '')}</span>
           <div class="text-[10px] text-slate-500 font-mono">${Number(r.payment_count || 0)} payment(s)</div></td>
         <td class="text-right font-mono">${fmtKes0(r.collected)}</td>
         <td class="text-right font-mono text-slate-400">${fmtKes0(r.deposit)}</td>
@@ -8513,7 +8513,7 @@ async function runCommissionReport() {
       </tr>`;
     if (resEl) {
       const d = new Date(`${report.month}-15T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
-      resEl.textContent = `${d}: commission = rate % Ã— (collected âˆ’ deposit âˆ’ garbage âˆ’ water). Landlord payout = collected âˆ’ commission.`;
+      resEl.textContent = `${d}: commission = rate % × (collected − deposit − garbage − water). Landlord payout = collected − commission.`;
     }
   } catch (err) {
     if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-center text-rose-400 py-6">${escapeHtml(err.message)}</td></tr>`;
@@ -8693,7 +8693,7 @@ document.getElementById('btn-ei-add-line')?.addEventListener('click', () => {
     </select></td>
     <td><input type="text" class="qc-input text-sm w-56" data-ei-desc placeholder="Description" /></td>
     <td><input type="number" min="0" class="qc-input text-sm w-32 text-right" data-ei-amt value="0" /></td>
-    <td><button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-ei-del>âœ•</button></td>`;
+    <td><button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-ei-del>✕</button></td>`;
   tbody.appendChild(tr);
   tr.querySelector('[data-ei-del]').addEventListener('click', () => {
     tr.remove();
@@ -8812,7 +8812,7 @@ document.getElementById('message-form')?.addEventListener('submit', async (e) =>
   statusEl.className = 'text-amber-500 text-sm font-mono mt-2';
   btn.disabled = true;
 
-  // Offline: save as Pending Send â€” delivered automatically on reconnect.
+  // Offline: save as Pending Send — delivered automatically on reconnect.
   if (effectiveOffline()) {
     try {
       const clientTxnId = offlineDb.newClientTxnId();
@@ -8820,7 +8820,7 @@ document.getElementById('message-form')?.addEventListener('submit', async (e) =>
         type: 'notice_send',
         payload: { tenant_id: tenantId, message, client_txn_id: clientTxnId },
       });
-      statusEl.textContent = 'ðŸŸ  Saved â€” Pending Send. Will deliver automatically when internet returns.';
+      statusEl.textContent = '🟠 Saved — Pending Send. Will deliver automatically when internet returns.';
       statusEl.className = 'text-amber-500 text-sm font-mono mt-2';
       showToast('Notice saved (Pending Send)');
       setTimeout(() => {
@@ -8837,7 +8837,7 @@ document.getElementById('message-form')?.addEventListener('submit', async (e) =>
 
   try {
     await api.sendMessage(tenantId, message);
-    statusEl.textContent = 'âœ“ Message sent successfully!';
+    statusEl.textContent = '✓ Message sent successfully!';
     statusEl.className = 'text-green-500 text-sm font-mono mt-2';
     setTimeout(() => {
       document.getElementById('message-modal').classList.add('hidden');
@@ -8951,8 +8951,8 @@ document.getElementById('btn-run-rollover')?.addEventListener('click', async () 
     const count = result.tenants_updated || 0;
     if (resEl) {
       resEl.textContent = count > 0
-        ? `Rollover complete â€” ${count} tenant(s) updated with new arrears.`
-        : 'Rollover complete â€” no tenants needed rollover.';
+        ? `Rollover complete — ${count} tenant(s) updated with new arrears.`
+        : 'Rollover complete — no tenants needed rollover.';
       resEl.className = 'text-sm font-mono text-green-400 text-center mt-2';
     }
   } catch (err) {
@@ -8962,7 +8962,7 @@ document.getElementById('btn-run-rollover')?.addEventListener('click', async () 
     }
   } finally {
     if (btn) btn.disabled = false;
-    // Rollover changes arrears / due dates / statuses â€” refresh the cards now
+    // Rollover changes arrears / due dates / statuses — refresh the cards now
     // instead of waiting for the 30s dashboard poll.
     loadDashboard();
   }
@@ -8983,7 +8983,7 @@ function docsTypeLabel(type) {
 }
 
 function formatDocsDate(iso) {
-  if (!iso) return 'â€”';
+  if (!iso) return '—';
   let d;
   if (String(iso).includes('T')) d = new Date(iso);
   else d = new Date(String(iso) + 'T12:00:00');
@@ -9054,18 +9054,18 @@ function renderDocuments(documents, total) {
   tbody.innerHTML = documents.map(d => `
     <tr>
       <td><span class="sys-tag">${escapeHtml(docsTypeLabel(d.doc_type).toUpperCase())}</span></td>
-      <td class="font-mono">${escapeHtml(d.doc_number || 'â€”')}</td>
+      <td class="font-mono">${escapeHtml(d.doc_number || '—')}</td>
       <td>
         <div class="font-semibold">${escapeHtml(d.title || 'Document')}</div>
         ${d.tenant_name ? `<div class="text-xs text-slate-400">${escapeHtml(d.tenant_name)}</div>` : ''}
         ${d.doc_type === 'letter' ? `<div class="mt-1">${letterStatusBadge(d)}</div>` : ''}
       </td>
       <td class="text-slate-300">
-        ${escapeHtml(d.house_name || d.property_name || 'â€”')}
+        ${escapeHtml(d.house_name || d.property_name || '—')}
         ${d.unit_label ? ` <span class="font-mono text-xs">(${escapeHtml(d.unit_label)})</span>` : ''}
       </td>
       <td>${formatDocsDate(d.doc_date)}</td>
-      <td class="text-right font-mono">${d.amount != null ? formatKes(d.amount) : 'â€”'}</td>
+      <td class="text-right font-mono">${d.amount != null ? formatKes(d.amount) : '—'}</td>
       <td class="text-right whitespace-nowrap">
         ${d.doc_type === 'letter' && d.status === 'Draft' ? `
         <button type="button" class="action-btn text-xs" data-doc-action="edit-draft" data-doc-id="${d.id}">Edit</button>
@@ -9197,7 +9197,7 @@ document.getElementById('documents-tbody')?.addEventListener('click', async (e) 
       btn.disabled = true;
       try {
         const res = await api.newVersionLetter(id);
-        showToast(`New draft version created (#${res.document?.id || 'â€”'}).`);
+        showToast(`New draft version created (#${res.document?.id || '—'}).`);
         await openDocDraftEditor(res.document.id);
         loadDocuments();
       } catch (err) {
@@ -9269,11 +9269,11 @@ document.getElementById('btn-documents-share-send')?.addEventListener('click', a
   }
 });
 
-// â”€â”€â”€ Documents Hub letter templates (inside the existing hub) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Documents Hub letter templates (inside the existing hub) ─────────────
 
-// â”€â”€â”€ Custom Notice (Blank Letterhead) â€” inside the existing hub â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Recipient (Tenant / Unit / Property â†’ all or specific tenants) â†’ review â†’
-// notice date + subject + content â†’ one INDIVIDUAL notice per tenant, saved
+// ─── Custom Notice (Blank Letterhead) — inside the existing hub ─────────────
+// Recipient (Tenant / Unit / Property → all or specific tenants) → review →
+// notice date + subject + content → one INDIVIDUAL notice per tenant, saved
 // under that tenant. Nothing is ever auto-sent: Send is per row, by the user.
 
 let cnTenants = null;
@@ -9285,7 +9285,7 @@ async function ensureCnTenants() {
     tenant_code: t.tenant_code,
     name: t.name,
     unit: t.unit_label || t.tenant_code,
-    property: t.property_name || 'â€”',
+    property: t.property_name || '—',
   }));
   return cnTenants;
 }
@@ -9348,7 +9348,7 @@ function cnRenderSpecificList() {
   list.innerHTML = inProp.length ? inProp.map((t) => `
     <label class="flex items-center gap-2 py-0.5">
       <input type="checkbox" value="${escapeHtml(t.tenant_code)}" ${checked.has(t.tenant_code) ? 'checked' : ''} />
-      <span class="text-slate-300">${escapeHtml(String(t.unit))} â€” ${escapeHtml(t.name)}</span>
+      <span class="text-slate-300">${escapeHtml(String(t.unit))} — ${escapeHtml(t.name)}</span>
     </label>`).join('') : '<span class="text-slate-500 p-2">No tenants in this property</span>';
 }
 
@@ -9371,24 +9371,24 @@ async function openCustomNoticeModal() {
   if (!modal) return;
   modal.classList.remove('hidden');
   const status = document.getElementById('cn-status');
-  if (status) { status.textContent = 'Loading tenantsâ€¦'; status.className = 'text-sm font-mono text-center mb-2 text-amber-400'; }
+  if (status) { status.textContent = 'Loading tenants…'; status.className = 'text-sm font-mono text-center mb-2 text-amber-400'; }
   try {
     const list = await ensureCnTenants();
     const tenantSel = document.getElementById('cn-tenant');
     const unitSel = document.getElementById('cn-unit');
     const propSel = document.getElementById('cn-property');
     if (tenantSel) {
-      tenantSel.innerHTML = '<option value="">â€” Select tenant â€”</option>' +
+      tenantSel.innerHTML = '<option value="">— Select tenant —</option>' +
         list.map((t) => `<option value="${escapeHtml(t.tenant_code)}">${escapeHtml(t.name)} (${escapeHtml(String(t.unit))})</option>`).join('');
     }
     if (unitSel) {
-      unitSel.innerHTML = '<option value="">â€” Select unit â€”</option>' +
+      unitSel.innerHTML = '<option value="">— Select unit —</option>' +
         [...list].sort((a, b) => String(a.unit).localeCompare(String(b.unit)))
-          .map((t) => `<option value="${escapeHtml(t.tenant_code)}">${escapeHtml(String(t.unit))} â€” ${escapeHtml(t.name)}</option>`).join('');
+          .map((t) => `<option value="${escapeHtml(t.tenant_code)}">${escapeHtml(String(t.unit))} — ${escapeHtml(t.name)}</option>`).join('');
     }
     if (propSel) {
       const props = [...new Set(list.map((t) => t.property))].sort();
-      propSel.innerHTML = '<option value="">â€” Select property â€”</option>' +
+      propSel.innerHTML = '<option value="">— Select property —</option>' +
         props.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
     }
     const dateEl = document.getElementById('cn-date');
@@ -9442,7 +9442,7 @@ document.getElementById('btn-cn-create')?.addEventListener('click', async () => 
   if (!body.trim()) return setStatus('Notice content is required.', 'text-amber-400');
   if (!confirm(`Create ${sel.length} individual notice${sel.length > 1 ? 's' : ''}? Each is saved separately under its tenant. Nothing will be sent.`)) return;
   if (btn) btn.disabled = true;
-  setStatus(`Creating ${sel.length} notice${sel.length > 1 ? 's' : ''}â€¦`, 'text-amber-400');
+  setStatus(`Creating ${sel.length} notice${sel.length > 1 ? 's' : ''}…`, 'text-amber-400');
   try {
     const res = await api.customNotice({
       tenant_codes: sel.map((t) => t.tenant_code),
@@ -9452,8 +9452,8 @@ document.getElementById('btn-cn-create')?.addEventListener('click', async () => 
       const errs = (res.results || []).filter((r) => !r.ok).map((r) => `${r.tenant_code}: ${r.error}`).join('; ');
       setStatus(`Created ${res.created}, failed ${res.failed}. ${errs}`, 'text-amber-400');
     } else {
-      setStatus(`Created ${res.created} notice${res.created > 1 ? 's' : ''} â€” not sent.`, 'text-green-400');
-      showToast(`${res.created} individual notice${res.created > 1 ? 's' : ''} created and saved under each tenant. Nothing was sent â€” use Send on each notice.`);
+      setStatus(`Created ${res.created} notice${res.created > 1 ? 's' : ''} — not sent.`, 'text-green-400');
+      showToast(`${res.created} individual notice${res.created > 1 ? 's' : ''} created and saved under each tenant. Nothing was sent — use Send on each notice.`);
       setTimeout(() => {
         closeCustomNoticeModal();
         ['documents-type', 'documents-tenant', 'documents-q', 'documents-from', 'documents-to'].forEach((id) => {
@@ -9490,10 +9490,10 @@ async function loadDocPlaceholders(templateKey) {
     for (const p of docPlaceholderCache[templateKey]) {
       (groups[p.group || 'Other'] = groups[p.group || 'Other'] || []).push(p);
     }
-    pick.innerHTML = '<option value="">â€” Insert placeholder at cursor (Subject / Recipient / Body) â€”</option>' +
+    pick.innerHTML = '<option value="">— Insert placeholder at cursor (Subject / Recipient / Body) —</option>' +
       Object.entries(groups).map(([g, items]) =>
         `<optgroup label="${escapeHtml(g)}">` +
-        items.map((p) => `<option value="${escapeHtml(p.code)}">{{${escapeHtml(p.code)}}} â€” ${escapeHtml(p.label)}</option>`).join('') +
+        items.map((p) => `<option value="${escapeHtml(p.code)}">{{${escapeHtml(p.code)}}} — ${escapeHtml(p.label)}</option>`).join('') +
         '</optgroup>').join('');
   } catch (_) {}
 }
@@ -9502,7 +9502,7 @@ async function openDocTemplatePicker() {
   const modal = document.getElementById('doc-template-modal');
   const grid = document.getElementById('doc-template-grid');
   if (!modal || !grid) return;
-  grid.innerHTML = '<p class="text-slate-500 text-sm">Loading templatesâ€¦</p>';
+  grid.innerHTML = '<p class="text-slate-500 text-sm">Loading templates…</p>';
   modal.classList.remove('hidden');
   try {
     if (!docLetterTemplates.length) {
@@ -9550,7 +9550,7 @@ async function openDocLetterEditor(templateKey, existingDoc = null) {
   document.getElementById('doc-template-modal')?.classList.add('hidden');
   document.getElementById('doc-letter-key').value = template.key;
   document.getElementById('doc-letter-id').value = existingDoc?.id || '';
-  document.getElementById('doc-letter-title').textContent = (existingDoc ? 'Edit Draft â€” ' : 'New Document â€” ') + template.label;
+  document.getElementById('doc-letter-title').textContent = (existingDoc ? 'Edit Draft — ' : 'New Document — ') + template.label;
   document.getElementById('doc-letter-desc').textContent = template.description || '';
   document.getElementById('doc-letter-fields').innerHTML =
     (template.fields || [])
@@ -9575,7 +9575,7 @@ async function openDocLetterEditor(templateKey, existingDoc = null) {
     if (tenantSel.options.length <= 1) {
       try {
         const { tenants } = await api.tenants();
-        tenantSel.innerHTML = '<option value="">â€” No tenant â€”</option>' +
+        tenantSel.innerHTML = '<option value="">— No tenant —</option>' +
           (tenants || []).map((t) => `<option value="${escapeHtml(t.tenant_code)}">${escapeHtml(t.name)} (${escapeHtml(t.tenant_code)})</option>`).join('');
       } catch (_) {}
     }
@@ -9587,7 +9587,7 @@ async function openDocLetterEditor(templateKey, existingDoc = null) {
   if (propSel && propSel.options.length <= 1) {
     try {
       const { houses } = await api.houses();
-      propSel.innerHTML = '<option value="">â€” No property â€”</option>' +
+      propSel.innerHTML = '<option value="">— No property —</option>' +
         (houses || []).map((h) => `<option value="${escapeHtml(h.paybill_number || h.id || '')}">${escapeHtml(h.house_name || '')}</option>`).join('');
     } catch (_) {}
   }
@@ -9622,7 +9622,7 @@ async function autofillDocLetter(announce = true) {
   const tenantCode = document.getElementById('doc-letter-tenant')?.value || null;
   if (!key) return;
   const values = collectDocLetterValues();
-  setDocLetterStatus('Resolving detailsâ€¦');
+  setDocLetterStatus('Resolving details…');
   try {
     const r = await api.resolveLetter({ template_key: key, tenant_code: tenantCode, values });
     const subjectEl = document.getElementById('doc-letter-subject');
@@ -9643,7 +9643,7 @@ async function autofillDocLetter(announce = true) {
     docLastRecipient = r.recipient_block || '';
     docResolvedTenant = tenantCode;
     // Fill empty dynamic fields from resolved raw values (arrears, rent,
-    // datesâ€¦). Never overwrite what the user already typed.
+    // dates…). Never overwrite what the user already typed.
     const raw = r.raw || {};
     const disp = r.data || {};
     document.querySelectorAll('#doc-letter-fields [data-doc-field]').forEach((el) => {
@@ -9662,7 +9662,7 @@ async function autofillDocLetter(announce = true) {
         }
       }
     });
-    setDocLetterStatus(announce ? 'Details loaded â€” review and edit freely.' : '');
+    setDocLetterStatus(announce ? 'Details loaded — review and edit freely.' : '');
     return r;
   } catch (err) {
     setDocLetterStatus('Autofill failed: ' + (err.message || err), true);
@@ -9681,7 +9681,7 @@ async function previewDocLetterServer() {
   if (!container) return;
   const key = document.getElementById('doc-letter-key')?.value;
   if (!key) return;
-  container.innerHTML = '<p class="text-slate-500 text-sm">Rendering previewâ€¦</p>';
+  container.innerHTML = '<p class="text-slate-500 text-sm">Rendering preview…</p>';
   container.classList.remove('hidden');
   try {
     const r = await api.previewLetter({
@@ -9739,7 +9739,7 @@ function gatherDocLetterPayload(status) {
 }
 
 async function saveDocLetterDraft() {
-  setDocLetterStatus('Saving draftâ€¦');
+  setDocLetterStatus('Saving draft…');
   try {
     // Sender fields ride along inside values for resolution-free saves.
     const payload = gatherDocLetterPayload('Draft');
@@ -9756,7 +9756,7 @@ async function saveDocLetterDraft() {
       doc = res.document;
       document.getElementById('doc-letter-id').value = doc?.id || '';
     }
-    setDocLetterStatus(`Draft saved (#${doc?.id || 'â€”'}).`);
+    setDocLetterStatus(`Draft saved (#${doc?.id || '—'}).`);
     revealLetterInHub();
     loadDocuments();
   } catch (err) {
@@ -9765,7 +9765,7 @@ async function saveDocLetterDraft() {
 }
 
 async function generateDocLetter() {
-  setDocLetterStatus('Generating PDFâ€¦');
+  setDocLetterStatus('Generating PDF…');
   try {
     const payload = gatherDocLetterPayload('Finalized');
     const id = document.getElementById('doc-letter-id')?.value;
@@ -9781,7 +9781,7 @@ async function generateDocLetter() {
       const res = await api.createLetter(payload);
       doc = res.document;
     }
-    setDocLetterStatus(`Generated ${doc?.doc_number || ''} â€” saved to Documents Hub.`);
+    setDocLetterStatus(`Generated ${doc?.doc_number || ''} — saved to Documents Hub.`);
     document.getElementById('doc-letter-id').value = doc?.id || '';
     revealLetterInHub();
     loadDocuments();
@@ -9806,7 +9806,7 @@ document.getElementById('btn-doc-letter-autofill')?.addEventListener('click', ()
 document.getElementById('doc-letter-tenant')?.addEventListener('change', () => {
   // Tenant (re)selected: refresh subject, recipient/house block and any
   // still-empty detail fields from that tenant's dashboard data.
-  showToast('Loading tenant detailsâ€¦');
+  showToast('Loading tenant details…');
   autofillDocLetter(false);
 });
 document.getElementById('btn-doc-letter-preview')?.addEventListener('click', previewDocLetter);
@@ -9819,8 +9819,8 @@ document.getElementById('btn-doc-letter-batch')?.addEventListener('click', async
     setDocLetterStatus('Select a template and a property first.', true);
     return;
   }
-  if (!confirm(`Generate an individualized letter for EVERY occupying tenant of ${propName}?\n\nEach tenant gets their own finalized document (own number + PDF). This cannot be undone per letter â€” delete rows individually if needed.`)) return;
-  setDocLetterStatus('Generating batch â€” this can take a while for large propertiesâ€¦');
+  if (!confirm(`Generate an individualized letter for EVERY occupying tenant of ${propName}?\n\nEach tenant gets their own finalized document (own number + PDF). This cannot be undone per letter — delete rows individually if needed.`)) return;
+  setDocLetterStatus('Generating batch — this can take a while for large properties…');
   try {
     const r = await api.batchLetters({
       template_key: key,
@@ -9944,7 +9944,7 @@ document.getElementById('import-excel-input')?.addEventListener('change', async 
   reader.readAsDataURL(file);
 });
 
-// â”€â”€â”€ Company Settings â€” Official GEHPM Stamp (admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Company Settings — Official GEHPM Stamp (admin) ───────────────────────
 let stampState = null;
 let stampPreviewUrl = null;
 
@@ -9961,7 +9961,7 @@ async function loadStampSettings() {
   const toggleBtn = document.getElementById('btn-stamp-toggle');
   if (!statusEl) return;
   setStampMsg('');
-  statusEl.textContent = 'Loadingâ€¦';
+  statusEl.textContent = 'Loading…';
   try {
     const s = await api.stampStatus();
     stampState = s;
@@ -9971,8 +9971,8 @@ async function loadStampSettings() {
       statusEl.innerHTML =
         `<span class="${s.active ? 'text-green-400' : 'text-amber-400'} font-bold">${s.active ? 'ACTIVE' : 'INACTIVE'}</span>` +
         ` <span class="text-slate-500">${escapeHtml(s.original_name || s.mimetype || '')}</span>` +
-        (s.updated_at ? ` <span class="text-slate-500">Â· ${escapeHtml(new Date(s.updated_at).toLocaleString())}</span>` : '') +
-        (s.updated_by ? ` <span class="text-slate-500">Â· by ${escapeHtml(s.updated_by)}</span>` : '');
+        (s.updated_at ? ` <span class="text-slate-500">· ${escapeHtml(new Date(s.updated_at).toLocaleString())}</span>` : '') +
+        (s.updated_by ? ` <span class="text-slate-500">· by ${escapeHtml(s.updated_by)}</span>` : '');
     }
     if (img) {
       if (stampPreviewUrl) { URL.revokeObjectURL(stampPreviewUrl); stampPreviewUrl = null; }
@@ -10002,13 +10002,13 @@ document.getElementById('btn-stamp-upload')?.addEventListener('click', async () 
   const input = document.getElementById('stamp-file');
   const file = input?.files?.[0];
   if (!file) return setStampMsg('Choose a PNG or JPEG file first.', true);
-  setStampMsg('Uploading stampâ€¦');
+  setStampMsg('Uploading stamp…');
   try {
     const form = new FormData();
     form.append('file', file);
     await api.uploadStamp(form);
     input.value = '';
-    setStampMsg('Stamp saved and activated â€” future finalized PDFs will carry it.');
+    setStampMsg('Stamp saved and activated — future finalized PDFs will carry it.');
     showToast('Official stamp uploaded and activated.');
     await loadStampSettings();
   } catch (err) {
@@ -10019,10 +10019,10 @@ document.getElementById('btn-stamp-upload')?.addEventListener('click', async () 
 document.getElementById('btn-stamp-toggle')?.addEventListener('click', async () => {
   if (!stampState?.configured) return;
   const to = !stampState.active;
-  setStampMsg((to ? 'Activating' : 'Deactivating') + ' stampâ€¦');
+  setStampMsg((to ? 'Activating' : 'Deactivating') + ' stamp…');
   try {
     await api.setStampActive(to);
-    setStampMsg(to ? 'Stamp activated.' : 'Stamp deactivated â€” finalized PDFs will not carry it.');
+    setStampMsg(to ? 'Stamp activated.' : 'Stamp deactivated — finalized PDFs will not carry it.');
     await loadStampSettings();
   } catch (err) {
     setStampMsg('Failed: ' + (err.message || err), true);
@@ -10041,7 +10041,7 @@ document.getElementById('btn-stamp-delete')?.addEventListener('click', async () 
   }
 });
 
-// â”€â”€â”€ Payment Arrangement (management-only; never tenant-visible) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Payment Arrangement (management-only; never tenant-visible) ────────────
 let tdArrCode = null;
 let tdArrActiveId = null;
 
@@ -10060,8 +10060,8 @@ async function loadTenantArrangements(code) {
   const histWrap = document.getElementById('td-arr-history-wrap');
   const histBody = document.getElementById('td-arr-history-tbody');
   if (!body) return;
-  body.textContent = 'Loadingâ€¦';
-  if (badge) { badge.textContent = 'â€¦'; badge.className = 'font-mono text-xs font-bold text-slate-400'; }
+  body.textContent = 'Loading…';
+  if (badge) { badge.textContent = '…'; badge.className = 'font-mono text-xs font-bold text-slate-400'; }
   if (histWrap) histWrap.classList.add('hidden');
   tdArrMsg('');
   try {
@@ -10077,20 +10077,20 @@ async function loadTenantArrangements(code) {
     };
     if (!active) {
       if (badge) { badge.textContent = 'NONE'; badge.className = 'font-mono text-xs font-bold text-slate-400'; }
-      body.innerHTML = '<span class="text-slate-500">Normal Rent Due Date governs. No arrangement in effect â€” fill the dates below to record one.</span>';
+      body.innerHTML = '<span class="text-slate-500">Normal Rent Due Date governs. No arrangement in effect — fill the dates below to record one.</span>';
     } else {
       tdArrActiveId = active.id;
       if (badge) { badge.textContent = (active.display_status || active.status).toUpperCase(); badge.className = `font-mono text-xs font-bold ${badgeFor(active.display_status || active.status)}`; }
       body.innerHTML =
         `<div class="grid grid-cols-2 md:grid-cols-4 gap-2">` +
-        `<div>Normal Due Date<br><span class="text-slate-200">${escapeHtml(active.normal_due_date || 'â€”')}</span></div>` +
-        `<div>Approved Pay Date<br><span class="text-green-300">${escapeHtml(active.approved_date ? String(active.approved_date).slice(0, 10) : 'â€”')}</span></div>` +
+        `<div>Normal Due Date<br><span class="text-slate-200">${escapeHtml(active.normal_due_date || '—')}</span></div>` +
+        `<div>Approved Pay Date<br><span class="text-green-300">${escapeHtml(active.approved_date ? String(active.approved_date).slice(0, 10) : '—')}</span></div>` +
         `<div>Actual Pay Date<br><span class="text-slate-200">${escapeHtml(active.actual_payment_date || 'Pending')}</span></div>` +
         `<div>Status<br><span class="${badgeFor(active.display_status || active.status)}">${escapeHtml(active.display_status || active.status)}</span></div>` +
         `<div>Rent (${escapeHtml(active.billing_period || '')})<br><span class="text-slate-200">${money(active.rent_amount)}</span></div>` +
         `<div>Paid<br><span class="text-slate-200">${money(active.amount_paid)}</span></div>` +
         `<div>Outstanding<br><span class="text-rose-300">${money(active.outstanding)}</span></div>` +
-        `<div>Notes<br><span class="text-slate-500">${escapeHtml((active.reason || 'â€”').slice(0, 80))}</span></div>` +
+        `<div>Notes<br><span class="text-slate-500">${escapeHtml((active.reason || '—').slice(0, 80))}</span></div>` +
         `</div>`;
       const req = document.getElementById('td-arr-requested');
       const app = document.getElementById('td-arr-approved');
@@ -10105,9 +10105,9 @@ async function loadTenantArrangements(code) {
         histBody.innerHTML = arrangements.map((a) => `
           <tr>
             <td class="font-mono text-xs">${escapeHtml(a.billing_period || '')}</td>
-            <td class="font-mono text-xs">${escapeHtml(a.requested_date ? String(a.requested_date).slice(0, 10) : 'â€”')}</td>
-            <td class="font-mono text-xs">${escapeHtml(a.approved_date ? String(a.approved_date).slice(0, 10) : 'â€”')}</td>
-            <td class="font-mono text-xs">${a.actual_payment_date ? `${escapeHtml(a.actual_payment_date)} Â· ${money(a.amount_paid)}` : 'Pending'}</td>
+            <td class="font-mono text-xs">${escapeHtml(a.requested_date ? String(a.requested_date).slice(0, 10) : '—')}</td>
+            <td class="font-mono text-xs">${escapeHtml(a.approved_date ? String(a.approved_date).slice(0, 10) : '—')}</td>
+            <td class="font-mono text-xs">${a.actual_payment_date ? `${escapeHtml(a.actual_payment_date)} · ${money(a.amount_paid)}` : 'Pending'}</td>
             <td class="font-mono text-xs ${badgeFor(a.display_status || a.status)}">${escapeHtml(a.display_status || a.status)}</td>
           </tr>`).join('');
       } else {
@@ -10132,7 +10132,7 @@ function tdArrForm() {
 
 document.getElementById('btn-td-arr-save')?.addEventListener('click', async () => {
   if (!tdArrCode) return;
-  tdArrMsg('Savingâ€¦');
+  tdArrMsg('Saving…');
   try {
     const f = tdArrForm();
     await api.createArrangement({ tenant_code: tdArrCode, ...f });
@@ -10143,7 +10143,7 @@ document.getElementById('btn-td-arr-save')?.addEventListener('click', async () =
 
 document.getElementById('btn-td-arr-approve')?.addEventListener('click', async () => {
   if (!tdArrCode) return;
-  tdArrMsg('Approvingâ€¦');
+  tdArrMsg('Approving…');
   try {
     const f = tdArrForm();
     let id = tdArrActiveId;
@@ -10159,7 +10159,7 @@ document.getElementById('btn-td-arr-approve')?.addEventListener('click', async (
 
 document.getElementById('btn-td-arr-modify')?.addEventListener('click', async () => {
   if (!tdArrActiveId) return tdArrMsg('No active arrangement to modify.', true);
-  tdArrMsg('Modifyingâ€¦');
+  tdArrMsg('Modifying…');
   try {
     const f = tdArrForm();
     await api.modifyArrangement(tdArrActiveId, f);
@@ -10196,7 +10196,7 @@ document.getElementById('btn-td-arr-expire')?.addEventListener('click', async ()
   } catch (err) { tdArrMsg('Expire failed: ' + (err.message || err), true); }
 });
 
-// â”€â”€â”€ Company Settings â€” Authorized Signature (admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Company Settings — Authorized Signature (admin) ───────────────────────
 let sigState = null;
 let sigPreviewUrl = null;
 
@@ -10214,7 +10214,7 @@ async function loadSignatureSettings() {
   const holderInput = document.getElementById('sig-holder');
   if (!statusEl) return;
   setSigMsg('');
-  statusEl.textContent = 'Loadingâ€¦';
+  statusEl.textContent = 'Loading…';
   try {
     const s = await api.signatureStatus();
     sigState = s;
@@ -10223,8 +10223,8 @@ async function loadSignatureSettings() {
     } else {
       statusEl.innerHTML =
         `<span class="${s.active ? 'text-green-400' : 'text-amber-400'} font-bold">${s.active ? 'ACTIVE' : 'INACTIVE'}</span>` +
-        ` <span class="text-slate-200">${escapeHtml(s.holder_name || 'â€”')}</span>` +
-        (s.updated_at ? ` <span class="text-slate-500">Â· ${escapeHtml(new Date(s.updated_at).toLocaleString())}</span>` : '');
+        ` <span class="text-slate-200">${escapeHtml(s.holder_name || '—')}</span>` +
+        (s.updated_at ? ` <span class="text-slate-500">· ${escapeHtml(new Date(s.updated_at).toLocaleString())}</span>` : '');
     }
     if (holderInput && !holderInput.value && s.holder_name) holderInput.value = s.holder_name;
     if (img) {
@@ -10257,14 +10257,14 @@ document.getElementById('btn-sig-upload')?.addEventListener('click', async () =>
   const holder = document.getElementById('sig-holder')?.value.trim() || '';
   if (!file) return setSigMsg('Choose a PNG or JPEG file first.', true);
   if (!holder) return setSigMsg('Enter the signature holder name first.', true);
-  setSigMsg('Uploading signatureâ€¦');
+  setSigMsg('Uploading signature…');
   try {
     const form = new FormData();
     form.append('file', file);
     form.append('holder_name', holder);
     await api.uploadSignature(form);
     fileInput.value = '';
-    setSigMsg('Signature saved and assigned â€” letter downloads will carry it.');
+    setSigMsg('Signature saved and assigned — letter downloads will carry it.');
     showToast('Authorized signature uploaded and assigned.');
     await loadSignatureSettings();
   } catch (err) {
@@ -10275,7 +10275,7 @@ document.getElementById('btn-sig-upload')?.addEventListener('click', async () =>
 document.getElementById('btn-sig-save-name')?.addEventListener('click', async () => {
   const holder = document.getElementById('sig-holder')?.value.trim() || '';
   if (!holder) return setSigMsg('Enter the signature holder name first.', true);
-  setSigMsg('Saving holder nameâ€¦');
+  setSigMsg('Saving holder name…');
   try {
     await api.patchSignature({ holder_name: holder });
     setSigMsg('Holder name saved.');
@@ -10288,10 +10288,10 @@ document.getElementById('btn-sig-save-name')?.addEventListener('click', async ()
 document.getElementById('btn-sig-toggle')?.addEventListener('click', async () => {
   if (!sigState?.configured) return;
   const to = !sigState.active;
-  setSigMsg((to ? 'Activating' : 'Deactivating') + ' signatureâ€¦');
+  setSigMsg((to ? 'Activating' : 'Deactivating') + ' signature…');
   try {
     await api.patchSignature({ active: to });
-    setSigMsg(to ? 'Signature activated.' : 'Signature deactivated â€” letters fall back to the generating user.');
+    setSigMsg(to ? 'Signature activated.' : 'Signature deactivated — letters fall back to the generating user.');
     await loadSignatureSettings();
   } catch (err) {
     setSigMsg('Failed: ' + (err.message || err), true);
@@ -10653,14 +10653,14 @@ document.getElementById('btn-download-standard-report')?.addEventListener('click
   } catch (err) { alert(err.message); }
 });
 
-// â”€â”€â”€ Enhanced Monthly Report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Enhanced Monthly Report ─────────────────────────────────────────────────
 let _currentMrView = 'standard';
 
 document.getElementById('btn-mr-standard')?.addEventListener('click', () => switchMrView('standard'));
 document.getElementById('btn-mr-enhanced')?.addEventListener('click', () => switchMrView('enhanced'));
 document.getElementById('btn-mr-water')?.addEventListener('click', () => switchMrView('water'));
 
-// â”€â”€â”€ Water Bill Report (read-only reporting over recorded invoices) â”€â”€â”€â”€â”€â”€â”€
+// ─── Water Bill Report (read-only reporting over recorded invoices) ───────
 
 async function loadWaterBillReport() {
   const standardView = document.getElementById('mr-report-view');
@@ -10684,7 +10684,7 @@ async function loadWaterBillReport() {
     if (resEl) resEl.textContent = 'Select a billing month and a specific property first.';
     return;
   }
-  if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-4">Loading water bill reportâ€¦</td></tr>';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-4">Loading water bill report…</td></tr>';
   try {
     const { report } = await api.getWaterBillReport({ house_paybill: housePaybill, billing_month: month, unit });
     if (waterView) waterView.classList.remove('hidden');
@@ -10697,7 +10697,7 @@ async function loadWaterBillReport() {
         const note = vacant && r.usage_note ? `<div class="text-[10px] italic text-amber-400">${escapeHtml(r.usage_note)}</div>` : '';
         return `<tr class="${vacant ? 'opacity-60' : ''}">
           <td class="font-mono font-semibold">${escapeHtml(r.unit || '')}</td>
-          <td>${vacant ? 'â€”' : escapeHtml(r.tenant_name || '')}</td>
+          <td>${vacant ? '—' : escapeHtml(r.tenant_name || '')}</td>
           <td>${vacant ? `<span class="text-slate-400">Vacant</span>${note}` : '<span class="text-green-400">Occupied</span>'}</td>
           <td class="text-right font-mono">${Number(r.previous_reading || 0).toFixed(1)}</td>
           <td class="text-right font-mono">${Number(r.current_reading || 0).toFixed(1)}</td>
@@ -10710,7 +10710,7 @@ async function loadWaterBillReport() {
     const t = report.totals || {};
     if (tfoot) {
       tfoot.innerHTML = `<tr class="font-bold border-t-2 border-slate-600">
-        <td colspan="5" class="text-right">TOTALS (${t.total_units || 0} units Â· ${t.occupied_units || 0} occupied Â· ${t.vacant_units || 0} vacant)</td>
+        <td colspan="5" class="text-right">TOTALS (${t.total_units || 0} units · ${t.occupied_units || 0} occupied · ${t.vacant_units || 0} vacant)</td>
         <td class="text-right font-mono">${Number(t.total_consumption || 0).toFixed(1)}</td>
         <td></td>
         <td class="text-right font-mono text-green-400">${money(t.total_water_charges)}</td>
@@ -10725,7 +10725,7 @@ async function loadWaterBillReport() {
         card('Water rate', `KES ${Number(report.water_rate || 0).toFixed(2)}`, 'text-white') +
         card('Total charges', money(t.total_water_charges), 'text-green-400');
     }
-    if (resEl) resEl.textContent = `${rows.length} unit(s) Â· ${report.property_name || ''} Â· ${report.billing_month_label || ''}`;
+    if (resEl) resEl.textContent = `${rows.length} unit(s) · ${report.property_name || ''} · ${report.billing_month_label || ''}`;
   } catch (err) {
     if (waterView) waterView.classList.add('hidden');
     if (empty) empty.classList.remove('hidden');
@@ -10742,7 +10742,7 @@ document.getElementById('btn-download-water-report')?.addEventListener('click', 
   const resEl = document.getElementById('mr-water-result');
   if (!month || !housePaybill) { if (resEl) resEl.textContent = 'Select a billing month and a specific property first.'; return; }
   try {
-    if (resEl) resEl.textContent = 'Generating PDFâ€¦';
+    if (resEl) resEl.textContent = 'Generating PDF…';
     const result = await api.downloadWaterBillReport({ house_paybill: housePaybill, billing_month: month, unit });
     if (result.blob) triggerFileDownload(result);
     if (resEl) resEl.textContent = 'PDF downloaded.';
@@ -10760,7 +10760,7 @@ document.getElementById('btn-send-water-report')?.addEventListener('click', asyn
   const phone = prompt('Send the Water Bill Report PDF via WhatsApp to which number? (e.g. 2547XXXXXXXX)');
   if (!phone) return;
   try {
-    if (resEl) resEl.textContent = 'Sending via WhatsAppâ€¦';
+    if (resEl) resEl.textContent = 'Sending via WhatsApp…';
     const result = await api.sendWaterBillReport({ house_paybill: housePaybill, billing_month: month, unit, phone: phone.trim() });
     if (resEl) resEl.textContent = result.message || 'Sent via WhatsApp.';
     showToast('Water bill report sent via WhatsApp.');
@@ -10826,16 +10826,16 @@ async function loadEnhancedReport(month) {
         <td class="font-mono">${escapeHtml(u.unit_number || '')}</td>
         <td>${escapeHtml(u.tenant_name || '')}</td>
         <td class="text-xs">${escapeHtml(u.telephone || '')}</td>
-        <td class="text-right font-mono">${u.deposit ? money(u.deposit) : 'â€”'}</td>
-        <td class="text-right font-mono">${u.water ? money(u.water) : 'â€”'}</td>
-        <td class="text-right font-mono">${u.penalty ? money(u.penalty) : 'â€”'}</td>
+        <td class="text-right font-mono">${u.deposit ? money(u.deposit) : '—'}</td>
+        <td class="text-right font-mono">${u.water ? money(u.water) : '—'}</td>
+        <td class="text-right font-mono">${u.penalty ? money(u.penalty) : '—'}</td>
         <td class="text-right font-mono">${money(u.monthly_rent)}</td>
-        <td class="text-right font-mono">${u.balance_bf ? money(u.balance_bf) : 'â€”'}</td>
+        <td class="text-right font-mono">${u.balance_bf ? money(u.balance_bf) : '—'}</td>
         <td class="text-right font-mono font-semibold">${money(u.rent_due)}</td>
-        <td class="text-right font-mono">${u.rent_paid ? money(u.rent_paid) : 'â€”'}</td>
-        <td class="font-mono text-xs">${escapeHtml(u.receipt_no || 'â€”')}</td>
-        <td class="font-mono text-xs">${escapeHtml(u.transaction_ref || 'â€”')}</td>
-        <td class="font-mono text-xs">${escapeHtml(u.payment_date || 'â€”')}</td>
+        <td class="text-right font-mono">${u.rent_paid ? money(u.rent_paid) : '—'}</td>
+        <td class="font-mono text-xs">${escapeHtml(u.receipt_no || '—')}</td>
+        <td class="font-mono text-xs">${escapeHtml(u.transaction_ref || '—')}</td>
+        <td class="font-mono text-xs">${escapeHtml(u.payment_date || '—')}</td>
         <td class="text-right font-mono font-semibold">${money(u.balance)}</td>
         <td><span class="font-semibold text-xs ${statusClass}">${escapeHtml(u.status || '')}</span></td>
       </tr>`;
@@ -10849,7 +10849,7 @@ async function loadEnhancedReport(month) {
       <td class="text-right font-mono">${money(sum.total_water_charges)}</td>
       <td class="text-right font-mono">${money(sum.total_penalties)}</td>
       <td class="text-right font-mono">${money(sum.total_rent_due)}</td>
-      <td class="text-right font-mono">â€”</td>
+      <td class="text-right font-mono">—</td>
       <td class="text-right font-mono">${money(sum.total_rent_due)}</td>
       <td class="text-right font-mono">${money(sum.total_rent_paid)}</td>
       <td colspan="3"></td>
@@ -10866,12 +10866,12 @@ async function loadEnhancedReport(month) {
       <td>${escapeHtml(w.tenant || '')}</td>
       <td>${escapeHtml(w.problem || '')}</td>
       <td>${escapeHtml(w.work_done || '')}</td>
-      <td class="text-right font-mono">${w.material_cost ? money(w.material_cost) : 'â€”'}</td>
-      <td class="text-right font-mono">${w.labour_cost ? money(w.labour_cost) : 'â€”'}</td>
+      <td class="text-right font-mono">${w.material_cost ? money(w.material_cost) : '—'}</td>
+      <td class="text-right font-mono">${w.labour_cost ? money(w.labour_cost) : '—'}</td>
       <td class="text-right font-mono font-semibold">${money(w.total_cost)}</td>
       <td><span class="text-xs ${w.responsible_party === 'Tenant' ? 'text-amber-400' : 'text-cyan-400'}">${escapeHtml(w.responsible_party || '')}</span></td>
-      <td class="text-right font-mono">${w.amount_recovered ? money(w.amount_recovered) : 'â€”'}</td>
-      <td class="text-right font-mono">${w.outstanding_recovery > 0 ? money(w.outstanding_recovery) : 'â€”'}</td>
+      <td class="text-right font-mono">${w.amount_recovered ? money(w.amount_recovered) : '—'}</td>
+      <td class="text-right font-mono">${w.outstanding_recovery > 0 ? money(w.outstanding_recovery) : '—'}</td>
       <td><span class="status-badge ${w.status === 'Paid' ? 'badge-active' : 'badge-pending'}">${escapeHtml(w.status || '')}</span></td>
     </tr>`).join('') : '<tr><td colspan="12" class="text-center text-slate-500 py-4">No work/maintenance activities this month</td></tr>';
 
@@ -10884,11 +10884,11 @@ async function loadEnhancedReport(month) {
       <td class="text-xs">${escapeHtml(i.property || '')}${i.unit ? ' / ' + escapeHtml(i.unit) : ''}</td>
       <td>${escapeHtml(i.description || '')}</td>
       <td class="text-right font-mono">${money(i.amount)}</td>
-      <td class="font-mono text-xs">${i.date_issued ? new Date(i.date_issued).toLocaleDateString('en-KE') : 'â€”'}</td>
+      <td class="font-mono text-xs">${i.date_issued ? new Date(i.date_issued).toLocaleDateString('en-KE') : '—'}</td>
       <td>${escapeHtml(i.responsible_party || '')}</td>
       <td><span class="status-badge badge-pending">${escapeHtml(i.payment_status || '')}</span></td>
-      <td class="text-right font-mono">${i.amount_paid ? money(i.amount_paid) : 'â€”'}</td>
-      <td class="text-right font-mono">${i.outstanding ? money(i.outstanding) : 'â€”'}</td>
+      <td class="text-right font-mono">${i.amount_paid ? money(i.amount_paid) : '—'}</td>
+      <td class="text-right font-mono">${i.outstanding ? money(i.outstanding) : '—'}</td>
     </tr>`).join('') : '<tr><td colspan="10" class="text-center text-slate-500 py-4">No invoices issued this month</td></tr>';
 
     // Summary grid
@@ -10932,7 +10932,7 @@ async function loadInvoiceRegister() {
 async function loadInvoiceRegisterMonthly() {
   const container = document.getElementById('ir-monthly');
   if (!container) return;
-  container.innerHTML = '<div class="text-slate-500 text-sm col-span-full">Loading monthly summaryâ€¦</div>';
+  container.innerHTML = '<div class="text-slate-500 text-sm col-span-full">Loading monthly summary…</div>';
   try {
     const { months } = await api.invoiceRegisterMonthly();
     if (!months || !months.length) {
@@ -10944,7 +10944,7 @@ async function loadInvoiceRegisterMonthly() {
         <div class="text-xs font-mono text-slate-400">${escapeHtml(m.month)}</div>
         <div class="text-lg font-bold mt-1">${m.total}</div>
         <div class="text-xs text-slate-400 mt-1">
-          Rent ${m.rent || 0} Â· Maint ${m.maintenance || 0} Â· Pen ${m.penalty || 0} Â· Exit ${m.exit || 0}
+          Rent ${m.rent || 0} · Maint ${m.maintenance || 0} · Pen ${m.penalty || 0} · Exit ${m.exit || 0}
         </div>
       </button>
     `).join('');
@@ -10967,7 +10967,7 @@ async function runInvoiceRegisterSearch() {
 
   const tbody = document.getElementById('ir-tbody');
   if (tbody) {
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-6">Loading invoice registerâ€¦</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-6">Loading invoice register…</td></tr>';
   }
 
   try {
@@ -11006,17 +11006,17 @@ function renderInvoiceRegister(records, total) {
     return `
     <tr>
       <td><span class="sys-tag">${escapeHtml(irTypeLabel(r.invoice_type).toUpperCase())}</span></td>
-      <td class="font-mono">${escapeHtml(r.invoice_number || 'â€”')}</td>
+      <td class="font-mono">${escapeHtml(r.invoice_number || '—')}</td>
       <td>
-        <div class="font-semibold">${escapeHtml(r.tenant_name || 'â€”')}</div>
+        <div class="font-semibold">${escapeHtml(r.tenant_name || '—')}</div>
         ${r.tenant_code ? `<div class="text-xs text-slate-400 font-mono">${escapeHtml(r.tenant_code)}</div>` : ''}
       </td>
       <td class="text-slate-300">
-        ${escapeHtml(r.property_name || 'â€”')}
+        ${escapeHtml(r.property_name || '—')}
         ${r.unit_label ? ` <span class="font-mono text-xs">(${escapeHtml(r.unit_label)})</span>` : ''}
       </td>
       <td>${formatDocsDate(r.generated_at)}</td>
-      <td class="text-right font-mono">${r.amount != null ? formatKes(r.amount) : 'â€”'}</td>
+      <td class="text-right font-mono">${r.amount != null ? formatKes(r.amount) : '—'}</td>
       <td>${irRegisterBadge(r.status)}${r.voided ? ' <span class="sys-tag">VOID</span>' : ''}</td>
       ${paidCell}
       <td class="text-right whitespace-nowrap">
@@ -11040,7 +11040,7 @@ async function openInvoiceRegisterView(id) {
     if (titleEl) titleEl.textContent = `${irTypeLabel(register.invoice_type)} Invoice ${register.invoice_number}`;
     if (metaEl) {
       metaEl.innerHTML = `
-        <span>Tenant: <b>${escapeHtml(register.tenant_name || 'â€”')}</b> (${escapeHtml(register.tenant_code || 'â€”')})</span>
+        <span>Tenant: <b>${escapeHtml(register.tenant_name || '—')}</b> (${escapeHtml(register.tenant_code || '—')})</span>
         <span>Status: ${irRegisterBadge(register.status)}</span>
         ${register.move_out_date ? `<span>Move-out: <b>${escapeHtml(register.move_out_date)}</b></span>` : ''}
         ${register.approved_by ? `<span>Approved by: <b>${escapeHtml(register.approved_by)}</b></span>` : ''}
@@ -11071,11 +11071,11 @@ async function openInvoiceRegisterEdit(id) {
     if (!register) throw new Error('Register entry not found');
     irEditId = register.id;
     const ctx = document.getElementById('ir-edit-context');
-    if (ctx) ctx.textContent = `${irTypeLabel(register.invoice_type)} ${register.invoice_number || ''} â€” ${register.tenant_name || ''} (${register.tenant_code || 'â€”'})`;
+    if (ctx) ctx.textContent = `${irTypeLabel(register.invoice_type)} ${register.invoice_number || ''} — ${register.tenant_name || ''} (${register.tenant_code || '—'})`;
     const amt = document.getElementById('ir-edit-amount');
     if (amt) amt.value = register.amount ?? '';
     const note = document.getElementById('ir-edit-paid-note');
-    if (note) note.textContent = `Already paid: KES ${Number(register.amount_paid || 0).toLocaleString()} â€” balance recomputes automatically and the linked PDF amount follows. Payments and counters are untouched.`;
+    if (note) note.textContent = `Already paid: KES ${Number(register.amount_paid || 0).toLocaleString()} — balance recomputes automatically and the linked PDF amount follows. Payments and counters are untouched.`;
     const statusEl = document.getElementById('ir-edit-status');
     if (statusEl) { statusEl.textContent = ''; statusEl.className = 'text-sm font-mono text-amber-400'; }
     document.getElementById('ir-edit-modal')?.classList.remove('hidden');
@@ -11099,11 +11099,11 @@ document.getElementById('btn-ir-edit-save')?.addEventListener('click', async () 
     return;
   }
   if (btn) btn.disabled = true;
-  if (statusEl) { statusEl.textContent = 'Savingâ€¦'; statusEl.className = 'text-sm font-mono text-amber-400'; }
+  if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'text-sm font-mono text-amber-400'; }
   try {
     const res = await api.updateInvoiceRegister(irEditId, { amount });
-    if (statusEl) { statusEl.textContent = 'Saved â€” register, balance and linked PDF updated.'; statusEl.className = 'text-sm font-mono text-green-400'; }
-    showToast(`Invoice updated${res.clamped ? ' (balance clamped at zero â€” paid exceeded the new total)' : ''}.`);
+    if (statusEl) { statusEl.textContent = 'Saved — register, balance and linked PDF updated.'; statusEl.className = 'text-sm font-mono text-green-400'; }
+    showToast(`Invoice updated${res.clamped ? ' (balance clamped at zero — paid exceeded the new total)' : ''}.`);
     setTimeout(() => {
       document.getElementById('ir-edit-modal')?.classList.add('hidden');
       irEditId = null;
@@ -11234,7 +11234,7 @@ document.getElementById('btn-ir-share-send')?.addEventListener('click', async ()
   const statusEl = document.getElementById('ir-share-status');
   if (btn) btn.disabled = true;
   if (statusEl) {
-    statusEl.textContent = 'Sendingâ€¦';
+    statusEl.textContent = 'Sending…';
     statusEl.className = 'text-sm font-mono text-amber-400';
   }
   try {
@@ -11297,7 +11297,7 @@ function renderDepositRefundSummary(s) {
 function getDrCountdown(refund) {
   if (refund.refund_status === 'refunded') return '<span class="text-green-400">REFUNDED</span>';
   if (refund.refund_status === 'no_refund_due') return '<span class="text-slate-500">N/A</span>';
-  if (!refund.refund_due_date) return '<span class="text-slate-500">â€”</span>';
+  if (!refund.refund_due_date) return '<span class="text-slate-500">—</span>';
   const due = new Date(refund.refund_due_date);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -11335,8 +11335,8 @@ function renderDepositRefundTable(refunds) {
   tbody.innerHTML = refunds.map(r => {
     const name = escapeHtml(r.tenant_name || r.tenant_code);
     const code = escapeHtml(r.tenant_code);
-    const prop = escapeHtml(r.property_name || 'â€”');
-    const unit = escapeHtml(r.unit_label || 'â€”');
+    const prop = escapeHtml(r.property_name || '—');
+    const unit = escapeHtml(r.unit_label || '—');
     return '<tr class="hover:bg-slate-800/50">' +
       '<td><p class="text-white font-semibold text-sm">' + name + '</p><p class="text-xs text-slate-400 font-mono">' + code + '</p></td>' +
       '<td><p class="text-sm">' + prop + '</p><p class="text-xs text-purple-300 font-mono">' + unit + '</p></td>' +
@@ -11400,10 +11400,10 @@ async function openDrDetail(id) {
 
     document.getElementById('dr-detail-status').innerHTML = getDrStatusBadge(refund.refund_status);
     setTextEl('dr-detail-tenant', refund.tenant_name || refund.tenant_code);
-    setTextEl('dr-detail-phone', refund.tenant_phone || 'â€”');
-    setTextEl('dr-detail-property', refund.property_name || 'â€”');
-    setTextEl('dr-detail-unit', refund.unit_label || 'â€”');
-    document.getElementById('dr-detail-exit-number').textContent = refund.exit_number || 'â€”';
+    setTextEl('dr-detail-phone', refund.tenant_phone || '—');
+    setTextEl('dr-detail-property', refund.property_name || '—');
+    setTextEl('dr-detail-unit', refund.unit_label || '—');
+    document.getElementById('dr-detail-exit-number').textContent = refund.exit_number || '—';
     setTextEl('dr-detail-exit-date', fmtDate(refund.exit_date));
     setTextEl('dr-detail-due-date', fmtDate(refund.refund_due_date));
 
@@ -11425,8 +11425,8 @@ async function openDrDetail(id) {
     if (lines.length) {
       linesPanel.classList.remove('hidden');
       linesTbody.innerHTML = lines.map(l => {
-        const cat = escapeHtml(l.category || l.label || 'â€”');
-        const desc = escapeHtml(l.description || l.label || 'â€”');
+        const cat = escapeHtml(l.category || l.label || '—');
+        const desc = escapeHtml(l.description || l.label || '—');
         const amt = formatKes(l.amount);
         return '<tr><td class="text-sm">' + cat + '</td><td class="text-sm">' + desc + '</td><td class="text-right font-mono text-rose-400">' + amt + '</td></tr>';
       }).join('');
@@ -11439,11 +11439,11 @@ async function openDrDetail(id) {
       txPanel.classList.remove('hidden');
       setTextEl('dr-detail-amount-refunded', formatKes(refund.amount_refunded));
       setTextEl('dr-detail-remaining', formatKes(refund.remaining_amount));
-      setTextEl('dr-detail-refund-date', refund.refund_date ? fmtDate(refund.refund_date) + (refund.refund_time ? ' ' + refund.refund_time.slice(0, 5) : '') : 'â€”');
-      setTextEl('dr-detail-method', refund.payment_method || 'â€”');
-      setTextEl('dr-detail-ref', refund.transaction_reference || 'â€”');
-      setTextEl('dr-detail-refunded-by', refund.refunded_by || 'â€”');
-      setTextEl('dr-detail-remarks', refund.remarks || 'â€”');
+      setTextEl('dr-detail-refund-date', refund.refund_date ? fmtDate(refund.refund_date) + (refund.refund_time ? ' ' + refund.refund_time.slice(0, 5) : '') : '—');
+      setTextEl('dr-detail-method', refund.payment_method || '—');
+      setTextEl('dr-detail-ref', refund.transaction_reference || '—');
+      setTextEl('dr-detail-refunded-by', refund.refunded_by || '—');
+      setTextEl('dr-detail-remarks', refund.remarks || '—');
     } else {
       txPanel.classList.add('hidden');
     }
@@ -11549,7 +11549,7 @@ document.getElementById('dr-record-form')?.addEventListener('submit', async (e) 
 
 window.openDrDetail = openDrDetail;
 
-// â”€â”€â”€ WhatsApp Module (QR-Linked) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── WhatsApp Module (QR-Linked) ────────────────────────────────────────────
 // NOTE: _waPolling/_waQrPolling are declared at the top of the file because
 // showView() (which runs during startup) calls waStart/StopPolling.
 try {
@@ -11579,7 +11579,7 @@ async function waLoadStatus() {
 
     const state = data.state || 'disconnected';
     const stateColors = { connected: 'bg-green-500', qr_required: 'bg-amber-500', connecting: 'bg-blue-500', disconnected: 'bg-slate-400', error: 'bg-red-500' };
-    const stateLabels = { connected: 'CONNECTED', qr_required: 'QR CODE READY', connecting: 'CONNECTINGâ€¦', disconnected: 'NOT CONNECTED', error: 'ERROR', authenticating: 'AUTHENTICATINGâ€¦', disconnecting: 'DISCONNECTINGâ€¦' };
+    const stateLabels = { connected: 'CONNECTED', qr_required: 'QR CODE READY', connecting: 'CONNECTING…', disconnected: 'NOT CONNECTED', error: 'ERROR', authenticating: 'AUTHENTICATING…', disconnecting: 'DISCONNECTING…' };
 
     dot.className = `w-2 h-2 rounded-full ${stateColors[state] || 'bg-slate-500'}`;
     text.textContent = stateLabels[state] || state.toUpperCase();
@@ -11632,16 +11632,16 @@ function waShowQr(qrData) {
   if (!container) return;
   if (qrData) {
     container.innerHTML = `<img src="${qrData}" alt="WhatsApp QR Code" class="w-64 h-64 rounded-lg">`;
-    document.getElementById('wa-qr-status').textContent = 'Waiting for scanâ€¦';
+    document.getElementById('wa-qr-status').textContent = 'Waiting for scan…';
     document.getElementById('wa-qr-status').className = 'text-sm text-amber-600';
   } else {
-    container.innerHTML = '<div class="w-64 h-64 bg-white rounded-lg flex items-center justify-center"><p class="text-slate-500 text-sm">Generating QR codeâ€¦</p></div>';
+    container.innerHTML = '<div class="w-64 h-64 bg-white rounded-lg flex items-center justify-center"><p class="text-slate-500 text-sm">Generating QR code…</p></div>';
   }
 }
 
 async function waConnect() {
   try {
-    document.getElementById('btn-wa-connect').textContent = 'Connectingâ€¦';
+    document.getElementById('btn-wa-connect').textContent = 'Connecting…';
     document.getElementById('btn-wa-connect').disabled = true;
     await api.waConnect();
     waStartPolling();
@@ -11655,7 +11655,7 @@ async function waConnect() {
 async function waSimulateScan() {
   try {
     const btn = document.querySelector('#wa-qr-panel button');
-    if (btn) { btn.textContent = 'Connectingâ€¦'; btn.disabled = true; }
+    if (btn) { btn.textContent = 'Connecting…'; btn.disabled = true; }
     await api.waSimulateScan();
   } catch (err) {
     alert('Failed: ' + (err.message || err));
@@ -11686,7 +11686,7 @@ async function waSendTest() {
   const phone = prompt('Enter phone number to send test message:');
   if (!phone) return;
   try {
-    const result = await api.waSendTest(phone, 'Test message from Rental Management System âœ“');
+    const result = await api.waSendTest(phone, 'Test message from Rental Management System ✓');
     alert(result.message || 'Test message sent!');
   } catch (err) {
     alert('Failed: ' + (err.message || err));
@@ -11731,19 +11731,19 @@ async function waLoadMessages(page = 1) {
     }
     tbody.innerHTML = messages.map(m => {
       const body = (m.content || '').replace(/\s+/g, ' ').trim();
-      const snippet = body.length > 90 ? body.slice(0, 90) + 'â€¦' : body;
+      const snippet = body.length > 90 ? body.slice(0, 90) + '…' : body;
       const st = (m.status || '').toLowerCase();
       const badge = ['sent', 'delivered', 'read'].includes(st)
         ? 'bg-green-900 text-green-300'
         : st === 'failed' ? 'bg-red-900 text-red-300' : 'bg-slate-700 text-slate-300';
       return `
       <tr class="text-sm">
-        <td class="py-2 pr-3">${escapeHtml(m.tenant_name || m.tenant_code || 'â€”')}</td>
-        <td class="py-2 pr-3 font-mono text-xs">${escapeHtml(m.phone_number || 'â€”')}</td>
+        <td class="py-2 pr-3">${escapeHtml(m.tenant_name || m.tenant_code || '—')}</td>
+        <td class="py-2 pr-3 font-mono text-xs">${escapeHtml(m.phone_number || '—')}</td>
         <td class="py-2 pr-3">${escapeHtml(m.message_type || 'text')}</td>
-        <td class="py-2 pr-3"><span class="px-2 py-0.5 rounded text-xs ${badge}">${escapeHtml(m.status || 'â€”')}</span></td>
-        <td class="py-2 pr-3 text-xs text-slate-500" title="${escapeHtml(body)}">${escapeHtml(snippet) || 'â€”'}</td>
-        <td class="py-2 text-xs text-slate-400">${m.created_at ? new Date(m.created_at).toLocaleString() : 'â€”'}</td>
+        <td class="py-2 pr-3"><span class="px-2 py-0.5 rounded text-xs ${badge}">${escapeHtml(m.status || '—')}</span></td>
+        <td class="py-2 pr-3 text-xs text-slate-500" title="${escapeHtml(body)}">${escapeHtml(snippet) || '—'}</td>
+        <td class="py-2 text-xs text-slate-400">${m.created_at ? new Date(m.created_at).toLocaleString() : '—'}</td>
       </tr>`;
     }).join('');
 
@@ -11756,13 +11756,13 @@ async function waLoadMessages(page = 1) {
     const win = 2;
     const start = Math.max(1, cur - win);
     const end = Math.min(totalPages, cur + win);
-    let html = `<button class="qc-btn text-xs" ${cur <= 1 ? 'disabled' : ''} onclick="waLoadMessages(${cur - 1})">â€¹ Prev</button>`;
-    if (start > 1) html += `<button class="qc-btn text-xs" onclick="waLoadMessages(1)">1</button>${start > 2 ? '<span class="text-slate-400 text-xs px-1 self-center">â€¦</span>' : ''}`;
+    let html = `<button class="qc-btn text-xs" ${cur <= 1 ? 'disabled' : ''} onclick="waLoadMessages(${cur - 1})">‹ Prev</button>`;
+    if (start > 1) html += `<button class="qc-btn text-xs" onclick="waLoadMessages(1)">1</button>${start > 2 ? '<span class="text-slate-400 text-xs px-1 self-center">…</span>' : ''}`;
     for (let i = start; i <= end; i++) {
       html += `<button class="qc-btn text-xs ${i === cur ? 'qc-btn-primary' : ''}" onclick="waLoadMessages(${i})">${i}</button>`;
     }
-    if (end < totalPages) html += `${end < totalPages - 1 ? '<span class="text-slate-400 text-xs px-1 self-center">â€¦</span>' : ''}<button class="qc-btn text-xs" onclick="waLoadMessages(${totalPages})">${totalPages}</button>`;
-    html += `<button class="qc-btn text-xs" ${cur >= totalPages ? 'disabled' : ''} onclick="waLoadMessages(${cur + 1})">Next â€º</button>`;
+    if (end < totalPages) html += `${end < totalPages - 1 ? '<span class="text-slate-400 text-xs px-1 self-center">…</span>' : ''}<button class="qc-btn text-xs" onclick="waLoadMessages(${totalPages})">${totalPages}</button>`;
+    html += `<button class="qc-btn text-xs" ${cur >= totalPages ? 'disabled' : ''} onclick="waLoadMessages(${cur + 1})">Next ›</button>`;
     html += `<span class="text-xs text-slate-400 px-1 self-center">Page ${cur} of ${totalPages}</span>`;
     pag.innerHTML = html;
   } catch (err) {
@@ -11904,7 +11904,7 @@ window.waLoadMessages = waLoadMessages;
 window.waSaveSettings = waSaveSettings;
 window.waPreviewTemplate = waPreviewTemplate;
 
-// â”€â”€â”€ SMS Module (Bytewave Networks) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── SMS Module (Bytewave Networks) ────────────────────────────────────────
 
 async function smsLoadStatus() {
   try {
@@ -11922,7 +11922,7 @@ async function smsLoadStatus() {
     const tokenInput = document.getElementById('sms-api-token');
     if (tokenInput) tokenInput.value = '';
   } catch (err) {
-    // Retry once â€” on first view the auth token may still be settling
+    // Retry once — on first view the auth token may still be settling
     if (!err || err.status !== 401) {
       setTextEl('sms-status-text', 'Error');
       console.error('[SMS] Status error:', err);
@@ -11971,7 +11971,7 @@ const SMS_RATE_KSH = 0.3;
 
 async function smsLoadBalance() {
   const el = document.getElementById('sms-balance-display');
-  if (el) el.textContent = 'â€¦';
+  if (el) el.textContent = '…';
   try {
     const data = await api.smsBalance();
     // Gateway payload: { ok, data: { status, message, data: { remaining_balance, expired_on } } }
@@ -11979,7 +11979,7 @@ async function smsLoadBalance() {
     const gw = (inner.data && typeof inner.data === 'object') ? inner.data : inner;
     const amount = parseFloat(String(gw.remaining_balance ?? gw.balance ?? '').replace(/[^0-9.]/g, ''));
     if (!Number.isFinite(amount)) {
-      if (el) el.textContent = 'â€”';
+      if (el) el.textContent = '—';
       return;
     }
     const sms = Math.floor(amount / SMS_RATE_KSH).toLocaleString('en-KE');
@@ -11990,8 +11990,8 @@ async function smsLoadBalance() {
         `<span><span class="text-xs text-slate-500">KSh</span> <span class="font-semibold text-slate-800">${bal}</span> <span class="text-xs text-slate-500">Balance</span></span>`;
     }
   } catch (_) {
-    // Always-visible widget â€” stay quiet on transient gateway/network errors.
-    if (el) el.textContent = 'â€”';
+    // Always-visible widget — stay quiet on transient gateway/network errors.
+    if (el) el.textContent = '—';
   }
 }
 
@@ -12023,18 +12023,18 @@ async function smsLoadMessages(page = 1) {
     }
     tbody.innerHTML = messages.map(m => {
       const body = (m.content || '').replace(/\s+/g, ' ').trim();
-      const snippet = body.length > 90 ? body.slice(0, 90) + 'â€¦' : body;
+      const snippet = body.length > 90 ? body.slice(0, 90) + '…' : body;
       const st = (m.status || '').toLowerCase();
       const badge = ['sent', 'delivered', 'read'].includes(st)
         ? 'bg-green-900 text-green-300'
         : st === 'failed' ? 'bg-red-900 text-red-300' : 'bg-slate-700 text-slate-300';
       return `
       <tr class="text-sm">
-        <td class="py-2 pr-3">${escapeHtml(m.tenant_name || m.tenant_code || 'â€”')}</td>
+        <td class="py-2 pr-3">${escapeHtml(m.tenant_name || m.tenant_code || '—')}</td>
         <td class="py-2 pr-3">${escapeHtml(m.message_type || 'SMS')}</td>
-        <td class="py-2 pr-3"><span class="px-2 py-0.5 rounded text-xs ${badge}">${escapeHtml(m.status || 'â€”')}</span></td>
-        <td class="py-2 pr-3 text-xs text-slate-500" title="${escapeHtml(body)}">${escapeHtml(snippet) || 'â€”'}</td>
-        <td class="py-2 text-xs text-slate-400">${m.created_at ? new Date(m.created_at).toLocaleString() : 'â€”'}</td>
+        <td class="py-2 pr-3"><span class="px-2 py-0.5 rounded text-xs ${badge}">${escapeHtml(m.status || '—')}</span></td>
+        <td class="py-2 pr-3 text-xs text-slate-500" title="${escapeHtml(body)}">${escapeHtml(snippet) || '—'}</td>
+        <td class="py-2 text-xs text-slate-400">${m.created_at ? new Date(m.created_at).toLocaleString() : '—'}</td>
       </tr>`;
     }).join('');
 
@@ -12047,13 +12047,13 @@ async function smsLoadMessages(page = 1) {
     const win = 2;
     const start = Math.max(1, cur - win);
     const end = Math.min(totalPages, cur + win);
-    let html = `<button class="qc-btn text-xs" ${cur <= 1 ? 'disabled' : ''} onclick="smsLoadMessages(${cur - 1})">â€¹ Prev</button>`;
-    if (start > 1) html += `<button class="qc-btn text-xs" onclick="smsLoadMessages(1)">1</button>${start > 2 ? '<span class="text-slate-400 text-xs px-1 self-center">â€¦</span>' : ''}`;
+    let html = `<button class="qc-btn text-xs" ${cur <= 1 ? 'disabled' : ''} onclick="smsLoadMessages(${cur - 1})">‹ Prev</button>`;
+    if (start > 1) html += `<button class="qc-btn text-xs" onclick="smsLoadMessages(1)">1</button>${start > 2 ? '<span class="text-slate-400 text-xs px-1 self-center">…</span>' : ''}`;
     for (let i = start; i <= end; i++) {
       html += `<button class="qc-btn text-xs ${i === cur ? 'qc-btn-primary' : ''}" onclick="smsLoadMessages(${i})">${i}</button>`;
     }
-    if (end < totalPages) html += `${end < totalPages - 1 ? '<span class="text-slate-400 text-xs px-1 self-center">â€¦</span>' : ''}<button class="qc-btn text-xs" onclick="smsLoadMessages(${totalPages})">${totalPages}</button>`;
-    html += `<button class="qc-btn text-xs" ${cur >= totalPages ? 'disabled' : ''} onclick="smsLoadMessages(${cur + 1})">Next â€º</button>`;
+    if (end < totalPages) html += `${end < totalPages - 1 ? '<span class="text-slate-400 text-xs px-1 self-center">…</span>' : ''}<button class="qc-btn text-xs" onclick="smsLoadMessages(${totalPages})">${totalPages}</button>`;
+    html += `<button class="qc-btn text-xs" ${cur >= totalPages ? 'disabled' : ''} onclick="smsLoadMessages(${cur + 1})">Next ›</button>`;
     html += `<span class="text-xs text-slate-400 px-1 self-center">Page ${cur} of ${totalPages}</span>`;
     pag.innerHTML = html;
   } catch (err) {
@@ -12067,7 +12067,7 @@ window.smsLoadBalance = smsLoadBalance;
 window.smsSendTestMsg = smsSendTestMsg;
 window.smsLoadMessages = smsLoadMessages;
 
-// â”€â”€â”€ Future Tenancies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Future Tenancies ──────────────────────────────────────────────────────
 
 let _ftCurrentTenancyId = null;
 
@@ -12095,11 +12095,11 @@ async function loadFutureTenancies() {
         : ft.status === 'ACTIVE' ? 'bg-green-100 text-green-700'
         : 'bg-slate-100 text-slate-500';
       return `<tr class="border-t border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="openFutureTenancyDetail(${ft.id})">
-        <td>${ft.property_name || 'â€”'}</td>
-        <td>${ft.unit_label || 'â€”'}</td>
+        <td>${ft.property_name || '—'}</td>
+        <td>${ft.unit_label || '—'}</td>
         <td>${ft.tenant_name}</td>
-        <td>${ft.phone_number || 'â€”'}</td>
-        <td>${ft.allocated_month || 'â€”'}</td>
+        <td>${ft.phone_number || '—'}</td>
+        <td>${ft.allocated_month || '—'}</td>
         <td>${Number(ft.rent_amount || 0).toLocaleString('en-KE')}</td>
         <td>${Number(ft.deposit_amount || 0).toLocaleString('en-KE')}</td>
         <td class="font-semibold">${totalPaid.toLocaleString('en-KE')}</td>
@@ -12128,7 +12128,7 @@ async function openFutureTenancyDetail(id) {
     const ft = data.future_tenancy;
     if (!ft) return;
     _ftCurrentTenancyId = id;
-    setTextEl('ft-detail-title', `${ft.tenant_name} â€” ${ft.unit_label || ''} ${ft.property_name}`);
+    setTextEl('ft-detail-title', `${ft.tenant_name} — ${ft.unit_label || ''} ${ft.property_name}`);
     setTextEl('ft-detail-subtitle', `Allocated to: ${ft.allocated_month} | Status: ${ft.status}`);
 
     // Show/hide action buttons based on status
@@ -12157,12 +12157,12 @@ async function openFutureTenancyDetail(id) {
             ? `<button onclick="approveFuturePayment(${fp.id})" class="text-xs text-green-600 hover:underline mr-2">Approve</button><button onclick="cancelFuturePaymentAction(${fp.id})" class="text-xs text-red-600 hover:underline">Cancel</button>`
             : '';
           return `<tr class="border-t border-slate-100">
-            <td>${fp.payment_date || 'â€”'}</td>
+            <td>${fp.payment_date || '—'}</td>
             <td class="font-semibold">${Number(fp.amount).toLocaleString('en-KE')}</td>
-            <td>${fp.payment_mode || 'â€”'}</td>
-            <td>${fp.purpose || 'â€”'}</td>
-            <td>${fp.allocated_month || 'â€”'}</td>
-            <td>${fp.mpesa_reference || 'â€”'}</td>
+            <td>${fp.payment_mode || '—'}</td>
+            <td>${fp.purpose || '—'}</td>
+            <td>${fp.allocated_month || '—'}</td>
+            <td>${fp.mpesa_reference || '—'}</td>
             <td><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge}">${fp.status}</span></td>
             <td>${actionBtns}</td>
           </tr>`;
@@ -12273,17 +12273,17 @@ async function showAddFutureTenancyModal() {
   modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
 
   const housesOptions = houses.map(h =>
-    `<option value="${h.paybill_number || ''}" data-property="${h.house_name || ''}" data-unit="${h.unit_label || ''}" data-rent="${h.rent_amount || 0}" data-deposit="${h.deposit_amount || 0}">${h.house_name || ''} â€” ${h.paybill_number || ''}</option>`
+    `<option value="${h.paybill_number || ''}" data-property="${h.house_name || ''}" data-unit="${h.unit_label || ''}" data-rent="${h.rent_amount || 0}" data-deposit="${h.deposit_amount || 0}">${h.house_name || ''} — ${h.paybill_number || ''}</option>`
   ).join('');
 
   modal.innerHTML = `
     <div class="bg-white rounded-xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto shadow-2xl">
-      <h3 class="text-lg font-bold mb-4">Reserve a Unit â€” Future Tenancy</h3>
+      <h3 class="text-lg font-bold mb-4">Reserve a Unit — Future Tenancy</h3>
       <div class="space-y-3">
         <div>
-          <label class="block text-xs font-medium text-slate-600 mb-1">Select House (optional â€” can enter manually below)</label>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Select House (optional — can enter manually below)</label>
           <select id="ft-modal-house" class="cyber-input w-full" onchange="ftModalHouseChanged(this)">
-            <option value="">â€” Enter details manually â€”</option>
+            <option value="">— Enter details manually —</option>
             ${housesOptions}
           </select>
         </div>
@@ -12412,7 +12412,7 @@ window.activateFutureTenancy = activateFutureTenancy;
 window.cancelFutureTenancy = cancelFutureTenancy;
 window.submitFutureTenancy = submitFutureTenancy;
 
-// â”€â”€ Water Bill Invoices â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Water Bill Invoices ─────────────────────────────────────────────────────
 
 let waterBillHousesCache = [];
 let waterBillCurrentTenant = null;
@@ -12440,10 +12440,10 @@ async function loadWaterBillInvoices() {
       .catch(() => []);
     const pendingRows = cachedPending.map((r) => `<tr class="border-b border-slate-800 hover:bg-slate-800/30" style="opacity:.92">
         <td class="font-mono text-xs">${escapeHtml(r.wtr_number || '(pending)')}</td>
-        <td>â€”</td><td>â€”</td>
-        <td>${escapeHtml(r.tenant_name || 'â€”')}</td>
-        <td>${escapeHtml(r.billing_month || 'â€”')}</td>
-        <td class="text-right font-mono font-bold">â€”</td>
+        <td>—</td><td>—</td>
+        <td>${escapeHtml(r.tenant_name || '—')}</td>
+        <td>${escapeHtml(r.billing_month || '—')}</td>
+        <td class="text-right font-mono font-bold">—</td>
         <td>${escapeHtml((r.created_at || '').slice(0, 10))}</td>
         <td>${offlineSyncBadge(r.sync)}</td>
         <td><span class="text-slate-500">Unpaid</span></td>
@@ -12476,7 +12476,7 @@ async function loadWaterBillInvoices() {
         <td>${escapeHtml(inv.billing_month)}</td>
         <td class="text-right font-mono font-bold">${Number(inv.total_amount).toLocaleString()}</td>
         <td>${inv.created_at ? new Date(inv.created_at).toLocaleDateString('en-GB') : ''}</td>
-        <td class="${statusClass} font-semibold">${escapeHtml(inv.status)}${inv.anomaly_flag ? ` <span title="${escapeHtml(inv.anomaly_detail || inv.anomaly_flag)}">âš ï¸ ${escapeHtml(String(inv.anomaly_flag).toUpperCase())}</span>` : ''}</td>
+        <td class="${statusClass} font-semibold">${escapeHtml(inv.status)}${inv.anomaly_flag ? ` <span title="${escapeHtml(inv.anomaly_detail || inv.anomaly_flag)}">⚠️ ${escapeHtml(String(inv.anomaly_flag).toUpperCase())}</span>` : ''}</td>
         <td>${paymentStatus}</td>
         <td class="text-right whitespace-nowrap">${actions.join(' ')}</td>
       </tr>`;
@@ -12490,17 +12490,17 @@ async function loadWaterBillInvoices() {
     if (!tbody) return;
     const cached = await offlineDb.getAll('water').catch(() => []);
     if (!cached.length) {
-      tbody.innerHTML = '<tr><td colspan="10" class="text-center text-slate-500 py-6">Offline â€” no synced water records on this device yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="text-center text-slate-500 py-6">Offline — no synced water records on this device yet.</td></tr>';
       return;
     }
-    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-amber-500 text-xs font-mono py-2">ðŸ“´ Offline â€” showing last synced data</td></tr>' + cached.map((r) => `<tr class="border-b border-slate-800 hover:bg-slate-800/30" style="opacity:.92">
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-amber-500 text-xs font-mono py-2">📴 Offline — showing last synced data</td></tr>' + cached.map((r) => `<tr class="border-b border-slate-800 hover:bg-slate-800/30" style="opacity:.92">
         <td class="font-mono text-xs">${escapeHtml(r.wtr_number || '(pending)')}</td>
-        <td>â€”</td><td>â€”</td>
-        <td>${escapeHtml(r.tenant_name || 'â€”')}</td>
-        <td>${escapeHtml(r.billing_month || 'â€”')}</td>
-        <td class="text-right font-mono font-bold">â€”</td>
+        <td>—</td><td>—</td>
+        <td>${escapeHtml(r.tenant_name || '—')}</td>
+        <td>${escapeHtml(r.billing_month || '—')}</td>
+        <td class="text-right font-mono font-bold">—</td>
         <td>${escapeHtml((r.created_at || r.synced_at || '').slice(0, 10))}</td>
-        <td>${offlineSyncBadge(r.sync)}${r.anomaly_flag ? `<div class="text-[10px] text-amber-500 font-mono mt-1" title="${escapeHtml(r.anomaly_detail || '')}">âš ï¸ ${escapeHtml(String(r.anomaly_flag).toUpperCase())}</div>` : ''}</td>
+        <td>${offlineSyncBadge(r.sync)}${r.anomaly_flag ? `<div class="text-[10px] text-amber-500 font-mono mt-1" title="${escapeHtml(r.anomaly_detail || '')}">⚠️ ${escapeHtml(String(r.anomaly_flag).toUpperCase())}</div>` : ''}</td>
         <td><span class="text-slate-500">Unpaid</span></td>
         <td class="text-right whitespace-nowrap"><span class="text-xs text-slate-500">Offline record</span></td>
       </tr>`).join('');
@@ -12547,7 +12547,7 @@ document.getElementById('wb-rate-house')?.addEventListener('change', async funct
     const history = data.history || [];
     if (historyDiv) {
       historyDiv.innerHTML = history.length
-        ? history.map(h => `<div>${escapeHtml(h.effective_month)}: KES ${h.old_rate} â†’ KES ${h.new_rate} (by ${escapeHtml(h.changed_by || 'system')})</div>`).join('')
+        ? history.map(h => `<div>${escapeHtml(h.effective_month)}: KES ${h.old_rate} → KES ${h.new_rate} (by ${escapeHtml(h.changed_by || 'system')})</div>`).join('')
         : '<div>No rate changes recorded.</div>';
     }
   } catch (err) { /* ignore */ }
@@ -12575,7 +12575,7 @@ document.getElementById('wb-search')?.addEventListener('input', debounce(loadWat
 document.getElementById('wb-status-filter')?.addEventListener('change', loadWaterBillInvoices);
 document.getElementById('wb-month-filter')?.addEventListener('change', loadWaterBillInvoices);
 
-// â”€â”€ Water Bill Form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Water Bill Form ─────────────────────────────────────────────────────────
 
 function showWaterBillForm(invoice = null) {
   document.getElementById('wb-list-view')?.classList.add('hidden');
@@ -12597,7 +12597,7 @@ function showWaterBillForm(invoice = null) {
 
   if (invoice) {
     document.getElementById('wb-form-unit').value = invoice.unit_label || '';
-    document.getElementById('wb-tenant-display').textContent = invoice.tenant_name || 'â€”';
+    document.getElementById('wb-tenant-display').textContent = invoice.tenant_name || '—';
     document.getElementById('wb-billing-month').value = invoice.billing_month || '';
     document.getElementById('wb-prev-reading').value = invoice.previous_reading || '';
     document.getElementById('wb-curr-reading').value = invoice.current_reading || '';
@@ -12628,7 +12628,7 @@ function showWaterBillForm(invoice = null) {
     document.getElementById('wb-notes').value = '';
     document.getElementById('wb-payment-month').value = '';
     document.getElementById('wb-due-date-display').value = '';
-    document.getElementById('wb-payment-terms').textContent = 'â€”';
+    document.getElementById('wb-payment-terms').textContent = '—';
     document.getElementById('wb-units-display').textContent = '0';
     document.getElementById('wb-current-charges-display').textContent = 'KES 0';
     document.getElementById('wb-outstanding-display').textContent = 'KES 0';
@@ -12637,7 +12637,7 @@ function showWaterBillForm(invoice = null) {
   document.getElementById('wb-form-result').textContent = '';
 }
 
-// Property change on form â†’ load rate
+// Property change on form → load rate
 document.getElementById('wb-form-house')?.addEventListener('change', async function() {
   const housePaybill = this.value;
   waterBillCurrentTenant = null;
@@ -12652,7 +12652,7 @@ document.getElementById('wb-form-house')?.addEventListener('change', async funct
   } catch (err) { /* ignore */ }
 });
 
-// Unit number change â†’ find tenant
+// Unit number change → find tenant
 document.getElementById('wb-form-unit')?.addEventListener('blur', async function() {
   const unitLabel = this.value.trim();
   const housePaybill = document.getElementById('wb-form-house')?.value;
@@ -12701,7 +12701,7 @@ document.getElementById('wb-form-unit')?.addEventListener('blur', async function
   }
 });
 
-// Billing month change â†’ calculate payment month and due date
+// Billing month change → calculate payment month and due date
 document.getElementById('wb-billing-month')?.addEventListener('change', updateWaterBillArrears);
 
 function updateWaterBillArrears() {
@@ -12709,7 +12709,7 @@ function updateWaterBillArrears() {
   if (!billingMonth) {
     document.getElementById('wb-payment-month').value = '';
     document.getElementById('wb-due-date-display').value = '';
-    document.getElementById('wb-payment-terms').textContent = 'â€”';
+    document.getElementById('wb-payment-terms').textContent = '—';
     return;
   }
   // Payment month = next month
@@ -12731,7 +12731,7 @@ function updateWaterBillArrears() {
   document.getElementById('wb-payment-terms').textContent = `Water bill for ${billingLabel}, issued in ${issueMonthLabel}, is due on or before ${dueDateLabel}. Please ensure payment is made using the payment details provided below.`;
 }
 
-// Reading/rate changes â†’ recalculate
+// Reading/rate changes → recalculate
 ['wb-prev-reading', 'wb-curr-reading', 'wb-rate', 'wb-rent-amount', 'wb-garbage-fee',
  'wb-rent-arrears', 'wb-water-arrears', 'wb-garbage-arrears', 'wb-other-arrears'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', updateWaterBillCalc);
@@ -12759,7 +12759,7 @@ function updateWaterBillCalc() {
   document.getElementById('wb-current-charges-display').textContent = fmt(totalCurrentCharges);
   document.getElementById('wb-outstanding-display').textContent = fmt(totalOutstanding);
   document.getElementById('wb-grand-total-display').textContent = fmt(grandTotal);
-  // Live anomaly screen (Phase 3) â€” same rules as the server.
+  // Live anomaly screen (Phase 3) — same rules as the server.
   try { renderWaterAnomalyWarn(); } catch (_) {}
 }
 
@@ -12797,10 +12797,10 @@ async function renderWaterAnomalyWarn() {
   el.classList.remove('hidden');
   if (a.level === 'reject') {
     el.style.cssText = 'background:#450a0a;border:1px solid #ef4444;color:#fecaca';
-    el.textContent = 'â›” ' + a.message;
+    el.textContent = '⛔ ' + a.message;
   } else {
     el.style.cssText = 'background:#451a03;border:1px solid #f59e0b;color:#fde68a';
-    el.textContent = 'âš ï¸ ' + a.message;
+    el.textContent = '⚠️ ' + a.message;
   }
 }
 
@@ -12911,7 +12911,7 @@ function showWaterBillReview(body, tenant) {
     <div class="grid grid-cols-2 gap-3">
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Rent:</span> <span class="text-white font-semibold">${fmt(rentAmount)}</span></div>
       <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Garbage Fee:</span> <span class="text-white font-semibold">${fmt(garbageFee)}</span></div>
-      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Water:</span> <span class="text-cyan-400 font-mono font-bold">${fmt(waterBill)} (${units} units Ã— KES ${Number(body.rate_per_unit).toFixed(2)})</span></div>
+      <div class="bg-slate-800/50 rounded p-2"><span class="text-slate-400">Water:</span> <span class="text-cyan-400 font-mono font-bold">${fmt(waterBill)} (${units} units × KES ${Number(body.rate_per_unit).toFixed(2)})</span></div>
       <div class="bg-cyan-900/30 border border-cyan-600 rounded p-2"><span class="text-cyan-300">Total Current:</span> <span class="text-cyan-400 font-bold">${fmt(totalCurrentCharges)}</span></div>
     </div>
 
@@ -12949,11 +12949,11 @@ document.getElementById('btn-confirm-wb-issue')?.addEventListener('click', async
     const history = await cachedWaterHistoryUnits();
     const anomaly = currentWaterAnomaly(history);
     if (anomaly.level === 'reject') {
-      resultEl.textContent = 'â›” ' + anomaly.message;
+      resultEl.textContent = '⛔ ' + anomaly.message;
       resultEl.className = 'text-sm font-mono text-rose-400 text-right mt-2';
       return;
     }
-    if (anomaly.level === 'warn' && !confirm(`âš ï¸ Unusual reading\n\n${anomaly.message}\n\nSave anyway?`)) {
+    if (anomaly.level === 'warn' && !confirm(`⚠️ Unusual reading\n\n${anomaly.message}\n\nSave anyway?`)) {
       return;
     }
     body.anomaly_flag = anomaly.level === 'warn' ? anomaly.code : null;
@@ -12978,7 +12978,7 @@ document.getElementById('btn-confirm-wb-issue')?.addEventListener('click', async
         created_at: new Date().toISOString(),
       });
       document.getElementById('wb-review-modal').style.display = 'none';
-      resultEl.textContent = 'ðŸŸ  Reading saved offline â€” PENDING SYNC. Will upload when internet returns.';
+      resultEl.textContent = '🟠 Reading saved offline — PENDING SYNC. Will upload when internet returns.';
       resultEl.className = 'text-sm font-mono text-amber-400 text-right mt-2';
       showToast('Water reading saved offline (PENDING SYNC)');
       setTimeout(() => { cancelWaterBillForm(); try { loadWaterBillInvoices(); } catch (_) {} }, 1200);
@@ -13054,7 +13054,7 @@ async function viewWaterInvoice(id) {
     const totalOutstanding = rentArrears + waterArrears + garbageArrears + otherArrears;
     const grandTotal = totalCurrentCharges + totalOutstanding;
 
-    document.getElementById('wb-detail-title').textContent = `Monthly Rent & Utility Invoice â€” ${inv.wtr_number}`;
+    document.getElementById('wb-detail-title').textContent = `Monthly Rent & Utility Invoice — ${inv.wtr_number}`;
     document.getElementById('wb-detail-content').innerHTML = `
       <div class="grid grid-cols-2 gap-3">
         <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Invoice No:</span><br><span class="text-black font-mono font-semibold">${escapeHtml(inv.wtr_number)}</span></div>
@@ -13071,7 +13071,7 @@ async function viewWaterInvoice(id) {
       <div class="grid grid-cols-2 gap-3">
         <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Rent:</span><br><span class="text-black font-semibold">${fmt(rentAmount)}</span></div>
         <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Garbage Fee:</span><br><span class="text-black font-semibold">${fmt(garbageFee)}</span></div>
-        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Water:</span><br><span class="text-blue-700 font-mono font-bold">${fmt(waterBill)} (${units} units Ã— KES ${rate})</span></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><span class="text-gray-500 text-xs">Water:</span><br><span class="text-blue-700 font-mono font-bold">${fmt(waterBill)} (${units} units × KES ${rate})</span></div>
         <div class="bg-blue-50 border-2 border-blue-600 rounded p-2"><span class="text-blue-700 text-xs font-bold">Total Current:</span><br><span class="text-blue-800 font-bold text-lg">${fmt(totalCurrentCharges)}</span></div>
       </div>
 
