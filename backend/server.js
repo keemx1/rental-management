@@ -95,6 +95,8 @@ app.use('/api/water-invoices', require('./routes/waterInvoices'));
 app.use('/api/sync', require('./routes/sync'));
 app.use('/api/inspections', require('./routes/inspections'));
 app.use('/api/preexit', require('./routes/preexitInspection'));
+app.use('/api/landlords', require('./routes/landlords'));
+app.use('/api/search', require('./routes/search'));
 app.use('/api/commissions', require('./routes/commissions'));
 
 app.get('/api/health', healthDetailedAuth, (req, res) => {

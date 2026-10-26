@@ -1963,6 +1963,138 @@ async function generateLetterPdfFile({ docNumber, subject, recipientBlock, bodyH
   return { file_path: pdfPath, filename };
 }
 
+// ─── Landlord commission invoice + per-property statement ───────────────────
+function buildCommissionInvoiceHtml(invoice, landlord, house) {
+  const monthLabel = (() => {
+    const [y, m] = String(invoice.billing_month || '').split('-').map(Number);
+    if (!y || !m) return invoice.billing_month || '';
+    return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  })();
+  const fmtK = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const payableClass = Number(invoice.total_payable) > 0 ? 'warn' : 'good';
+  return renderTemplate('commission_invoice.html', {
+    invoice_number: invoice.invoice_number,
+    invoice_date: new Date(invoice.created_at).toISOString().slice(0, 10),
+    landlord_name: landlord?.name || '',
+    landlord_phone: landlord?.phone || '—',
+    property_name: house?.house_name || invoice.house_paybill_number,
+    house_paybill: invoice.house_paybill_number,
+    billing_month_label: monthLabel,
+    rent_collected: fmtK(invoice.rent_collected),
+    commission_rate: Number(invoice.commission_rate || 0).toFixed(2),
+    commission_amount: fmtK(invoice.commission_amount),
+    previous_balance: fmtK(invoice.previous_balance),
+    payments_applied: fmtK(invoice.payments_applied),
+    current_amount_payable: fmtK(invoice.total_payable),
+    total_outstanding_balance: fmtK(invoice.total_payable),
+    payable_class: payableClass,
+    payment_instructions: `Kindly settle this commission via M-PESA Paybill 4086873 (Gutenberg Elite), Account Number: ${landlord?.name || 'LANDLORD'} — quote invoice ${invoice.invoice_number}. Bank transfers are also accepted; contact management for details.`,
+    GEHM_STAMP_LINE: '{{GEHM_STAMP_LINE}}',
+    date: new Date(invoice.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
+  });
+}
+
+async function generateAndStoreCommissionInvoice(invoiceId, actor) {
+  const invoice = await require('../storage/store').getCommissionInvoiceById
+    ? await require('../storage/store').getCommissionInvoiceById(invoiceId)
+    : (await require('../config/database').query(`SELECT * FROM commission_invoices WHERE id = $1`, [invoiceId])).rows[0];
+  if (!invoice) return null;
+  const db = require('../config/database');
+  const landlord = (await db.query(`SELECT * FROM landlords WHERE id = $1`, [invoice.landlord_id])).rows[0] || null;
+  const house = (await db.query(`SELECT * FROM houses WHERE paybill_number = $1`, [invoice.house_paybill_number])).rows[0] || null;
+  const html = buildCommissionInvoiceHtml(invoice, landlord, house);
+  const safeHouse = String(invoice.house_paybill_number || '').replace(/[^A-Za-z0-9_-]+/g, '');
+  const filename = `COMMISSION-INVOICE-${invoice.invoice_number}-${safeHouse}.pdf`;
+  ensureDir();
+  const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+  const doc = await store.createDocument({
+    doc_type: 'commission_invoice',
+    doc_number: invoice.invoice_number,
+    title: `Landlord Commission Invoice ${invoice.invoice_number} — ${landlord?.name || ''} (${house?.house_name || invoice.house_paybill_number})`,
+    filename,
+    file_path: pdfPath,
+    house_paybill_number: invoice.house_paybill_number,
+    property_name: house?.house_name || null,
+    amount: Number(invoice.total_payable || 0),
+    doc_date: new Date(invoice.created_at).toISOString().slice(0, 10),
+    reuse_invoice_doc: true,
+  });
+  if (doc && doc.id) {
+    await db.query(`UPDATE commission_invoices SET document_id = $1, updated_at = NOW() WHERE id = $2`, [doc.id, invoice.id]);
+    invoice.document_id = doc.id;
+  }
+  return doc;
+}
+
+function buildCommissionStatementHtml(ledger, asOfDate) {
+  const fmtK = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d) => {
+    if (!d) return '—';
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return String(d).slice(0, 10);
+    return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+  const rows = (ledger.events || []).map((e) => {
+    if (e.type === 'invoice') {
+      const monthLabel = e.billing_month || '';
+      return `<tr>
+        <td>${fmtDate(e.date)}</td>
+        <td class="font-mono">${escDocText(e.invoice_number)}<br><span class="muted">${escDocText(monthLabel)}</span></td>
+        <td class="num">${fmtK(e.commission)}</td>
+        <td class="num">—</td>
+        <td class="ref">previous balance ${fmtK(e.previous_balance)} → payable ${fmtK(e.total_payable)}</td>
+        <td class="num bal">${fmtK(e.balance)}</td>
+      </tr>`;
+    }
+    return `<tr>
+      <td>${fmtDate(e.date)}</td>
+      <td class="muted">Payment received</td>
+      <td class="num">—</td>
+      <td class="num">${fmtK(e.amount)}</td>
+      <td class="ref">${escDocText([e.method, e.reference].filter(Boolean).join(' · '))}</td>
+      <td class="num bal">${fmtK(e.balance)}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="6" class="empty-note">No commission activity recorded for this property yet.</td></tr>`;
+
+  return renderTemplate('commission_statement.html', {
+    landlord_name: ledger.landlord?.name || 'Unassigned',
+    property_name: ledger.house?.house_name || ledger.house?.paybill_number || '',
+    house_paybill: ledger.house?.paybill_number || '',
+    rate_percent: Number(ledger.rate_percent || 0).toFixed(2),
+    as_of_date: asOfDate,
+    rows_html: rows,
+    total_commission: fmtK(ledger.summary.total_commission),
+    total_paid: fmtK(ledger.summary.total_paid),
+    outstanding: fmtK(ledger.summary.outstanding),
+    date: asOfDate,
+  });
+}
+
+async function generateAndStoreCommissionStatement(housePaybill) {
+  const ledgerMod = require('./landlordCommission');
+  const ledger = await ledgerMod.getLedger(housePaybill);
+  if (!ledger) return null;
+  const asOf = new Date().toISOString().slice(0, 10);
+  const html = buildCommissionStatementHtml(ledger, asOf);
+  const safeHouse = String(housePaybill || '').replace(/[^A-Za-z0-9_-]+/g, '');
+  const filename = `COMMISSION-STATEMENT-${safeHouse}-${asOf}.pdf`;
+  ensureDir();
+  const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+  const doc = await store.createDocument({
+    doc_type: 'commission_statement',
+    doc_number: `COMSTMT-${housePaybill}`,
+    title: `Commission Statement — ${ledger.house?.house_name || housePaybill}`,
+    filename,
+    file_path: pdfPath,
+    house_paybill_number: housePaybill,
+    property_name: ledger.house?.house_name || null,
+    amount: ledger.summary.outstanding,
+    doc_date: asOf,
+    reuse_invoice_doc: true,
+  });
+  return doc;
+}
+
 module.exports = {
   DOCUMENTS_DIR,
   renderTemplate,
@@ -2003,6 +2135,10 @@ module.exports = {
   generateAndStoreEmployeeRentInvoice,
   buildWaterInvoiceHtml,
   generateAndStoreWaterInvoice,
+  buildCommissionInvoiceHtml,
+  generateAndStoreCommissionInvoice,
+  buildCommissionStatementHtml,
+  generateAndStoreCommissionStatement,
   buildWaterBillReportHtml,
   generateWaterBillReportPdf,
   buildLetterHtml,

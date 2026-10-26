@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v74';
+const GEHM_VERSION = 'v75';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -602,6 +602,7 @@ function showView(name) {
   }
   if (name === 'archive') loadArchive();
   if (name === 'preexit-inspection') preexitResetView();
+  if (name === 'landlords') loadLandlords();
   if (name === 'pending-overpayments') loadPendingOverpayments();
   if (name === 'deposit-refunds') loadDepositRefunds();
   if (name === 'future-tenancies') loadFutureTenancies();
@@ -3883,6 +3884,501 @@ document.getElementById('pei-items-tbody')?.addEventListener('input', (e) => {
 document.getElementById('pei-items-tbody')?.addEventListener('click', (e) => {
   const del = e.target.closest('[data-pei-del]');
   if (del) peiDeleteItem(Number(del.dataset.peiDel));
+});
+
+// ─── Universal Global Search ────────────────────────────────────────────────
+// One search bar on the Main Dashboard covering the ENTIRE system. Every
+// result is a DIRECT deep link to the exact record.
+let _gsItems = [];
+let _gsTimer = null;
+
+function gsPanel(show) {
+  document.getElementById('global-search-results')?.classList.toggle('hidden', !show);
+}
+
+function renderGlobalSearchResults(data) {
+  const box = document.getElementById('global-search-results');
+  if (!box) return;
+  _gsItems = [];
+  if (!data || !data.groups || !data.groups.length) {
+    box.innerHTML = '<div class="p-3 text-slate-500 text-sm font-mono">No matches found.</div>';
+    gsPanel(true);
+    return;
+  }
+  box.innerHTML = data.groups.map((g) => `
+    <div class="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-cyan-400 font-bold">${escapeHtml(g.title)}</div>
+    ${g.items.map((it) => {
+      _gsItems.push(it);
+      return `<button type="button" class="gs-item block w-full text-left px-3 py-2 hover:bg-slate-800 border-t border-slate-800" data-gs-index="${_gsItems.length - 1}">
+        <span class="text-sm text-white">${escapeHtml(it.label)}</span>
+        <span class="block text-xs text-slate-400 font-mono">${escapeHtml(it.sublabel || '')}</span>
+      </button>`;
+    }).join('')}
+  `).join('');
+  gsPanel(true);
+}
+
+async function runGlobalSearch() {
+  const q = (document.getElementById('global-search')?.value || '').trim();
+  if (q.length < 2) { gsPanel(false); return; }
+  try {
+    const data = await api.globalSearch(q);
+    renderGlobalSearchResults(data);
+  } catch (err) {
+    const box = document.getElementById('global-search-results');
+    if (box) box.innerHTML = `<div class="p-3 text-rose-400 text-sm font-mono">${escapeHtml(err.message)}</div>`;
+    gsPanel(true);
+  }
+}
+
+async function landlordIdForHouse(paybill) {
+  try {
+    const { landlords } = await api.listLandlords();
+    for (const l of landlords || []) {
+      if ((l.properties || []).some((p) => p.house_paybill_number === paybill)) return l.id;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function handleSearchResultGo(item) {
+  gsPanel(false);
+  const input = document.getElementById('global-search');
+  if (input) input.value = item.label;
+  try {
+    switch (item.kind) {
+      case 'tenant':
+        activeTenantCode = item.id;
+        showView('tenant-dashboard');
+        break;
+      case 'former_tenant':
+        showView('archive');
+        loadArchive();
+        openTenancyHistory(item.id);
+        break;
+      case 'house':
+        openHouseDashboard(item.id);
+        break;
+      case 'landlord':
+        showView('landlords');
+        await openLandlordProfile(item.id);
+        break;
+      case 'water_invoice':
+        showView('invoices');
+        showInvoiceType('water-bill');
+        viewWaterInvoice(item.id);
+        break;
+      case 'exit_invoice':
+        openExitInvoiceModal(item.tenant_code || activeTenantCode, item.id);
+        break;
+      case 'preexit':
+        showView('preexit-inspection');
+        await peiOpen(item.id);
+        break;
+      case 'payment':
+        if (item.receipt_document_id) {
+          const res = await api.document(item.receipt_document_id);
+          await openDocumentViewModal(res.document || res);
+        } else if (item.tenant_code) {
+          activeTenantCode = item.tenant_code;
+          showView('tenant-dashboard');
+          showToast('Payment found — opened the tenant dashboard (no receipt PDF on file).', 'info');
+        }
+        break;
+      case 'document': {
+        const res = await api.document(item.id);
+        await openDocumentViewModal(res.document || res);
+        break;
+      }
+      case 'commission_invoice':
+      case 'commission_payment': {
+        showView('landlords');
+        const llId = await landlordIdForHouse(item.house_paybill);
+        if (llId) await openLandlordProfile(llId);
+        if (item.kind === 'commission_payment') await openLandlordLedger(item.house_paybill);
+        break;
+      }
+      case 'deposit_refund':
+        showView('deposit-refunds');
+        loadDepositRefunds();
+        break;
+      case 'work_order':
+      case 'management_expense_invoice':
+        showView('work-orders');
+        loadWorkOrders();
+        break;
+      case 'penalty':
+      case 'maintenance_charge':
+      default:
+        if (item.tenant_code) {
+          activeTenantCode = item.tenant_code;
+          showView('tenant-dashboard');
+        }
+        break;
+    }
+  } catch (err) {
+    console.error('Search navigation failed:', err);
+  }
+}
+
+document.getElementById('global-search')?.addEventListener('input', () => {
+  clearTimeout(_gsTimer);
+  _gsTimer = setTimeout(runGlobalSearch, 280);
+});
+document.getElementById('global-search')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); clearTimeout(_gsTimer); runGlobalSearch(); }
+  if (e.key === 'Escape') gsPanel(false);
+});
+document.getElementById('global-search-results')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-gs-index]');
+  if (!btn) return;
+  const item = _gsItems[Number(btn.dataset.gsIndex)];
+  if (item) handleSearchResultGo(item);
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#global-search-panel')) gsPanel(false);
+});
+
+// ─── Landlord Commission Management ─────────────────────────────────────────
+let _llState = { landlordId: null, overview: null, month: null, invoiceCtx: null, paymentCtx: null, ledgerHouse: null, lastInvoiceDoc: null };
+
+const llFmt = (v) => `KES ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+async function loadLandlords() {
+  const monthEl = document.getElementById('ll-month');
+  if (monthEl && !monthEl.value) monthEl.value = new Date().toISOString().slice(0, 7);
+  const tbody = document.getElementById('ll-list-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5 text-slate-500">Loading…</td></tr>';
+  try {
+    const month = monthEl?.value || undefined;
+    const { landlords } = await api.listLandlords(month);
+    if (!landlords.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5 text-slate-500">No landlords yet — create one, then assign properties.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = landlords.map((l) => `
+      <tr class="border-b border-slate-800 hover:bg-slate-800/30">
+        <td class="font-semibold">${escapeHtml(l.name)}</td>
+        <td class="font-mono text-xs">${escapeHtml(l.phone || '—')}</td>
+        <td>${(l.properties || []).length}</td>
+        <td class="font-mono font-bold ${Number(l.total_outstanding) > 0 ? 'text-amber-400' : 'text-emerald-400'}">${llFmt(l.total_outstanding)}</td>
+        <td class="text-right"><button type="button" class="action-btn !py-1 !px-2 text-xs" data-ll-open="${l.id}">View</button></td>
+      </tr>`).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center py-5 text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+document.getElementById('ll-list-tbody')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-ll-open]');
+  if (btn) openLandlordProfile(Number(btn.dataset.llOpen));
+});
+
+async function openLandlordProfile(id, monthOverride) {
+  _llState.landlordId = id;
+  const monthEl = document.getElementById('ll-month');
+  const month = monthOverride || monthEl?.value || new Date().toISOString().slice(0, 7);
+  if (monthEl) monthEl.value = month;
+  _llState.month = month;
+  try {
+    const ov = await api.getLandlord(id, month);
+    _llState.overview = ov;
+    document.getElementById('ll-profile')?.classList.remove('hidden');
+    document.getElementById('btn-ll-assign')?.classList.remove('hidden');
+    const sub = document.getElementById('ll-sub');
+    if (sub) sub.textContent = `${ov.landlord.name} · ${ov.landlord.phone || 'no phone'} · ${ov.properties.length} properties · figures for ${month}`;
+    const tbody = document.getElementById('ll-props-tbody');
+    if (tbody) {
+      if (!ov.properties.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-5 text-slate-500">No properties assigned — use Assign Property.</td></tr>';
+      } else {
+        tbody.innerHTML = ov.properties.map((p) => `
+          <tr class="border-b border-slate-800 hover:bg-slate-800/30">
+            <td><div class="font-semibold">${escapeHtml(p.house_name || '')}</div><div class="text-xs font-mono text-slate-500">${escapeHtml(p.house_paybill_number)}</div></td>
+            <td><button type="button" class="text-cyan-400 hover:text-cyan-300 underline" data-ll-rate="${escapeHtml(p.house_paybill_number)}" title="Set commission rate">${Number(p.rate_percent).toFixed(2)}%</button></td>
+            <td class="font-mono">${llFmt(p.rent_collected)}</td>
+            <td class="font-mono">${llFmt(p.commission_this_month)}</td>
+            <td class="font-mono">${llFmt(p.total_commission)}</td>
+            <td class="font-mono text-emerald-400">${llFmt(p.total_paid)}</td>
+            <td class="font-mono font-bold ${Number(p.outstanding) > 0 ? 'text-amber-400' : 'text-slate-400'}">${llFmt(p.outstanding)}</td>
+            <td class="text-right whitespace-nowrap text-xs">
+              <button type="button" class="text-cyan-400 hover:text-cyan-300 px-1" data-ll-invoice="${escapeHtml(p.house_paybill_number)}">Invoice</button>
+              <button type="button" class="text-emerald-400 hover:text-emerald-300 px-1" data-ll-payment="${escapeHtml(p.house_paybill_number)}">Payment</button>
+              <button type="button" class="text-blue-400 hover:text-blue-300 px-1" data-ll-ledger="${escapeHtml(p.house_paybill_number)}">Ledger</button>
+              <button type="button" class="text-slate-400 hover:text-slate-300 px-1" data-ll-statement="${escapeHtml(p.house_paybill_number)}">Statement</button>
+            </td>
+          </tr>`).join('');
+      }
+    }
+    const totalEl = document.getElementById('ll-total-outstanding');
+    if (totalEl) totalEl.textContent = llFmt(ov.total_outstanding);
+  } catch (err) {
+    showToast('Failed to load landlord: ' + err.message, 'error');
+  }
+}
+
+document.getElementById('ll-props-tbody')?.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-ll-rate],[data-ll-invoice],[data-ll-payment],[data-ll-ledger],[data-ll-statement]');
+  if (!t || !_llState.landlordId) return;
+  const paybill = t.dataset.llRate || t.dataset.llInvoice || t.dataset.llPayment || t.dataset.llLedger || t.dataset.llStatement;
+  if (t.dataset.llRate != null) {
+    const cur = _llState.overview?.properties?.find((p) => p.house_paybill_number === paybill);
+    const val = prompt(`Commission rate % for ${paybill}:`, cur ? Number(cur.rate_percent) : 0);
+    if (val == null || val === '') return;
+    const rate = Number(val);
+    if (isNaN(rate) || rate < 0) { showToast('Invalid rate', 'error'); return; }
+    try {
+      await api.setCommissionRate(paybill, rate);
+      await openLandlordProfile(_llState.landlordId, _llState.month);
+      showToast(`Rate for ${paybill} set to ${rate}%`, 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+    return;
+  }
+  if (t.dataset.llInvoice != null) openCommissionInvoiceModal(paybill);
+  if (t.dataset.llPayment != null) openCommissionPaymentModal(paybill);
+  if (t.dataset.llLedger != null) openLandlordLedger(paybill);
+  if (t.dataset.llStatement != null) downloadCommissionStatement(paybill);
+});
+
+async function openLandlordLedger(paybill) {
+  if (!_llState.landlordId) return;
+  try {
+    const ledger = await api.landlordLedger(_llState.landlordId, paybill);
+    _llState.ledgerHouse = paybill;
+    const modal = document.getElementById('ll-ledger-modal');
+    modal?.classList.remove('hidden');
+    const sub = document.getElementById('ll-ledger-sub');
+    if (sub) sub.textContent = `${ledger.landlord?.name || ''} · ${ledger.house?.house_name || paybill} (${paybill}) · rate ${Number(ledger.rate_percent).toFixed(2)}%`;
+    const tbody = document.getElementById('ll-ledger-tbody');
+    if (tbody) {
+      tbody.innerHTML = (ledger.events || []).map((e) => e.type === 'invoice' ? `
+        <tr class="border-b border-slate-800">
+          <td class="font-mono text-xs">${new Date(e.date).toLocaleDateString('en-GB')}</td>
+          <td class="font-mono text-xs">${escapeHtml(e.invoice_number)}<div class="text-[10px] text-slate-500">${escapeHtml(e.billing_month || '')}</div></td>
+          <td class="font-mono text-cyan-300">${llFmt(e.commission)}</td>
+          <td class="text-slate-600">—</td>
+          <td class="text-xs text-slate-400">prev ${llFmt(e.previous_balance)} → payable ${llFmt(e.total_payable)}</td>
+          <td class="font-mono font-bold">${llFmt(e.balance)}</td>
+        </tr>` : `
+        <tr class="border-b border-slate-800">
+          <td class="font-mono text-xs">${new Date(e.date).toLocaleDateString('en-GB')}</td>
+          <td class="text-slate-400 text-xs">Payment received</td>
+          <td class="text-slate-600">—</td>
+          <td class="font-mono text-emerald-300">${llFmt(e.amount)}</td>
+          <td class="text-xs text-slate-400">${escapeHtml([e.method, e.reference].filter(Boolean).join(' · '))}</td>
+          <td class="font-mono font-bold">${llFmt(e.balance)}</td>
+        </tr>`).join('') || '<tr><td colspan="6" class="text-center py-4 text-slate-500">No activity yet.</td></tr>';
+    }
+    const sum = document.getElementById('ll-ledger-summary');
+    if (sum) sum.textContent = `Commission ${llFmt(ledger.summary.total_commission)} · Paid ${llFmt(ledger.summary.total_paid)} · Outstanding ${llFmt(ledger.summary.outstanding)}`;
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function downloadCommissionStatement(paybill) {
+  if (!_llState.landlordId) return;
+  try {
+    showToast('Generating statement PDF…', 'info');
+    const res = await api.commissionStatement(_llState.landlordId, paybill);
+    if (res.document) await openDocumentViewModal(res.document);
+    else showToast('Statement built but no document returned', 'error');
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+function openCommissionInvoiceModal(paybill) {
+  const prop = _llState.overview?.properties?.find((p) => p.house_paybill_number === paybill);
+  _llState.invoiceCtx = paybill;
+  _llState.lastInvoiceDoc = null;
+  const modal = document.getElementById('ll-invoice-modal');
+  modal?.classList.remove('hidden');
+  const sub = document.getElementById('ll-invoice-sub');
+  if (sub) sub.textContent = `${_llState.overview?.landlord?.name || ''} · ${prop?.house_name || paybill} (${paybill}) · rate ${Number(prop?.rate_percent || 0).toFixed(2)}%`;
+  const monthEl = document.getElementById('ll-invoice-month');
+  if (monthEl) monthEl.value = _llState.month || new Date().toISOString().slice(0, 7);
+  document.getElementById('ll-invoice-preview-box')?.classList.add('hidden');
+  document.getElementById('btn-ll-invoice-pdf')?.classList.add('hidden');
+  const res = document.getElementById('ll-invoice-result');
+  if (res) res.textContent = '';
+}
+
+async function generateLandlordInvoiceNow() {
+  if (!_llState.landlordId || !_llState.invoiceCtx) return;
+  const month = document.getElementById('ll-invoice-month')?.value;
+  if (!month) { showToast('Pick a billing month', 'error'); return; }
+  const resEl = document.getElementById('ll-invoice-result');
+  if (resEl) resEl.textContent = 'Generating…';
+  try {
+    const res = await api.generateCommissionInvoice(_llState.landlordId, _llState.invoiceCtx, month);
+    _llState.lastInvoiceDoc = res.document || null;
+    const inv = res.invoice;
+    const box = document.getElementById('ll-invoice-preview-box');
+    if (box) {
+      box.classList.remove('hidden');
+      box.innerHTML = `
+        <div class="flex justify-between"><span class="text-slate-400">Invoice</span><span class="text-white">${escapeHtml(inv.invoice_number)}</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Rent collected</span><span>${llFmt(inv.rent_collected)}</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Rate</span><span>${Number(inv.commission_rate).toFixed(2)}%</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Commission</span><span class="text-cyan-300">${llFmt(inv.commission_amount)}</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Previous balance</span><span>${llFmt(inv.previous_balance)}</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Payments applied</span><span>− ${llFmt(inv.payments_applied)}</span></div>
+        <div class="flex justify-between font-bold"><span>Amount payable</span><span class="text-amber-300">${llFmt(inv.total_payable)}</span></div>`;
+    }
+    if (resEl) resEl.textContent = res.regenerated ? '✓ Invoice regenerated (same month refreshed).' : '✓ Invoice generated.';
+    const pdfBtn = document.getElementById('btn-ll-invoice-pdf');
+    if (pdfBtn && res.document) pdfBtn.classList.remove('hidden');
+    await openLandlordProfile(_llState.landlordId, _llState.month);
+  } catch (err) {
+    if (resEl) resEl.textContent = err.message;
+  }
+}
+
+function openCommissionPaymentModal(paybill) {
+  const prop = _llState.overview?.properties?.find((p) => p.house_paybill_number === paybill);
+  _llState.paymentCtx = paybill;
+  const modal = document.getElementById('ll-payment-modal');
+  modal?.classList.remove('hidden');
+  const sub = document.getElementById('ll-payment-sub');
+  if (sub) sub.textContent = `${_llState.overview?.landlord?.name || ''} · ${prop?.house_name || paybill} (${paybill}) · outstanding ${llFmt(prop?.outstanding)}`;
+  const dateEl = document.getElementById('ll-pay-date');
+  if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+  const amtEl = document.getElementById('ll-pay-amount');
+  if (amtEl) amtEl.value = '';
+  const res = document.getElementById('ll-payment-result');
+  if (res) res.textContent = '';
+}
+
+async function saveCommissionPayment() {
+  if (!_llState.landlordId || !_llState.paymentCtx) return;
+  const body = {
+    payment_date: document.getElementById('ll-pay-date')?.value,
+    amount: Number(document.getElementById('ll-pay-amount')?.value || 0),
+    method: document.getElementById('ll-pay-method')?.value || 'M-Pesa',
+    reference: document.getElementById('ll-pay-ref')?.value?.trim() || null,
+    notes: document.getElementById('ll-pay-notes')?.value?.trim() || null,
+  };
+  const resEl = document.getElementById('ll-payment-result');
+  try {
+    const res = await api.recordCommissionPayment(_llState.landlordId, _llState.paymentCtx, body);
+    if (resEl) resEl.textContent = `✓ Payment recorded — property outstanding now ${llFmt(res.outstanding)}.`;
+    document.getElementById('ll-pay-amount').value = '';
+    document.getElementById('ll-pay-ref').value = '';
+    await openLandlordProfile(_llState.landlordId, _llState.month);
+  } catch (err) {
+    if (resEl) resEl.textContent = err.message;
+  }
+}
+
+function openLandlordForm(landlord) {
+  const modal = document.getElementById('landlord-modal');
+  modal?.classList.remove('hidden');
+  document.getElementById('landlord-modal-title').textContent = landlord ? 'Edit Landlord' : 'New Landlord';
+  document.getElementById('ll-form-id').value = landlord ? landlord.id : '';
+  document.getElementById('ll-form-name').value = landlord?.name || '';
+  document.getElementById('ll-form-phone').value = landlord?.phone || '';
+  document.getElementById('ll-form-email').value = landlord?.email || '';
+  document.getElementById('ll-form-idno').value = landlord?.id_number || '';
+  document.getElementById('ll-form-notes').value = landlord?.notes || '';
+  const res = document.getElementById('ll-form-result');
+  if (res) res.textContent = '';
+}
+
+async function saveLandlordForm() {
+  const id = document.getElementById('ll-form-id')?.value;
+  const body = {
+    name: document.getElementById('ll-form-name')?.value?.trim(),
+    phone: document.getElementById('ll-form-phone')?.value?.trim() || null,
+    email: document.getElementById('ll-form-email')?.value?.trim() || null,
+    id_number: document.getElementById('ll-form-idno')?.value?.trim() || null,
+    notes: document.getElementById('ll-form-notes')?.value?.trim() || null,
+  };
+  if (!body.name) { document.getElementById('ll-form-result').textContent = 'Name is required'; return; }
+  try {
+    const res = id ? await api.updateLandlord(id, body) : await api.createLandlord(body);
+    document.getElementById('landlord-modal')?.classList.add('hidden');
+    await loadLandlords();
+    if (!id && res.landlord) await openLandlordProfile(res.landlord.id);
+    if (id && Number(id) === _llState.landlordId) await openLandlordProfile(Number(id));
+    showToast('Landlord saved', 'success');
+  } catch (err) {
+    document.getElementById('ll-form-result').textContent = err.message;
+  }
+}
+
+async function openAssignPropertyModal() {
+  const modal = document.getElementById('ll-assign-modal');
+  modal?.classList.remove('hidden');
+  const sel = document.getElementById('ll-assign-house');
+  try {
+    const { houses } = await api.houses();
+    if (sel) {
+      sel.innerHTML = '<option value="">Select property…</option>' + (houses || []).map((h) =>
+        `<option value="${escapeHtml(h.paybill_number)}">${escapeHtml(h.house_name)} (${escapeHtml(h.paybill_number)})</option>`).join('');
+    }
+  } catch (_) {}
+  const res = document.getElementById('ll-assign-result');
+  if (res) res.textContent = '';
+}
+
+async function saveAssignProperty() {
+  if (!_llState.landlordId) return;
+  const paybill = document.getElementById('ll-assign-house')?.value;
+  const resEl = document.getElementById('ll-assign-result');
+  if (!paybill) { if (resEl) resEl.textContent = 'Select a property'; return; }
+  try {
+    await api.assignLandlordHouse(_llState.landlordId, paybill);
+    document.getElementById('ll-assign-modal')?.classList.add('hidden');
+    await loadLandlords();
+    await openLandlordProfile(_llState.landlordId, _llState.month);
+    showToast('Property assigned', 'success');
+  } catch (err) {
+    if (resEl) resEl.textContent = err.message;
+  }
+}
+
+// Pre-Exit placement: one click from the Exit Invoice workflow.
+function openPreExitForUnit(unit) {
+  if (!unit) return;
+  showView('preexit-inspection');
+  setTimeout(() => {
+    const unitEl = document.getElementById('pei-unit');
+    if (unitEl) unitEl.value = unit;
+    peiLoadLookup();
+  }, 60);
+}
+document.getElementById('btn-ei-preexit')?.addEventListener('click', () => {
+  const unit = document.getElementById('ei-tenant-code')?.value || activeTenantCode;
+  document.getElementById('exit-invoice-modal')?.classList.add('hidden');
+  openPreExitForUnit(unit);
+});
+
+document.getElementById('btn-ll-new')?.addEventListener('click', () => openLandlordForm(null));
+document.getElementById('btn-ll-edit')?.addEventListener('click', () => {
+  if (_llState.overview?.landlord) openLandlordForm(_llState.overview.landlord);
+});
+document.getElementById('btn-ll-refresh')?.addEventListener('click', () => {
+  if (_llState.landlordId) openLandlordProfile(_llState.landlordId, document.getElementById('ll-month')?.value);
+  else loadLandlords();
+});
+document.getElementById('ll-month')?.addEventListener('change', () => {
+  if (_llState.landlordId) openLandlordProfile(_llState.landlordId, document.getElementById('ll-month')?.value);
+  loadLandlords();
+});
+document.getElementById('btn-ll-assign')?.addEventListener('click', openAssignPropertyModal);
+document.getElementById('btn-ll-form-cancel')?.addEventListener('click', () => document.getElementById('landlord-modal')?.classList.add('hidden'));
+document.getElementById('btn-ll-form-save')?.addEventListener('click', saveLandlordForm);
+document.getElementById('btn-ll-assign-cancel')?.addEventListener('click', () => document.getElementById('ll-assign-modal')?.classList.add('hidden'));
+document.getElementById('btn-ll-assign-save')?.addEventListener('click', saveAssignProperty);
+document.getElementById('btn-ll-invoice-close')?.addEventListener('click', () => document.getElementById('ll-invoice-modal')?.classList.add('hidden'));
+document.getElementById('btn-ll-invoice-generate')?.addEventListener('click', generateLandlordInvoiceNow);
+document.getElementById('btn-ll-invoice-pdf')?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (_llState.lastInvoiceDoc) await openDocumentViewModal(_llState.lastInvoiceDoc);
+});
+document.getElementById('btn-ll-pay-cancel')?.addEventListener('click', () => document.getElementById('ll-payment-modal')?.classList.add('hidden'));
+document.getElementById('btn-ll-pay-save')?.addEventListener('click', saveCommissionPayment);
+document.getElementById('btn-ll-ledger-close')?.addEventListener('click', () => document.getElementById('ll-ledger-modal')?.classList.add('hidden'));
+document.getElementById('btn-ll-ledger-statement')?.addEventListener('click', () => {
+  if (_llState.ledgerHouse) downloadCommissionStatement(_llState.ledgerHouse);
 });
 
 function togglePaymentFields() {

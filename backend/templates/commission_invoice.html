@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Landlord Commission Invoice</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; font-size: 11px; margin: 0; padding: 26px 30px; background: #fff; }
+    .header { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid #1a4b8c; padding-bottom: 12px; }
+    .header img { height: 58px; width: auto; }
+    .titles h1 { margin: 0; font-size: 19px; letter-spacing: 0.04em; color: #1a4b8c; }
+    .titles .company { font-size: 11px; color: #475569; margin-top: 2px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; margin: 14px 0 4px; }
+    .meta div { font-size: 11px; padding: 3px 0; border-bottom: 1px dotted #cbd5e1; }
+    .lbl { color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
+    .val { color: #0f172a; font-weight: 600; }
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #1a4b8c; margin: 16px 0 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #1a4b8c; color: #fff; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; padding: 7px 9px; text-align: left; }
+    td { padding: 7px 9px; border-bottom: 1px solid #e2e8f0; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .grand td { background: #eef2ff; border: 1px solid #c7d2fe; font-weight: 700; font-size: 13px; color: #1e3a8a; }
+    .grand.warn td { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+    .note { margin-top: 14px; padding: 10px 12px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 10px; color: #334155; border-radius: 4px; }
+    .note strong { display: block; margin-bottom: 3px; font-size: 10px; letter-spacing: 0.04em; color: #0f172a; }
+    .footer { margin-top: 16px; padding-top: 8px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; color: #94a3b8; font-size: 9px; }
+    .footer-bar { height: 3px; background: #e31837; width: 100%; margin: 12px 0 6px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="{{logo_base64}}" alt="Logo" />
+    <div class="titles">
+      <h1>LANDLORD COMMISSION INVOICE</h1>
+      <div class="company">GUTENBERG ELITE HOME &amp; PROPERTY MANAGEMENTS</div>
+    </div>
+  </div>
+
+  <div class="meta">
+    <div><span class="lbl">Invoice No</span><br /><span class="val">{{invoice_number}}</span></div>
+    <div><span class="lbl">Invoice Date</span><br /><span class="val">{{invoice_date}}</span></div>
+    <div><span class="lbl">Landlord</span><br /><span class="val">{{landlord_name}}</span> <span style="color:#64748b">({{landlord_phone}})</span></div>
+    <div><span class="lbl">Property</span><br /><span class="val">{{property_name}}</span> <span style="color:#64748b">({{house_paybill}})</span></div>
+    <div><span class="lbl">Billing Month</span><br /><span class="val">{{billing_month_label}}</span></div>
+  </div>
+
+  <h2>Commission Details</h2>
+  <table>
+    <thead>
+      <tr><th>Description</th><th style="text-align: right;">Amount / Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Rent collected for this property (commissionable)</td><td class="num">KES {{rent_collected}}</td></tr>
+      <tr><td>Commission rate</td><td class="num">{{commission_rate}}%</td></tr>
+      <tr><td>Commission earned this month</td><td class="num">KES {{commission_amount}}</td></tr>
+      <tr><td>Previous outstanding balance</td><td class="num">KES {{previous_balance}}</td></tr>
+      <tr><td>Payments / credits applicable (this month)</td><td class="num">KES {{payments_applied}}</td></tr>
+      <tr class="grand {{payable_class}}"><td>CURRENT AMOUNT PAYABLE</td><td class="num">KES {{current_amount_payable}}</td></tr>
+      <tr><td><strong>Total outstanding balance (carried forward)</strong></td><td class="num"><strong>KES {{total_outstanding_balance}}</strong></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <strong>PAYMENT INSTRUCTIONS</strong>
+    {{payment_instructions}}
+  </div>
+
+  <div style="margin:14px 0;line-height:1.5;">
+    <div>For: GUTENBERG ELITE HOME &amp; PROPERTY MANAGEMENTS</div>
+    <div>{{GEHM_STAMP_LINE}}</div>
+    <div>Date: {{date}}</div>
+  </div>
+
+  <div class="footer-bar"></div>
+  <div class="footer">
+    <span>Landlord Commission Invoice {{invoice_number}}</span>
+    <span>Find a Home. Leave the Management to Us</span>
+  </div>
+</body>
+</html>

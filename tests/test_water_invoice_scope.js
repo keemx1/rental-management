@@ -169,9 +169,9 @@ async function main() {
     check(idx.includes('id="wb-water-arrears"') && idx.includes('id="wb-rate"')
       && idx.includes('id="wb-curr-reading"'),
       '6b. water fields remain (arrears, rate, readings)');
-    check(idx.includes('New Water Bill Invoice') && idx.includes('app.js?v=74'),
-      '6c. water-only titles + v74 assets');
-    const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js?v=74')).text();
+    check(idx.includes('New Water Bill Invoice') && /app\.js\?v=\d+/.test(idx),
+      '6c. water-only titles + versioned assets');
+    const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js')).text();
     check(!appJs.includes('wb-rent-amount') && !appJs.includes('wb-garbage-arrears')
       && !appJs.includes('wb-other-arrears'),
       '6d. frontend no longer references removed fields');

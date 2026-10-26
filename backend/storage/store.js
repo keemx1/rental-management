@@ -2332,7 +2332,9 @@ async function nextCounterNumber(counterTable, prefix) {
 
   let num;
   if (res.rows.length === 0) {
-    await query(`INSERT INTO ${counterTable} (prefix, next_number) VALUES ($1, 2) ON CONFLICT (prefix) DO UPDATE SET next_number = next_number + 1 RETURNING 1 AS num`, [prefix]);
+    // Qualified column refs: unqualified names are ambiguous inside
+    // ON CONFLICT DO UPDATE (old row vs new row).
+    await query(`INSERT INTO ${counterTable} (prefix, next_number) VALUES ($1, 2) ON CONFLICT (prefix) DO UPDATE SET next_number = ${counterTable}.next_number + 1 RETURNING 1 AS num`, [prefix]);
     num = 1;
   } else {
     num = res.rows[0].num;
@@ -8357,6 +8359,226 @@ async function generateWaterInvoiceNumber() {
   return nextCounterNumber('invoice_counters', 'GEHPM-WTR');
 }
 
+async function generateCommissionInvoiceNumber() {
+  return nextCounterNumber('invoice_counters', 'GEHPM-COM');
+}
+
+// ─── Universal Global Search ───────────────────────────────────────────────
+// One query surface across the entire system. Every item carries a `kind`
+// the frontend maps to a DIRECT deep link (exact record, not a module dump).
+async function globalSearch(rawQ, limit = 6) {
+  const q = String(rawQ || '').trim();
+  if (q.length < 2) return { q, groups: [] };
+  const like = `%${q}%`;
+  const groups = [];
+  const add = (key, title, rows) => { if (rows && rows.length) groups.push({ key, title, items: rows }); };
+  const L = Math.min(Number(limit) || 6, 20);
+
+  try {
+    const r = await query(
+      `SELECT tenant_code, name, phone_number, property_name, status FROM tenants
+        WHERE tenant_code ILIKE $1 OR name ILIKE $1 OR phone_number ILIKE $1 OR national_id ILIKE $1
+        ORDER BY name LIMIT $2`, [like, L]);
+    add('tenants', 'Tenants', r.rows.map(t => ({
+      kind: 'tenant', id: t.tenant_code, label: t.name || t.tenant_code,
+      sublabel: `${t.tenant_code} · ${t.property_name || ''} · ${t.status || ''}`.trim(),
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT id, tenant_code, tenant_name, property_name,
+              move_in_date::text AS move_in_date, move_out_date::text AS move_out_date
+         FROM tenancy_archive
+        WHERE tenant_code ILIKE $1 OR tenant_name ILIKE $1
+        ORDER BY archived_at DESC LIMIT $2`, [like, L]);
+    add('former_tenants', 'Former tenants (archive)', r.rows.map(a => ({
+      kind: 'former_tenant', id: a.id, label: a.tenant_name || a.tenant_code,
+      sublabel: `${a.tenant_code} · ${a.property_name || ''} · ${String(a.move_in_date || '?').slice(0, 10)} → ${String(a.move_out_date || 'closed').slice(0, 10)}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT h.paybill_number, h.house_name,
+              l.name AS landlord_name
+         FROM houses h LEFT JOIN landlords l ON l.id = h.landlord_id
+        WHERE h.paybill_number ILIKE $1 OR h.house_name ILIKE $1 OR l.name ILIKE $1
+        ORDER BY h.house_name LIMIT $2`, [like, L]);
+    add('properties', 'Properties / units', r.rows.map(h => ({
+      kind: 'house', id: h.paybill_number, label: h.house_name || h.paybill_number,
+      sublabel: `House ${h.paybill_number}${h.landlord_name ? ` · landlord ${h.landlord_name}` : ''}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT id, name, phone FROM landlords
+        WHERE name ILIKE $1 OR phone ILIKE $1 OR id_number ILIKE $1 OR email ILIKE $1
+        ORDER BY name LIMIT $2`, [like, L]);
+    add('landlords', 'Landlords', r.rows.map(l => ({
+      kind: 'landlord', id: l.id, label: l.name, sublabel: l.phone || '',
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT w.id, w.wtr_number, w.tenant_code, w.tenant_name, w.unit_label, w.billing_month, w.total_amount, w.status
+         FROM water_invoices w
+        WHERE w.wtr_number ILIKE $1 OR w.tenant_name ILIKE $1 OR w.tenant_code ILIKE $1 OR w.unit_label ILIKE $1
+        ORDER BY w.created_at DESC LIMIT $2`, [like, L]);
+    add('water_invoices', 'Water invoices', r.rows.map(w => ({
+      kind: 'water_invoice', id: w.id, label: w.wtr_number,
+      sublabel: `${w.tenant_name || w.tenant_code} · ${w.unit_label || ''} · ${w.billing_month} · KES ${Number(w.total_amount || 0).toLocaleString()} · ${w.status}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT e.id, e.exit_number, e.tenant_code, e.property_name, e.unit_label, e.status, e.final_settlement
+         FROM exit_invoices e
+        WHERE e.exit_number ILIKE $1 OR e.tenant_code ILIKE $1 OR e.property_name ILIKE $1 OR e.unit_label ILIKE $1
+        ORDER BY e.created_at DESC LIMIT $2`, [like, L]);
+    add('exit_invoices', 'Exit invoices', r.rows.map(e => ({
+      kind: 'exit_invoice', id: e.id, tenant_code: e.tenant_code, label: e.exit_number,
+      sublabel: `${e.tenant_code} · ${e.unit_label || ''} · ${e.property_name || ''} · ${e.status}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT i.id, i.tenant_code, i.tenant_name, i.property_name, i.unit_label, i.inspection_date::text AS inspection_date, i.status
+         FROM preexit_inspections i
+        WHERE i.tenant_code ILIKE $1 OR i.tenant_name ILIKE $1 OR i.property_name ILIKE $1 OR CAST(i.id AS text) = $2
+        ORDER BY i.inspection_date DESC LIMIT $3`, [like, q, L]);
+    add('preexit_inspections', 'Pre-Exit Inspection Inventories', r.rows.map(i => ({
+      kind: 'preexit', id: i.id, label: `Pre-Exit Inspection #${i.id} — ${i.tenant_name || i.tenant_code}`,
+      sublabel: `${i.tenant_code} · ${i.unit_label || ''} · inspected ${String(i.inspection_date || '').slice(0, 10)} · ${i.status}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT p.id, p.tenant_code, p.receipt_number, p.mpesa_reference, p.amount, p.payment_date::text AS payment_date,
+              p.payment_type, d.id AS receipt_document_id
+         FROM payments p
+         LEFT JOIN documents d ON d.doc_number = p.receipt_number AND d.doc_type = 'receipt'
+        WHERE (p.receipt_number ILIKE $1 OR p.mpesa_reference ILIKE $1) AND p.status = 'Approved'
+        ORDER BY p.payment_date DESC LIMIT $2`, [like, L]);
+    add('payments', 'Payments / M-Pesa references', r.rows.map(p => ({
+      kind: 'payment', id: p.id, tenant_code: p.tenant_code, receipt_document_id: p.receipt_document_id || null,
+      label: `${p.receipt_number || 'Payment'} — KES ${Number(p.amount || 0).toLocaleString()}`,
+      sublabel: `${p.tenant_code} · ${p.mpesa_reference || 'no ref'} · ${String(p.payment_date || '').slice(0, 10)}${p.payment_type ? ` · ${p.payment_type}` : ''}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT id, invoice_number, tenant_code, description, amount, status, category
+         FROM penalties
+        WHERE invoice_number ILIKE $1 OR description ILIKE $1 OR tenant_code ILIKE $1
+        ORDER BY created_at DESC LIMIT $2`, [like, L]);
+    add('penalties', 'Penalties / charges', r.rows.map(p => ({
+      kind: 'penalty', id: p.id, tenant_code: p.tenant_code, label: p.invoice_number || p.description || 'Charge',
+      sublabel: `${p.tenant_code || ''} · ${p.category || 'penalty'} · KES ${Number(p.amount || 0).toLocaleString()} · ${p.status}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT id, wo_number, property_name, house_paybill_number, unit_codes, status, total_cost
+         FROM work_orders
+        WHERE wo_number ILIKE $1 OR property_name ILIKE $1 OR unit_codes::text ILIKE $1 OR technician_name ILIKE $1
+        ORDER BY created_at DESC LIMIT $2`, [like, L]);
+    add('work_orders', 'Work orders', r.rows.map(w => ({
+      kind: 'work_order', id: w.id, house_paybill: w.house_paybill_number, label: w.wo_number,
+      sublabel: `${w.property_name || ''} · ${String(w.unit_codes || '')} · ${w.status} · KES ${Number(w.total_cost || 0).toLocaleString()}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT id, wo_number, tenant_code, tenant_name, problem, repair_description, amount_charged, recovery_status, receipt_number, transaction_reference
+         FROM maintenance_charges
+        WHERE wo_number ILIKE $1 OR tenant_code ILIKE $1 OR tenant_name ILIKE $1 OR problem ILIKE $1
+           OR receipt_number ILIKE $1 OR transaction_reference ILIKE $1
+        ORDER BY created_at DESC LIMIT $2`, [like, L]);
+    add('maintenance_charges', 'Maintenance records', r.rows.map(m => ({
+      kind: 'maintenance_charge', id: m.id, tenant_code: m.tenant_code, label: `${m.wo_number || 'Charge'}${m.tenant_code ? ` — ${m.tenant_code}` : ''}`,
+      sublabel: `${m.tenant_name || ''} · ${m.problem || m.repair_description || ''} · charged KES ${Number(m.amount_charged || 0).toLocaleString()} · ${m.recovery_status || ''}`.trim(),
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT m.id, m.mnt_number, m.property_name, m.house_paybill_number, m.status, m.grand_total, m.technician_name
+         FROM maintenance_invoices m
+        WHERE m.mnt_number ILIKE $1 OR m.property_name ILIKE $1 OR m.technician_name ILIKE $1
+        ORDER BY m.created_at DESC LIMIT $2`, [like, L]);
+    add('management_expense_invoices', 'Management expense invoices', r.rows.map(m => ({
+      kind: 'management_expense_invoice', id: m.id, house_paybill: m.house_paybill_number, label: m.mnt_number,
+      sublabel: `${m.property_name || ''} · ${m.status} · KES ${Number(m.grand_total || 0).toLocaleString()}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT d.id, d.doc_type, d.doc_number, d.title, d.filename, d.tenant_code, d.created_at::text AS created_at
+         FROM documents d
+        WHERE d.doc_number ILIKE $1 OR d.title ILIKE $1 OR d.filename ILIKE $1
+        ORDER BY d.created_at DESC LIMIT $2`, [like, L]);
+    add('documents', 'Documents, receipts & reports', r.rows.map(d => ({
+      kind: 'document', id: d.id, doc_type: d.doc_type, tenant_code: d.tenant_code || null,
+      label: d.doc_number || d.title || d.filename,
+      sublabel: `${(d.doc_type || 'document').replace(/_/g, ' ')} · ${d.title || d.filename || ''}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT ci.id, ci.invoice_number, ci.house_paybill_number, ci.billing_month, ci.total_payable, ci.status,
+              l.name AS landlord_name, h.house_name
+         FROM commission_invoices ci
+         JOIN landlords l ON l.id = ci.landlord_id
+         LEFT JOIN houses h ON h.paybill_number = ci.house_paybill_number
+        WHERE ci.invoice_number ILIKE $1 OR l.name ILIKE $1 OR h.house_name ILIKE $1 OR ci.house_paybill_number ILIKE $1
+        ORDER BY ci.created_at DESC LIMIT $2`, [like, L]);
+    add('commission_invoices', 'Landlord commission invoices', r.rows.map(ci => ({
+      kind: 'commission_invoice', id: ci.id, landlord_id: null, house_paybill: ci.house_paybill_number, label: ci.invoice_number,
+      sublabel: `${ci.landlord_name} · ${ci.house_name || ci.house_paybill_number} · ${ci.billing_month} · KES ${Number(ci.total_payable || 0).toLocaleString()} · ${ci.status}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT cp.id, cp.house_paybill_number, cp.payment_date::text AS payment_date, cp.amount, cp.method, cp.reference,
+              l.name AS landlord_name, h.house_name
+         FROM commission_payments cp
+         JOIN landlords l ON l.id = cp.landlord_id
+         LEFT JOIN houses h ON h.paybill_number = cp.house_paybill_number
+        WHERE cp.reference ILIKE $1 OR l.name ILIKE $1 OR h.house_name ILIKE $1 OR cp.house_paybill_number ILIKE $1
+        ORDER BY cp.payment_date DESC LIMIT $2`, [like, L]);
+    add('commission_payments', 'Landlord commission payments', r.rows.map(cp => ({
+      kind: 'commission_payment', id: cp.id, house_paybill: cp.house_paybill_number, label: `${cp.reference || 'Payment'} — KES ${Number(cp.amount || 0).toLocaleString()}`,
+      sublabel: `${cp.landlord_name} · ${cp.house_name || cp.house_paybill_number} · ${String(cp.payment_date || '').slice(0, 10)} · ${cp.method}`,
+    })));
+  } catch (_) {}
+
+  try {
+    const r = await query(
+      `SELECT id, tenant_code, refund_status, refundable_amount, amount_refunded, transaction_reference, exit_date::text AS exit_date
+         FROM deposit_refunds
+        WHERE tenant_code ILIKE $1 OR transaction_reference ILIKE $1
+        ORDER BY created_at DESC LIMIT $2`, [like, L]);
+    add('deposit_refunds', 'Deposit refunds', r.rows.map(d => ({
+      kind: 'deposit_refund', id: d.id, tenant_code: d.tenant_code, label: `Deposit refund — ${d.tenant_code}`,
+      sublabel: `${String(d.exit_date || '').slice(0, 10)} · refundable KES ${Number(d.refundable_amount || 0).toLocaleString()} · ${d.refund_status}${d.transaction_reference ? ` · ${d.transaction_reference}` : ''}`,
+    })));
+  } catch (_) {}
+
+  return { q, groups };
+}
+
 async function createWaterInvoice(data) {
   if (data.client_txn_id) {
     const existing = await findRecordByClientTxnId('water_invoices', data.client_txn_id);
@@ -8991,6 +9213,8 @@ module.exports = {
 
   // Water invoice
   generateWaterInvoiceNumber,
+  generateCommissionInvoiceNumber,
+  globalSearch,
   createWaterInvoice,
   getWaterInvoice,
   listWaterInvoices,

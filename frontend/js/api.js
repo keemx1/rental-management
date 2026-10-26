@@ -249,6 +249,43 @@ export const api = {
   preexitTransfer(id, itemIds) {
     return request(`/preexit/${id}/transfer`, { method: 'POST', body: JSON.stringify({ item_ids: itemIds }) });
   },
+  globalSearch(q, limit) {
+    return request(`/search?q=${encodeURIComponent(q)}${limit ? `&limit=${limit}` : ''}`);
+  },
+  listLandlords(month) {
+    return request(`/landlords${month ? `?month=${encodeURIComponent(month)}` : ''}`);
+  },
+  createLandlord(body) {
+    return request('/landlords', { method: 'POST', body: JSON.stringify(body) });
+  },
+  getLandlord(id, month) {
+    return request(`/landlords/${id}${month ? `?month=${encodeURIComponent(month)}` : ''}`);
+  },
+  updateLandlord(id, body) {
+    return request(`/landlords/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  assignLandlordHouse(id, housePaybill) {
+    return request(`/landlords/${id}/assign-house`, { method: 'POST', body: JSON.stringify({ house_paybill_number: housePaybill }) });
+  },
+  landlordLedger(id, paybill) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/ledger`);
+  },
+  generateCommissionInvoice(id, paybill, billingMonth) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/commission-invoice`, {
+      method: 'POST', body: JSON.stringify({ billing_month: billingMonth }),
+    });
+  },
+  recordCommissionPayment(id, paybill, body) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/commission-payments`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+  },
+  commissionStatement(id, paybill) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/statement`, { method: 'POST', body: JSON.stringify({}) });
+  },
+  voidCommissionInvoice(invoiceId) {
+    return request(`/landlords/commission-invoices/${invoiceId}/void`, { method: 'POST', body: JSON.stringify({}) });
+  },
   deleteArchive(id) {
     return request(`/archive/${id}`, { method: 'DELETE' });
   },

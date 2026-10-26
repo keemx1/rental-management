@@ -257,6 +257,7 @@
         <a href="#" data-nav="mgmt-expenses-report" class="nav-link block py-3 px-4 rounded">Mgmt Expenses</a>
           <a href="#" data-nav="deposit-refunds" class="nav-link block py-3 px-4 rounded">Deposit Refunds</a>
           <a href="#" data-nav="preexit-inspection" class="nav-link block py-3 px-4 rounded">Pre-Exit Inspection</a>
+          <a href="#" data-nav="landlords" class="nav-link block py-3 px-4 rounded">Landlords</a>
           <a href="#" data-nav="commissions" class="nav-link block py-3 px-4 rounded">Commissions</a>
         <a href="#" data-nav="archive" class="nav-link block py-3 px-4 rounded">Archive</a>
         <a href="#" data-nav="pending-overpayments" class="nav-link block py-3 px-4 rounded">Pending Overpayments</a>
@@ -298,6 +299,17 @@
 
       <!-- DASHBOARD -->
       <section data-view="dashboard" class="hidden space-y-8">
+        <!-- Universal Global Search -->
+        <div class="glass-panel p-4 relative" id="global-search-panel">
+          <div class="flex items-center gap-3">
+            <span class="sys-tag shrink-0">[GLOBAL_SEARCH]</span>
+            <input id="global-search" type="text" autocomplete="off"
+              class="cyber-input flex-1 !py-3 text-base"
+              placeholder="Search ANYTHING — tenant, unit, property, invoice no, M-Pesa ref, landlord, receipt, work order, report…" />
+          </div>
+          <div id="global-search-results"
+            class="hidden absolute left-0 right-0 top-full mt-1 z-40 max-h-[70vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900/95 shadow-2xl"></div>
+        </div>
         <header class="section-head flex items-center justify-between gap-4">
           <div>
             <p class="section-num">01 / DASHBOARD</p>
@@ -4440,6 +4452,64 @@
     </div>
   </section>
 
+  <!-- LANDLORDS & COMMISSIONS LEDGER -->
+  <section data-view="landlords" class="hidden space-y-6">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <span class="sys-tag">[LANDLORD_COMMISSIONS]</span>
+        <h2 class="section-title mt-1">Landlord <span class="accent">Commission Ledger</span></h2>
+        <p class="section-desc">One landlord profile → many properties — each property keeps its own commission account, invoices, payments and balance.</p>
+      </div>
+      <div class="flex gap-2">
+        <button type="button" id="btn-ll-assign" class="qc-btn hidden">Assign Property</button>
+        <button type="button" id="btn-ll-new" class="qc-btn qc-btn-primary">+ New Landlord</button>
+      </div>
+    </div>
+
+    <div class="glass-panel p-4">
+      <h3 class="font-orbitron text-lg text-white mb-3">Landlords</h3>
+      <div class="overflow-x-auto">
+        <table class="cyber-table">
+          <thead><tr><th>Name</th><th>Phone</th><th>Properties</th><th>Total Outstanding</th><th></th></tr></thead>
+          <tbody id="ll-list-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="ll-profile" class="glass-panel p-5 hidden">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div>
+          <span id="ll-badge" class="sys-tag">[LANDLORD]</span>
+          <p id="ll-sub" class="text-xs text-slate-500 font-mono mt-1">—</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <input type="month" id="ll-month" class="cyber-input !py-1 text-sm" />
+          <button type="button" id="btn-ll-edit" class="qc-btn text-xs">Edit</button>
+          <button type="button" id="btn-ll-refresh" class="qc-btn text-xs">Refresh</button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="cyber-table">
+          <thead>
+            <tr>
+              <th>Property</th><th>Rate</th><th>Rent Collected</th><th>Commission (month)</th>
+              <th>Invoiced</th><th>Paid</th><th>Outstanding</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="ll-props-tbody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="6" class="text-right font-semibold">Total outstanding (all properties)</td>
+              <td id="ll-total-outstanding" class="font-semibold">KES 0</td><td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <p class="text-[11px] text-slate-500 mt-2 font-mono">Commission = rate% × rent collected per property. Balances carry forward automatically — never mix properties.</p>
+    </div>
+  </section>
+
   <section data-view="commissions" class="hidden space-y-6">
         <div>
           <span class="sys-tag">[COMMISSIONS]</span>
@@ -4879,10 +4949,105 @@
         <button type="button" id="btn-statement-download" class="qc-btn flex-1">⬇ Download PDF</button>
         <button type="button" id="btn-statement-send" class="qc-btn qc-btn-primary flex-1">📲 Send via WhatsApp</button>
         <button type="button" id="btn-statement-both" class="qc-btn qc-btn-secondary flex-1">Both: Download + Send</button>
-        <button type="button" id="btn-statement-close" class="qc-btn flex-1 mt-1">Close</button>
+            <button type="button" id="btn-statement-close" class="qc-btn flex-1 mt-1">Close</button>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
+
+      <!-- Landlord modal (create / edit) -->
+      <div id="landlord-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+        <div class="glass-panel p-6 w-full max-w-md">
+          <h3 id="landlord-modal-title" class="font-orbitron text-xl text-white mb-4">New Landlord</h3>
+          <input type="hidden" id="ll-form-id" />
+          <div class="space-y-3">
+            <div><label class="form-label">Full name *</label><input id="ll-form-name" class="cyber-input" /></div>
+            <div><label class="form-label">Phone</label><input id="ll-form-phone" class="cyber-input" /></div>
+            <div><label class="form-label">Email</label><input id="ll-form-email" class="cyber-input" /></div>
+            <div><label class="form-label">ID number</label><input id="ll-form-idno" class="cyber-input" /></div>
+            <div><label class="form-label">Notes</label><textarea id="ll-form-notes" rows="2" class="cyber-input"></textarea></div>
+          </div>
+          <p id="ll-form-result" class="text-sm font-mono mt-2"></p>
+          <div class="flex gap-2 mt-4">
+            <button type="button" id="btn-ll-form-cancel" class="qc-btn flex-1">Cancel</button>
+            <button type="button" id="btn-ll-form-save" class="qc-btn qc-btn-primary flex-1">Save Landlord</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Assign property modal -->
+      <div id="ll-assign-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+        <div class="glass-panel p-6 w-full max-w-md">
+          <h3 class="font-orbitron text-xl text-white mb-4">Assign Property to Landlord</h3>
+          <label class="form-label">Property</label>
+          <select id="ll-assign-house" class="cyber-input mb-3"></select>
+          <p id="ll-assign-result" class="text-sm font-mono"></p>
+          <div class="flex gap-2 mt-4">
+            <button type="button" id="btn-ll-assign-cancel" class="qc-btn flex-1">Cancel</button>
+            <button type="button" id="btn-ll-assign-save" class="qc-btn qc-btn-primary flex-1">Assign</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Commission invoice modal -->
+      <div id="ll-invoice-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+        <div class="glass-panel p-6 w-full max-w-lg">
+          <h3 class="font-orbitron text-xl text-white mb-3">Generate Commission Invoice</h3>
+          <p id="ll-invoice-sub" class="text-xs text-slate-400 font-mono mb-3">—</p>
+          <div class="flex items-end gap-3 mb-3">
+            <div><label class="form-label">Billing month</label><input type="month" id="ll-invoice-month" class="cyber-input" /></div>
+          </div>
+          <div id="ll-invoice-preview-box" class="hidden bg-slate-800/50 rounded-lg p-3 text-sm font-mono space-y-1"></div>
+          <p id="ll-invoice-result" class="text-sm font-mono mt-2"></p>
+          <div class="flex flex-wrap gap-2 mt-4">
+            <button type="button" id="btn-ll-invoice-close" class="qc-btn flex-1">Close</button>
+            <a id="ll-invoice-pdf" class="qc-btn flex-1 hidden text-center" href="#" target="_blank" rel="noopener">View PDF</a>
+            <button type="button" id="btn-ll-invoice-generate" class="qc-btn qc-btn-primary flex-1">Generate Invoice</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Record commission payment modal -->
+      <div id="ll-payment-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+        <div class="glass-panel p-6 w-full max-w-md">
+          <h3 class="font-orbitron text-xl text-white mb-3">Record Commission Payment</h3>
+          <p id="ll-payment-sub" class="text-xs text-slate-400 font-mono mb-3">—</p>
+          <div class="space-y-3">
+            <div><label class="form-label">Payment date *</label><input type="date" id="ll-pay-date" class="cyber-input" /></div>
+            <div><label class="form-label">Amount (KES) *</label><input type="number" min="0.01" step="0.01" id="ll-pay-amount" class="cyber-input" /></div>
+            <div><label class="form-label">Payment method</label>
+              <select id="ll-pay-method" class="cyber-input"><option>M-Pesa</option><option>Bank</option><option>Cash</option><option>Other</option></select>
+            </div>
+            <div><label class="form-label">M-Pesa / bank reference</label><input id="ll-pay-ref" class="cyber-input" /></div>
+            <div><label class="form-label">Notes</label><input id="ll-pay-notes" class="cyber-input" /></div>
+          </div>
+          <p id="ll-payment-result" class="text-sm font-mono mt-2"></p>
+          <div class="flex gap-2 mt-4">
+            <button type="button" id="btn-ll-pay-cancel" class="qc-btn flex-1">Cancel</button>
+            <button type="button" id="btn-ll-pay-save" class="qc-btn qc-btn-primary flex-1">Record Payment</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Commission ledger modal -->
+      <div id="ll-ledger-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+        <div class="glass-panel p-6 w-full max-w-3xl max-h-[85vh] overflow-y-auto">
+          <h3 class="font-orbitron text-xl text-white mb-1">Commission Ledger</h3>
+          <p id="ll-ledger-sub" class="text-xs text-slate-400 font-mono mb-3">—</p>
+          <div class="overflow-x-auto">
+            <table class="cyber-table">
+              <thead><tr><th>Date</th><th>Invoice</th><th>Commission</th><th>Payment</th><th>Reference</th><th>Balance</th></tr></thead>
+              <tbody id="ll-ledger-tbody"></tbody>
+            </table>
+          </div>
+          <div class="flex justify-between items-center mt-3 font-mono text-sm">
+            <span id="ll-ledger-summary">—</span>
+            <button type="button" id="btn-ll-ledger-statement" class="qc-btn qc-btn-primary text-xs">Download Statement PDF</button>
+          </div>
+          <div class="flex justify-end mt-3">
+            <button type="button" id="btn-ll-ledger-close" class="qc-btn">Close</button>
+          </div>
+        </div>
+      </div>
 
   <!-- Exit Invoice modal -->
   <div id="exit-invoice-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
@@ -5082,8 +5247,9 @@
       </div>
 
       <div id="ei-actions-draft" class="flex flex-wrap gap-2 mb-2">
+        <button type="button" id="btn-ei-preexit" class="qc-btn text-xs flex-1">Pre-Exit Inventory →</button>
         <button type="button" id="btn-ei-save-draft" class="qc-btn flex-1">💾 Save Draft</button>
-        <button type="button" id="btn-ei-finalize" class="qc-btn qc-btn-primary flex-1">🔒 Finalize Invoice</button>
+        <button type="button" id="btn-ei-finalize" class="qc-btn qc-btn-primary flex-1">📄 Finalize Invoice</button>
         <button type="button" id="btn-ei-cancel" class="qc-btn flex-1">Close</button>
       </div>
       <div id="ei-actions-final" class="hidden flex flex-col gap-2">
@@ -5576,10 +5742,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=74"></script>
+  <script type="module" src="/js/app.js?v=75"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=74').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=75').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

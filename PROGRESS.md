@@ -36,6 +36,8 @@ Run from the repo root (server must be up on port `3003`):
 | Statement period integration | `node tests/test_statement_period.js` | 55 assertions — 7-row period summary (opening/rent/full garbage/charges/due/payments/balance) with month arithmetic + continuity, period-scoped payment & charge histories (no all-time mixing, no duplicate rows), period empty-states, design/letterhead preserved, route validation + PDF, frontend period selector |
 | Broadcast channel (SMS option) | `node tests/test_broadcast_channel.js` | 32 assertions — whatsapp/sms/both dispatch with per-channel tallies and log rows, SMS-only 400 when unconfigured, both+unconfigured degrades to WhatsApp with per-recipient SMS failures, honest per-recipient failure reasons, whatsapp_message_log untouched by SMS legs, house scoping, frontend selector |
 | Water invoice water-only scope | `node tests/test_water_invoice_scope.js` | 27 assertions — totals = water bill + WATER arrears only (rent/garbage/other arrears excluded even when supplied), tenant rent never injected, update recomputes water-only, PDF titled WATER BILL INVOICE with no rent/garbage lines + water-only notes, form fields removed, PDF end-to-end |
+| Universal global search | `node tests/test_global_search.js` | 23 assertions — every entity type (tenants, archive, properties, landlords, water/exit invoices, pre-exit forms, payments+M-Pesa with receipt deep links, penalties, work orders, maintenance, mgmt expense invoices, documents, commission invoices/payments), kinds for direct navigation, route + auth, frontend bar |
+| Landlord commissions | `node tests/test_landlord_commissions.js` | 35 assertions — per-property accounts never mixed (300k@5%=15k vs 200k@4%=8k), invoice PDF + numbers, payments to the correct property only, automatic carry-forward (5k→17k−7k→10k→8k), statement ledger with running balance + PDF, regeneration/void, mismatch + unassigned guards, overview split |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -564,6 +566,52 @@ garbage / non-water arrears) are no longer part of it anywhere.
 - Test suites now assert asset versioning with `/app\.js\?v=\d+/` so a
   future stamp bump cannot break them (statement + broadcast suites).
 
+### 21. Universal Global Search + Landlord Commission Management (v75)
+Three workstreams in one release:
+
+**1. Universal Global Search** — one prominent search bar at the top of the
+Main Dashboard (`GET /api/search?q=` → `store.globalSearch`) covering the
+ENTIRE system: live tenants, former tenants (archive), properties/units,
+landlords, water invoices, exit invoices, pre-exit inspection forms,
+payments by receipt no / M-Pesa ref (with the receipt document id for a
+direct PDF deep link), penalties, work orders, maintenance records,
+management expense invoices (`maintenance_invoices`), documents
+(rent invoices, receipts, reports, statements, letters…), landlord
+commission invoices + payments, deposit refunds. Every result carries a
+`kind`; the frontend dispatcher navigates to the EXACT record (tenant
+dashboard, house dashboard, invoice modal, pre-exit editor, receipt PDF
+viewer, landlord profile/ledger, water-invoice detail…) — never a module
+dump. Two-character minimum, grouped results, 250ms debounce.
+
+**2. Pre-Exit placement** — unchanged nav entry, PLUS a "Pre-Exit
+Inventory →" button inside the Exit Invoice workflow (one click opens the
+inspector preloaded with that unit), and every inspection form is findable
+via Global Search (kind `preexit` opens the editor directly). Editability
+was already complete (v71).
+
+**3. Landlord Commission Management** (`landlords` + `commission_invoices` +
+`commission_payments` + `houses.landlord_id`; rate reuses the existing
+`commission_rates`): ONE landlord profile → MANY properties, each property
+with a fully INDEPENDENT commission account. Commission = property rate% ×
+commissionable rent collected (same receipts/allocation rule as the
+existing monthly commission report). "Generate Commission Invoice" per
+property-month (rent collected, rate, commission, previous outstanding,
+payments applied, current payable, GEHPM details, payment instructions,
+PDF via the document registry; regeneration-safe via a partial unique
+index on active rows). "Record Payment" posts against the property only
+(mismatched-landlord 409). Automatic carry-forward: previous balance =
+ledger truth (Σ issued invoices − Σ payments); no manual opening balances;
+voiding recomputes. "Statement" renders the full per-property ledger
+(Date | Invoice | Commission | Payment | Reference | Balance with running
+balance) + PDF. Landlord overview lists per-property outstanding + a
+convenience combined total. All of it is in Global Search (landlord name,
+property, invoice number, payment reference). Existing workflow untouched
+(payments/allocation/rent/deposits/water/garbage/exit/commission report
+unchanged). Stamps → `?v=75`, SW → `gutenberg-v76-irmanage`.
+- Bug fixed en route: `nextCounterNumber`'s ON CONFLICT branch used an
+  ambiguous `next_number` reference (only surfaced on a brand-new prefix
+  like the first GEHPM-COM invoice) — now table-qualified.
+
 ---
 
 ## Open items / next
@@ -605,3 +653,4 @@ garbage / non-water arrears) are no longer part of it anywhere.
 | 18 | Statement of Account: selectable period + 7-row monthly summary, period-scoped histories, design preserved | v72 |
 | 19 | Broadcast channel selector: WhatsApp / SMS / Both with per-channel tallies and honest statuses | v73 |
 | 20 | Water Bill invoice covers water only (rent/garbage excluded from totals, document and form) | v74 |
+| 21 | Universal Global Search + Landlord Commission Management (per-property ledgers, invoices, payments, statements) | v75 |
