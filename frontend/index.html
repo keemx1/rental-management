@@ -255,8 +255,9 @@
         <a href="#" data-nav="invoice-register" class="nav-link block py-3 px-4 rounded">Invoice Register</a>
         <a href="#" data-nav="monthly-reports" class="nav-link block py-3 px-4 rounded">Monthly Reports</a>
         <a href="#" data-nav="mgmt-expenses-report" class="nav-link block py-3 px-4 rounded">Mgmt Expenses</a>
-        <a href="#" data-nav="deposit-refunds" class="nav-link block py-3 px-4 rounded">Deposit Refunds</a>
-        <a href="#" data-nav="commissions" class="nav-link block py-3 px-4 rounded">Commissions</a>
+          <a href="#" data-nav="deposit-refunds" class="nav-link block py-3 px-4 rounded">Deposit Refunds</a>
+          <a href="#" data-nav="preexit-inspection" class="nav-link block py-3 px-4 rounded">Pre-Exit Inspection</a>
+          <a href="#" data-nav="commissions" class="nav-link block py-3 px-4 rounded">Commissions</a>
         <a href="#" data-nav="archive" class="nav-link block py-3 px-4 rounded">Archive</a>
         <a href="#" data-nav="pending-overpayments" class="nav-link block py-3 px-4 rounded">Pending Overpayments</a>
         <a href="#" data-nav="users" class="nav-link hidden block py-3 px-4 rounded">Users</a>
@@ -4366,7 +4367,92 @@
       </section>
 
       <!-- COMMISSIONS (agent commission per house per month) -->
-      <section data-view="commissions" class="hidden space-y-6">
+      <!-- PRE-EXIT INSPECTION INVENTORY (additional feature before the Exit Invoice) -->
+  <section data-view="preexit-inspection" class="hidden space-y-6">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <span class="sys-tag">[PRE_EXIT_INSPECTION]</span>
+        <h2 class="section-title mt-1">Pre-Exit <span class="accent">Inspection Inventory</span></h2>
+        <p class="section-desc">Record inspection findings before the Exit Invoice, share them with the tenant, then transfer agreed items into the existing Exit Invoice.</p>
+      </div>
+    </div>
+
+    <!-- Step 1: unit lookup + tenancy + inspection date -->
+    <div class="glass-panel p-5">
+      <div class="flex flex-wrap items-end gap-3">
+        <div>
+          <label class="form-label">Unit Number</label>
+          <input id="pei-unit" class="cyber-input" placeholder="e.g. BH23" />
+        </div>
+        <button type="button" id="btn-peiload" class="qc-btn qc-btn-primary">Load Tenant Details</button>
+        <div id="pei-tenant-card" class="hidden flex-1 min-w-[260px] text-sm font-mono text-slate-300 bg-slate-900 border border-slate-700 rounded p-3"></div>
+      </div>
+      <div id="pei-tenancy-row" class="hidden mt-3">
+        <label class="form-label">Tenancy (multiple records exist for this unit — select the one being inspected)</label>
+        <select id="pei-tenancy" class="cyber-input"></select>
+      </div>
+      <div class="flex flex-wrap items-end gap-3 mt-3">
+        <div>
+          <label class="form-label">Inspection Date</label>
+          <input type="date" id="pei-date" class="cyber-input" />
+        </div>
+        <button type="button" id="btn-peinew" class="qc-btn">Create New Inventory</button>
+        <button type="button" id="btn-peilatest" class="qc-btn hidden">Open Latest Inventory</button>
+        <span id="pei-status-msg" class="text-sm font-mono self-center"></span>
+      </div>
+    </div>
+
+    <!-- Step 2: inventory editor -->
+    <div id="pei-editor" class="glass-panel p-5 hidden">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div>
+          <span id="pei-badge" class="sys-tag">[DRAFT]</span>
+          <p id="pei-sub" class="text-xs text-slate-500 font-mono mt-1">—</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="btn-peishare" class="qc-btn qc-btn-primary">Share with Tenant</button>
+          <button type="button" id="btn-peipdf" class="qc-btn hidden">View PDF</button>
+        </div>
+      </div>
+      <div id="pei-changed" class="hidden mb-3 text-xs font-mono text-amber-300 bg-amber-950 border border-amber-700 rounded p-2">Changes made after the last share — use Share with Tenant to send the latest version.</div>
+
+      <div class="overflow-x-auto">
+        <table class="cyber-table" id="pei-items">
+          <thead>
+            <tr>
+              <th>Item / Description</th><th>Qty</th><th>Cost per Qty</th><th>Total</th>
+              <th>Remarks / Notes</th><th>Agreed</th><th>Transfer</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="pei-items-tbody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3" class="text-right font-semibold">Total estimated inspection costs</td>
+              <td id="pei-total" class="font-semibold text-right">KES 0</td>
+              <td colspan="4"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="flex flex-wrap gap-2 mt-3">
+        <button type="button" id="btn-peisave" class="qc-btn qc-btn-primary">Save Changes</button>
+        <button type="button" id="btn-peicancel" class="qc-btn">Cancel</button>
+        <button type="button" id="btn-peiadd" class="qc-btn">Add Item</button>
+        <span id="pei-save-msg" class="text-sm font-mono self-center"></span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3 mt-4 pt-3 border-t border-slate-700">
+        <button type="button" id="btn-peitagreed" class="qc-btn">Mark as Agreed</button>
+        <button type="button" id="btn-peitransfer" class="qc-btn qc-btn-primary">Add Agreed Items to Exit Invoice</button>
+        <span id="pei-transfer-msg" class="text-sm font-mono"></span>
+        <button type="button" id="pei-exit-link" class="qc-btn hidden text-xs">Open Exit Invoice →</button>
+      </div>
+      <p class="text-[11px] text-slate-500 mt-2 font-mono">Amounts are inspection estimates only — they become deductions only after being transferred into the Exit Invoice and processed through the existing exit workflow.</p>
+    </div>
+  </section>
+
+  <section data-view="commissions" class="hidden space-y-6">
         <div>
           <span class="sys-tag">[COMMISSIONS]</span>
           <h2 class="section-title mt-1">Agent <span class="accent">Commissions</span></h2>
@@ -5500,10 +5586,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=70"></script>
+  <script type="module" src="/js/app.js?v=71"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=70').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=71').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

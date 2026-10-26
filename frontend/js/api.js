@@ -225,6 +225,30 @@ export const api = {
   archiveHistory(id) {
     return request(`/archive/${id}/history`);
   },
+  preexitLookup(unit) {
+    return request(`/preexit/lookup?unit=${encodeURIComponent(unit)}`);
+  },
+  preexitList(unit) {
+    return request(`/preexit?unit=${encodeURIComponent(unit)}`);
+  },
+  preexitCreate(body) {
+    return request('/preexit', { method: 'POST', body: JSON.stringify(body) });
+  },
+  preexitGet(id) {
+    return request(`/preexit/${id}`);
+  },
+  preexitSave(id, body) {
+    return request(`/preexit/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+  preexitStatus(id, status) {
+    return request(`/preexit/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+  },
+  preexitShare(id) {
+    return request(`/preexit/${id}/share`, { method: 'POST', body: JSON.stringify({}) });
+  },
+  preexitTransfer(id, itemIds) {
+    return request(`/preexit/${id}/transfer`, { method: 'POST', body: JSON.stringify({ item_ids: itemIds }) });
+  },
   deleteArchive(id) {
     return request(`/archive/${id}`, { method: 'DELETE' });
   },

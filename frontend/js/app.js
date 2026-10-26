@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v70';
+const GEHM_VERSION = 'v71';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -601,6 +601,7 @@ function showView(name) {
     populatePropertyDropdowns();
   }
   if (name === 'archive') loadArchive();
+  if (name === 'preexit-inspection') preexitResetView();
   if (name === 'pending-overpayments') loadPendingOverpayments();
   if (name === 'deposit-refunds') loadDepositRefunds();
   if (name === 'future-tenancies') loadFutureTenancies();
@@ -3490,6 +3491,396 @@ async function loadHouseCollection(houseId) {
     setTextEl('hc-remaining-note', '');
   }
 }
+
+// ─── Pre-Exit Inspection Inventory ───────────────────────────────────────────
+// Additional feature BEFORE the Exit Invoice: record findings, share the PDF,
+// transfer agreed items into the Exit Invoice exactly once. Draft items are
+// edited locally and saved in one batch; the server recalculates all totals.
+let _peiState = { unit: null, lookup: null, inspection: null, draft: [], document: null, dirty: false };
+
+function peiMsg(id, text, color) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = `text-sm font-mono self-center ${color || 'text-slate-400'}`;
+}
+
+function preexitResetView() {
+  _peiState = { unit: null, lookup: null, inspection: null, draft: [], document: null, dirty: false };
+  const unit = document.getElementById('pei-unit');
+  if (unit) unit.value = '';
+  const date = document.getElementById('pei-date');
+  if (date) date.value = new Date().toISOString().slice(0, 10);
+  const card = document.getElementById('pei-tenant-card');
+  if (card) { card.classList.add('hidden'); card.innerHTML = ''; }
+  document.getElementById('pei-tenancy-row')?.classList.add('hidden');
+  document.getElementById('pei-editor')?.classList.add('hidden');
+  document.getElementById('btn-peilatest')?.classList.add('hidden');
+  document.getElementById('btn-peipdf')?.classList.add('hidden');
+  peiMsg('pei-status-msg', '');
+  peiMsg('pei-save-msg', '');
+  peiMsg('pei-transfer-msg', '');
+}
+
+async function peiLoadLookup() {
+  const unitEl = document.getElementById('pei-unit');
+  const unit = (unitEl?.value || '').trim();
+  if (!unit) { peiMsg('pei-status-msg', 'Enter a unit number first.', 'text-amber-400'); return; }
+  peiMsg('pei-status-msg', 'Loading…');
+  try {
+    const lookup = await api.preexitLookup(unit);
+    _peiState.unit = unit;
+    _peiState.lookup = lookup;
+
+    const card = document.getElementById('pei-tenant-card');
+    const t = lookup.live_tenant;
+    if (card) {
+      card.classList.remove('hidden');
+      card.innerHTML = t && t.occupied
+        ? `<strong>${escapeHtml(t.name)}</strong> (${escapeHtml(t.tenant_code)}) — ${escapeHtml(t.property_name || '')}<br/>Move-in: ${escapeHtml(t.move_in_date || '—')} · ${escapeHtml(t.status || '')}`
+        : `No current tenant on ${escapeHtml(unit)}. Select a historical tenancy below.`;
+    }
+
+    // Tenancy selection: current occupancy first, then every archive record.
+    const row = document.getElementById('pei-tenancy');
+    const sel = document.getElementById('pei-tenancy');
+    if (row && sel) {
+      const options = [];
+      if (t && t.occupied) {
+        options.push(`<option value="">Current tenancy — ${escapeHtml(t.name)}${t.move_in_date ? ` (from ${escapeHtml(t.move_in_date)})` : ''}</option>`);
+      }
+      for (const a of lookup.archived_tenancies || []) {
+        options.push(`<option value="a${a.id}">${escapeHtml(a.tenant_name || '—')} (${escapeHtml(a.move_in_date || '?')} → ${escapeHtml(a.move_out_date || 'closed')})</option>`);
+      }
+      sel.innerHTML = options.join('');
+      row.classList.toggle('hidden', options.length === 0);
+      if (!t || !t.occupied) row.classList.remove('hidden');
+    }
+
+    const latestBtn = document.getElementById('btn-peilatest');
+    if (latestBtn) latestBtn.classList.toggle('hidden', !(lookup.inventories || []).length);
+
+    peiMsg('pei-status-msg',
+      (lookup.inventories || []).length
+        ? `${(lookup.inventories || []).length} inventory record(s) found for this unit.`
+        : 'Tenant details loaded.',
+      'text-green-500');
+  } catch (err) {
+    peiMsg('pei-status-msg', err.message, 'text-rose-500');
+  }
+}
+
+function peiSelectedTenancyId() {
+  const sel = document.getElementById('pei-tenancy');
+  const v = sel ? sel.value : '';
+  if (!v) return undefined;
+  if (v.startsWith('a')) return Number(v.slice(1));
+  return undefined;
+}
+
+async function peiCreateInventory() {
+  const unit = (_peiState.unit || document.getElementById('pei-unit')?.value || '').trim();
+  const dateEl = document.getElementById('pei-date');
+  const inspection_date = dateEl?.value || new Date().toISOString().slice(0, 10);
+  if (!unit) { peiMsg('pei-status-msg', 'Enter a unit number first.', 'text-amber-400'); return; }
+  peiMsg('pei-status-msg', 'Creating…');
+  try {
+    const res = await api.preexitCreate({ unit, inspection_date, tenancy_id: peiSelectedTenancyId() });
+    await peiOpen(res.inspection.id);
+    peiMsg('pei-status-msg', 'Inventory created — record the inspection items below.', 'text-green-500');
+  } catch (err) {
+    peiMsg('pei-status-msg', err.message, 'text-rose-500');
+    if (err.status === 409) document.getElementById('pei-tenancy-row')?.classList.remove('hidden');
+  }
+}
+
+async function peiOpenLatest() {
+  const list = _peiState.lookup?.inventories || [];
+  if (!list.length) return;
+  await peiOpen(list[0].id);
+}
+
+async function peiOpen(id) {
+  try {
+    const res = await api.preexitGet(id);
+    const ins = res.inspection;
+    _peiState.inspection = ins;
+    _peiState.draft = (ins.items || []).map((it) => ({
+      id: it.id, description: it.description, quantity: Number(it.quantity),
+      cost_per_qty: Number(it.cost_per_qty), remarks: it.remarks || '', agreed: !!it.agreed,
+      transfer_status: it.transfer_status, transferred_at: it.transferred_at, exit_invoice_id: it.exit_invoice_id,
+    }));
+    _peiState.dirty = false;
+    _peiState.document = null;
+    document.getElementById('pei-editor')?.classList.remove('hidden');
+    document.getElementById('pei-date').value = ins.inspection_date || '';
+    peiRenderEditor();
+  } catch (err) {
+    peiMsg('pei-status-msg', err.message, 'text-rose-500');
+  }
+}
+
+function peiRenderEditor() {
+  const ins = _peiState.inspection;
+  if (!ins) return;
+  const badge = document.getElementById('pei-badge');
+  if (badge) {
+    const map = { Draft: 'bg-slate-700 text-slate-200', Shared: 'bg-sky-900 text-sky-300', Agreed: 'bg-emerald-900 text-emerald-300' };
+    badge.textContent = `[${(ins.status || 'Draft').toUpperCase()}]`;
+    badge.className = `sys-tag ${map[ins.status] || ''}`;
+  }
+  const sub = document.getElementById('pei-sub');
+  if (sub) {
+    sub.textContent = `${ins.tenant_name} · ${ins.unit_label || ins.tenant_code} · ${ins.property_name || '—'} · inspected ${ins.inspection_date || '—'}` +
+      (ins.tenancy ? ` · tenancy: ${ins.tenancy.tenant_name} (${ins.tenancy.move_in_date || '?'} → ${ins.tenancy.move_out_date || 'closed'})` : '');
+  }
+  document.getElementById('pei-changed')?.classList.toggle('hidden', !ins.edited_after_share);
+  const pdfBtn = document.getElementById('btn-peipdf');
+  if (pdfBtn) pdfBtn.classList.toggle('hidden', !ins.document_id);
+  const shareBtn = document.getElementById('btn-peishare');
+  if (shareBtn) shareBtn.disabled = false;
+  const agreedBtn = document.getElementById('btn-peitagreed');
+  if (agreedBtn) {
+    agreedBtn.disabled = ins.status === 'Agreed';
+    agreedBtn.textContent = ins.status === 'Agreed' ? 'Agreed ✓' : 'Mark as Agreed';
+  }
+  peiRenderItems();
+  peiRenderExitLink();
+}
+
+function peiRenderExitLink() {
+  const ins = _peiState.inspection;
+  const link = document.getElementById('pei-exit-link');
+  if (!link) return;
+  if (ins && ins.exit_invoice) {
+    link.classList.remove('hidden');
+    link.textContent = `Open Exit Invoice ${ins.exit_invoice.exit_number || ''} →`;
+    link.onclick = () => {
+      const t = ins.tenancy;
+      openExitInvoiceModal(ins.tenant_code, ins.exit_invoice.id, {
+        name: ins.tenant_name,
+        unit: ins.unit_label || ins.tenant_code,
+        property: ins.property_name || '',
+        rent_amount: t ? Number(t.rent_amount || 0) : 0,
+        deposit_paid: t ? Number(t.deposit_paid || 0) : Number((ins.live_tenant || {}).deposit_paid || 0),
+        water_charge: 0,
+      });
+    };
+  } else {
+    link.classList.add('hidden');
+  }
+}
+
+function peiRowTotal(it) {
+  return Math.round((Number(it.quantity || 0) * Number(it.cost_per_qty || 0)) * 100) / 100;
+}
+
+function peiGrandTotal() {
+  return _peiState.draft.reduce((s, it) => s + peiRowTotal(it), 0);
+}
+
+function peiRenderItems() {
+  const tbody = document.getElementById('pei-items-tbody');
+  if (!tbody) return;
+  const ksh = (v) => `KES ${Number(v || 0).toLocaleString()}`;
+  if (!_peiState.draft.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="py-4 text-center text-slate-500">No items yet — use "Add Item" to record the first finding.</td></tr>`;
+    document.getElementById('pei-total').textContent = 'KES 0';
+    return;
+  }
+  tbody.innerHTML = _peiState.draft.map((it, idx) => {
+    const transferred = it.transfer_status === 'Transferred';
+    const total = peiRowTotal(it);
+    if (transferred) {
+      return `<tr class="opacity-80">
+        <td>${escapeHtml(it.description)}</td>
+        <td class="font-mono text-right">${Number(it.quantity)}</td>
+        <td class="font-mono text-right">${ksh(it.cost_per_qty)}</td>
+        <td class="font-mono text-right">${ksh(total)}</td>
+        <td class="text-xs text-slate-400">${escapeHtml(it.remarks || '—')}</td>
+        <td>${it.agreed ? '<span class="text-green-400 font-bold">Yes</span>' : '—'}</td>
+        <td><span class="text-xs font-mono text-emerald-300">Transferred ✓${it.transferred_at ? `<br/><span class="text-slate-500">${new Date(it.transferred_at).toLocaleDateString()}</span>` : ''}</span></td>
+        <td class="text-xs text-slate-500">locked</td>
+      </tr>`;
+    }
+    return `<tr>
+      <td><input class="cyber-input !py-1 text-sm" data-pei-idx="${idx}" data-pei-field="description" value="${escapeHtml(it.description)}" /></td>
+      <td><input type="number" min="1" class="cyber-input !py-1 text-sm w-16 text-right" data-pei-idx="${idx}" data-pei-field="quantity" value="${Number(it.quantity)}" /></td>
+      <td><input type="number" min="0" step="0.01" class="cyber-input !py-1 text-sm w-28 text-right" data-pei-idx="${idx}" data-pei-field="cost_per_qty" value="${Number(it.cost_per_qty)}" /></td>
+      <td class="font-mono text-right" id="pei-total-${idx}">${ksh(total)}</td>
+      <td><input class="cyber-input !py-1 text-sm" data-pei-idx="${idx}" data-pei-field="remarks" value="${escapeHtml(it.remarks || '')}" /></td>
+      <td class="text-center"><input type="checkbox" data-pei-idx="${idx}" data-pei-field="agreed" ${it.agreed ? 'checked' : ''} class="w-4 h-4 accent-emerald-500" /></td>
+      <td class="text-center text-xs font-mono text-slate-400">Not Transferred</td>
+      <td><button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-pei-del="${idx}">Delete</button></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('pei-total').textContent = ksh(peiGrandTotal());
+}
+
+function peiRecalcRow(idx) {
+  const it = _peiState.draft[idx];
+  if (!it) return;
+  const cell = document.getElementById(`pei-total-${idx}`);
+  if (cell) cell.textContent = `KES ${Number(peiRowTotal(it)).toLocaleString()}`;
+  const totalEl = document.getElementById('pei-total');
+  if (totalEl) totalEl.textContent = `KES ${Number(peiGrandTotal()).toLocaleString()}`;
+}
+
+async function peiAddItem() {
+  if (!_peiState.inspection) return;
+  _peiState.draft.push({ description: '', quantity: 1, cost_per_qty: 0, remarks: '', agreed: false });
+  _peiState.dirty = true;
+  peiRenderItems();
+  const inputs = document.querySelectorAll('#pei-items-tbody [data-pei-field="description"]');
+  const last = inputs[inputs.length - 1];
+  if (last) last.focus();
+}
+
+function peiDeleteItem(idx) {
+  const it = _peiState.draft[idx];
+  if (!it) return;
+  const label = it.description || '(unnamed item)';
+  if (it.transfer_status === 'Transferred') {
+    peiMsg('pei-save-msg', 'Transferred items are locked — correct the Exit Invoice entry instead.', 'text-amber-400');
+    return;
+  }
+  if (!confirm(`Delete "${label}" from this inventory?`)) return;
+  _peiState.draft.splice(idx, 1);
+  _peiState.dirty = true;
+  peiRenderItems();
+}
+
+async function peiSave() {
+  if (!_peiState.inspection) return;
+  const dateEl = document.getElementById('pei-date');
+  peiMsg('pei-save-msg', 'Saving…', 'text-amber-400');
+  try {
+    const res = await api.preexitSave(_peiState.inspection.id, {
+      inspection_date: dateEl?.value || _peiState.inspection.inspection_date,
+      items: _peiState.draft.map((it) => ({
+        id: it.id, description: it.description, quantity: it.quantity,
+        cost_per_qty: it.cost_per_qty, remarks: it.remarks, agreed: !!it.agreed,
+      })),
+    });
+    await peiOpen(_peiState.inspection.id);
+    let note = '✓ Saved — totals recalculated.';
+    if (res.preserved_transferred && res.preserved_transferred.length) {
+      note += ` (${res.preserved_transferred.length} transferred item(s) locked & unchanged)`;
+    }
+    peiMsg('pei-save-msg', note, 'text-green-500');
+  } catch (err) {
+    peiMsg('pei-save-msg', err.message, 'text-rose-500');
+    if (err.status === 409) peiOpen(_peiState.inspection.id); // stale/locked — reload
+  }
+}
+
+async function peiMarkAgreed() {
+  if (!_peiState.inspection) return;
+  if (!_peiState.draft.length) { peiMsg('pei-transfer-msg', 'Add items first.', 'text-amber-400'); return; }
+  if (_peiState.dirty) { peiMsg('pei-transfer-msg', 'Save Changes before marking as Agreed.', 'text-amber-400'); return; }
+  try {
+    await api.preexitStatus(_peiState.inspection.id, 'Agreed');
+    await peiOpen(_peiState.inspection.id);
+    peiMsg('pei-transfer-msg', 'Marked Agreed — items ready for transfer.', 'text-green-500');
+  } catch (err) {
+    peiMsg('pei-transfer-msg', err.message, 'text-rose-500');
+  }
+}
+
+async function peiShare() {
+  if (!_peiState.inspection) return;
+  if (_peiState.dirty) { peiMsg('pei-save-msg', 'Save Changes before sharing.', 'text-amber-400'); return; }
+  const btn = document.getElementById('btn-peishare');
+  if (btn) btn.disabled = true;
+  peiMsg('pei-save-msg', 'Generating PDF and sending to the tenant…', 'text-amber-400');
+  try {
+    const res = await api.preexitShare(_peiState.inspection.id);
+    _peiState.document = res.document || null;
+    await peiOpen(_peiState.inspection.id);
+    peiMsg('pei-save-msg', '✓ PDF shared with the tenant via WhatsApp.', 'text-green-500');
+  } catch (err) {
+    peiMsg('pei-save-msg', err.message, 'text-rose-500');
+    if (err.data && err.data.document) {
+      _peiState.document = err.data.document;
+      document.getElementById('btn-peipdf')?.classList.remove('hidden');
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function peiViewPdf() {
+  try {
+    let doc = _peiState.document;
+    if (!doc && _peiState.inspection && _peiState.inspection.document_id) {
+      const res = await api.document(_peiState.inspection.document_id);
+      doc = res.document || res;
+    }
+    if (doc) await openDocumentViewModal(doc);
+    else peiMsg('pei-save-msg', 'No PDF yet — use Share with Tenant first.', 'text-amber-400');
+  } catch (err) {
+    peiMsg('pei-save-msg', err.message, 'text-rose-500');
+  }
+}
+
+async function peiTransfer() {
+  if (!_peiState.inspection) return;
+  if (_peiState.dirty) { peiMsg('pei-transfer-msg', 'Save Changes before transferring.', 'text-amber-400'); return; }
+  const eligible = _peiState.draft.filter((it) => it.agreed && it.transfer_status !== 'Transferred');
+  if (!eligible.length) {
+    peiMsg('pei-transfer-msg', 'No new agreed items to transfer (all transferred already?).', 'text-amber-400');
+    return;
+  }
+  const btn = document.getElementById('btn-peitransfer');
+  if (btn) btn.disabled = true;
+  peiMsg('pei-transfer-msg', `Transferring ${eligible.length} item(s)…`, 'text-amber-400');
+  try {
+    const res = await api.preexitTransfer(_peiState.inspection.id, eligible.map((it) => it.id));
+    await peiOpen(_peiState.inspection.id);
+    peiMsg('pei-transfer-msg', `✓ ${res.message || 'Transferred.'}`, 'text-green-500');
+  } catch (err) {
+    peiMsg('pei-transfer-msg', err.message, 'text-rose-500');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+document.getElementById('btn-peiload')?.addEventListener('click', peiLoadLookup);
+document.getElementById('btn-peinew')?.addEventListener('click', peiCreateInventory);
+document.getElementById('btn-peilatest')?.addEventListener('click', peiOpenLatest);
+document.getElementById('btn-peisave')?.addEventListener('click', peiSave);
+document.getElementById('btn-peicancel')?.addEventListener('click', () => {
+  if (_peiState.inspection) peiOpen(_peiState.inspection.id);
+});
+document.getElementById('btn-peiadd')?.addEventListener('click', peiAddItem);
+document.getElementById('btn-peitagreed')?.addEventListener('click', peiMarkAgreed);
+document.getElementById('btn-peishare')?.addEventListener('click', peiShare);
+document.getElementById('btn-peipdf')?.addEventListener('click', peiViewPdf);
+document.getElementById('btn-peitransfer')?.addEventListener('click', peiTransfer);
+document.getElementById('pei-unit')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); peiLoadLookup(); }
+});
+document.getElementById('pei-items-tbody')?.addEventListener('input', (e) => {
+  const el = e.target;
+  const idx = Number(el.dataset.peiIdx);
+  const field = el.dataset.peiField;
+  if (!Number.isInteger(idx) || !field) return;
+  const it = _peiState.draft[idx];
+  if (!it) return;
+  if (field === 'quantity' || field === 'cost_per_qty') {
+    it[field] = Number(el.value);
+    peiRecalcRow(idx);
+  } else if (field === 'agreed') {
+    it.agreed = el.checked;
+  } else {
+    it[field] = el.value;
+  }
+  _peiState.dirty = true;
+});
+document.getElementById('pei-items-tbody')?.addEventListener('click', (e) => {
+  const del = e.target.closest('[data-pei-del]');
+  if (del) peiDeleteItem(Number(del.dataset.peiDel));
+});
 
 function togglePaymentFields() {
   const method = document.getElementById('house-edit-payment-method').value;

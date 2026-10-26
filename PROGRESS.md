@@ -32,6 +32,7 @@ Run from the repo root (server must be up on port `3003`):
 | Payment delivery + receipt | `node tests/test_payment_delivery.js` | 27 assertions — delivery-status flips Sent→Delivered→Read via the real receipt callback, confirmation text AND PDF receipt sent for every payment type (normal/advanced/overpayment/partial/arrears), overpayment workflow preserved |
 | Message channels | `node tests/test_message_channels.js` | 26 assertions — WhatsApp/SMS/Both dispatch with per-channel status, SMS history in the SMS tab, unconfigured-SMS 400, all-failed 502, idempotent replay, offline channel forwarding |
 | Send retry (session locks) | `node tests/test_send_retry.js` | 11 assertions — transient session-file locks (EPERM-open/EBUSY) retried safely pre-transmission, real failures surfaced immediately, disconnected guard untouched |
+| Pre-Exit Inspection Inventory | `node tests/test_preexit_inspection.js` | 56 assertions — unit lookup + tenancy disambiguation, item CRUD with server-side totals (spec 14,500 example), Draft/Shared/Agreed, PDF with exact disclaimer + no refund figures, one-time transfer into the Exit Invoice (repeat/partial retry safe, finalized refused 409), transferred items locked, tenancy seal + archive visibility, re-let protection |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -424,6 +425,59 @@ duplicate a message.
 - Note: the 34 historical Failed rows from today cannot be verified
   retroactively; new sends classify correctly (Sent when delivered, Failed
   only for genuine failures).
+  *Follow-up (same day): operator confirmed those deliveries — 37 lock-class
+  rows (Oct 23–26) were corrected to Delivered via
+  `backend/scripts/mark-lock-failures-delivered.js --apply`, keeping the
+  original failure_reason on each row and writing a full audit_log entry.*
+
+### 17. Pre-Exit Inspection Inventory (v71)
+New additional feature that sits BEFORE the existing Exit Invoice (nav:
+Pre-Exit Inspection). The Exit Invoice itself is untouched — transfers go
+through `store.updateExitInvoice` (the same existing calculation path any
+invoice edit uses) and finalization is never bypassed.
+
+- **Schema** (`migrate-preexit-inspection.js`): `preexit_inspections`
+  (tenant_code FK RESTRICT, tenancy_id → tenancy_archive, status
+  Draft/Shared/Agreed, shared_at, edited_after_share, document_id) +
+  `preexit_inspection_items` (qty/cost/total server-computed, agreed flag,
+  transfer_status, transferred_at, exit_invoice_id, unique transfer_ref).
+  DB duplicate-transfer protection: trigger blocks ANY second transition to
+  'Transferred' + partial unique index on transfer_ref. The table is in
+  TENANCY_SCOPED_TABLES → sealed to the archive at vacate.
+- **Workflow**: enter unit → tenant details auto-load (occupied → current
+  tenancy; re-let unit → select the correct historical tenancy — never
+  auto-assigns to a new occupant; vacant with history → explicit choice
+  required 409 TENANCY_REQUIRED) → inspection date → item rows
+  (description, qty, cost/qty, auto total, remarks, agreed) with Add /
+  Edit / Delete (confirm) / Save Changes / Cancel, live totals, batch PUT
+  recomputes everything server-side.
+- **Share with Tenant**: renders `templates/preexit_inspection.html`
+  (title PRE-EXIT INSPECTION INVENTORY, all required fields, the EXACT
+  mandated disclaimer, no refund/deduction figures, forbidden phrase
+  absent), generates the PDF through the document pipeline (stable
+  `PEI-<id>` document row), sends via `sendDocumentSmart`, then sets
+  Shared + shared_at; edits afterwards set `edited_after_share` (banner
+  "changes after last share") while keeping the latest saved version.
+- **Transfer**: `POST /api/preexit/:id/transfer` — requires status Agreed,
+  selects agreed+untransferred items (partial OK), creates/uses a DRAFT
+  Exit Invoice, appends lines carrying description/quantity/cost/total +
+  `pei_inspection_id`/`pei_item_id` links via the existing
+  `updateExitInvoice`, claims each item with an atomic conditional UPDATE
+  (per-inspection lock, compensation on failure, line-dedupe guard, DB
+  trigger). Repeat/refresh/retry → `transferred: 0`, lines unchanged
+  (acceptance: 3 items → transfer ×3 + refresh → still exactly 3 lines;
+  interruption retry moves only the remainder). Finalized invoice → 409.
+  Transferred items are locked for edit/delete (correction stays on the
+  Exit Invoice where it is audited); unagreed items never transfer.
+- **Archive**: `getTenancyArchive` now returns `preexit_inspections`
+  (with items) for the sealed tenancy — traceable after re-letting; a new
+  occupant's inventory is a separate record (tenancy_id NULL) and the old
+  one keeps its binding/name.
+- Frontend: nav entry + section (lookup panel, tenancy select, inventory
+  editor table with editable rows, status badges, Share/View PDF/Mark
+  Agreed/Add Agreed Items to Exit Invoice, exit-invoice deep link using
+  the correct tenancy's rent/deposit snapshot). Stamps → `?v=71`, SW
+  cache → `gutenberg-v72-irmanage`.
 
 ---
 
@@ -462,3 +516,4 @@ duplicate a message.
 | 14 | WhatsApp delivery status auto-updates + PDF receipt for every payment type | v68 |
 | 15 | Message channel selector: WhatsApp / SMS / Both wired end-to-end (incl. tenants-section modal) | v70 |
 | 16 | WhatsApp false-Failed fix: retry on transient session-file locks + Defender exclusion script | backend |
+| 17 | Pre-Exit Inspection Inventory: findings → PDF share → agreed items transferred once into Exit Invoice | v71 |

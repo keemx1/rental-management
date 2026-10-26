@@ -6700,6 +6700,7 @@ function groupPaymentsByMonth(payments) {
 const TENANCY_SCOPED_TABLES = [
   'payments', 'penalties', 'documents', 'water_invoices', 'deposit_applications',
   'credit_allocations', 'message_logs', 'tenancy_agreements', 'inspections', 'maintenance_charges',
+  'preexit_inspections',
 ];
 
 async function sealTenancyRows(tenantCode, archiveId) {
@@ -6973,6 +6974,30 @@ async function getTenancyArchive(id) {
   r.penalties = mergeById(r.penalties, livePenalties);
   r.documents = mergeById(r.documents, liveDocs);
   r.deposit_refund_row = refundRow;
+
+  // Pre-Exit Inspection Inventories bound to this tenancy (sealed at vacate)
+  // stay reachable from the archive forever — including after re-letting.
+  try {
+    const pei = await query(
+      `SELECT i.*, COALESCE((
+         SELECT jsonb_agg(jsonb_build_object(
+           'id', it.id, 'description', it.description, 'quantity', it.quantity,
+           'cost_per_qty', it.cost_per_qty, 'total', it.total, 'agreed', it.agreed,
+           'transfer_status', it.transfer_status, 'transferred_at', it.transferred_at,
+           'exit_invoice_id', it.exit_invoice_id
+         ) ORDER BY it.id)
+         FROM preexit_inspection_items it WHERE it.inspection_id = i.id
+       ), '[]'::jsonb) AS items
+         FROM preexit_inspections i
+        WHERE i.tenancy_id = $1
+        ORDER BY i.inspection_date DESC, i.id DESC`,
+      [id]
+    );
+    r.preexit_inspections = pei.rows;
+  } catch (err) {
+    console.error('[Tenancy] archive preexit merge failed:', err.message);
+    r.preexit_inspections = [];
+  }
 
   return {
     ...r,

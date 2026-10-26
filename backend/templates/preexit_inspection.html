@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pre-Exit Inspection Inventory</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: #1e293b;
+      font-size: 11px;
+      margin: 0;
+      padding: 26px 30px;
+      background: #ffffff;
+    }
+    .head { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid #1a4b8c; padding-bottom: 12px; }
+    .head img { height: 58px; width: auto; }
+    .titles h1 { margin: 0; font-size: 19px; letter-spacing: 0.04em; color: #1a4b8c; }
+    .titles .company { font-size: 11px; color: #475569; margin-top: 2px; }
+    .titles .status { display: inline-block; margin-top: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 10px; border-radius: 10px; background: #eef2ff; color: #1e3a8a; border: 1px solid #c7d2fe; }
+
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; margin: 14px 0 4px; }
+    .meta div { font-size: 11px; padding: 3px 0; border-bottom: 1px dotted #cbd5e1; }
+    .meta .lbl { color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
+    .meta .val { color: #0f172a; font-weight: 600; }
+
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #1a4b8c; margin: 18px 0 8px; }
+
+    table.items { width: 100%; border-collapse: collapse; }
+    table.items th {
+      background: #1a4b8c; color: #fff; font-size: 10px; text-transform: uppercase;
+      letter-spacing: 0.05em; padding: 7px 9px; text-align: left;
+    }
+    table.items td { padding: 7px 9px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    table.items .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.items .notes { color: #475569; font-size: 10px; }
+    table.items tr:nth-child(even) td { background: #f8fafc; }
+
+    .totals { margin-top: 10px; margin-left: auto; width: 46%; }
+    .totals .row { display: flex; justify-content: space-between; padding: 6px 10px; font-size: 11px; }
+    .totals .row.grand { background: #eef2ff; border: 1px solid #c7d2fe; font-weight: 700; font-size: 13px; color: #1e3a8a; }
+
+    .disclaimer {
+      margin-top: 20px; padding: 10px 12px; border: 1px solid #f59e0b;
+      background: #fffbeb; color: #78350f; font-size: 9.5px; line-height: 1.5;
+      border-radius: 4px;
+    }
+    .disclaimer strong { display: block; margin-bottom: 3px; font-size: 10px; letter-spacing: 0.04em; }
+
+    .footer { margin-top: 14px; padding-top: 8px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; color: #94a3b8; font-size: 9px; }
+    .tenancy-note { font-size: 9.5px; color: #64748b; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <img src="{{logo_base64}}" alt="Logo" />
+    <div class="titles">
+      <h1>PRE-EXIT INSPECTION INVENTORY</h1>
+      <div class="company">GUTENBERG ELITE HOME &amp; PROPERTY MANAGEMENTS</div>
+      <div class="status">{{status}}</div>
+    </div>
+  </div>
+
+  <div class="meta">
+    <div><span class="lbl">Tenant</span><br /><span class="val">{{tenant_name}}</span></div>
+    <div><span class="lbl">Property / House</span><br /><span class="val">{{property_name}}</span></div>
+    <div><span class="lbl">Unit</span><br /><span class="val">{{unit}}</span></div>
+    <div><span class="lbl">Inspection Date</span><br /><span class="val">{{inspection_date}}</span></div>
+  </div>
+  <div class="tenancy-note">{{tenancy_label}}</div>
+
+  <h2>Inspection Items</h2>
+  <table class="items">
+    <thead>
+      <tr>
+        <th style="width:40%">Item / Description</th>
+        <th class="num" style="width:8%">Qty</th>
+        <th class="num" style="width:17%">Cost per Qty</th>
+        <th class="num" style="width:17%">Total</th>
+        <th style="width:18%">Remarks / Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{rows_html}}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="row"><span>Total items recorded</span><span>{{item_count}}</span></div>
+    <div class="row grand"><span>Total estimated inspection costs</span><span>{{total_estimated}}</span></div>
+  </div>
+
+  <div class="disclaimer">
+    <strong>DISCLAIMER</strong>
+    This document records items identified during pre-exit inspection for review. It is not a final Exit Invoice, does not confirm final deposit deductions, and does not determine the tenant's deposit refund. Any agreed items may subsequently be transferred to the existing Exit Invoice for final processing.
+  </div>
+
+  <div class="footer">
+    <span>Generated {{generated_at}}</span>
+    <span>Pre-Exit Inspection Inventory — not an Exit Invoice</span>
+  </div>
+</body>
+</html>
