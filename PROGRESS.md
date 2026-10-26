@@ -31,6 +31,7 @@ Run from the repo root (server must be up on port `3003`):
 | House collection position | `node tests/test_house_collection.js` | 29 assertions — expected (rent/deposits/water/garbage/penalties/maintenance/exit charges) and collected (any category) per period, remaining + %, mid-period joiner included, live recompute on charge/payment changes |
 | Payment delivery + receipt | `node tests/test_payment_delivery.js` | 27 assertions — delivery-status flips Sent→Delivered→Read via the real receipt callback, confirmation text AND PDF receipt sent for every payment type (normal/advanced/overpayment/partial/arrears), overpayment workflow preserved |
 | Message channels | `node tests/test_message_channels.js` | 26 assertions — WhatsApp/SMS/Both dispatch with per-channel status, SMS history in the SMS tab, unconfigured-SMS 400, all-failed 502, idempotent replay, offline channel forwarding |
+| Send retry (session locks) | `node tests/test_send_retry.js` | 11 assertions — transient session-file locks (EPERM-open/EBUSY) retried safely pre-transmission, real failures surfaced immediately, disconnected guard untouched |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -403,6 +404,27 @@ or both channels:
   via Both"), so the tenants-section flow visibly offers all three channels
   and dispatches the selected one.
 
+### 16. "Delivered but reported Failed" — transient session-file locks (no version bump, backend only)
+Messages that reached the tenant were being recorded as `Failed`. Database
+forensics showed 34 failures TODAY alone with
+`EPERM: operation not permitted, open '...sessions\session-*.json'` — Windows
+(real-time Defender scanning of the frequently-written Baileys session JSONs)
+briefly locks the file while the send path reads it, the send call rejects,
+and the status is logged as Failed. The lock happens BEFORE any bytes are
+relayed (encryption session read), so the retry below is safe and can never
+duplicate a message.
+
+- `session-manager` now wraps every provider send (text, media, document,
+  bulk) in `withSessionLockRetry`: lock-class errors (EPERM-open, EBUSY,
+  EACCES) retry up to 2× with a short backoff; every other error surfaces
+  immediately — real failures are never masked.
+- Root-cause hardening: run `add-defender-exclusion.bat` once as
+  administrator (UAC prompt) to exclude the sessions folder from real-time
+  scanning — after that the lock cannot occur at all.
+- Note: the 34 historical Failed rows from today cannot be verified
+  retroactively; new sends classify correctly (Sent when delivered, Failed
+  only for genuine failures).
+
 ---
 
 ## Open items / next
@@ -438,4 +460,5 @@ or both channels:
 | 12 | House Dashboard: live collection position (expected/collected/remaining/%) | v66 |
 | 13 | Encoding repair: mojibake removed, original symbols/labels restored | v67 |
 | 14 | WhatsApp delivery status auto-updates + PDF receipt for every payment type | v68 |
-| 15 | Message channel selector: WhatsApp / SMS / Both wired end-to-end | v69 |
+| 15 | Message channel selector: WhatsApp / SMS / Both wired end-to-end (incl. tenants-section modal) | v70 |
+| 16 | WhatsApp false-Failed fix: retry on transient session-file locks + Defender exclusion script | backend |
