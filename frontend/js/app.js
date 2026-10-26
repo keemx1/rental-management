@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v69';
+const GEHM_VERSION = 'v70';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -3109,7 +3109,10 @@ async function openMessageModal(tenantId) {
   statusEl.classList.add('hidden');
   statusEl.textContent = '';
   sendBtn.disabled = false;
+  // Channel-aware label (the Send Via selector drives it; reset() restores
+  // the default WhatsApp option).
   sendBtn.textContent = 'Send via WhatsApp';
+  document.getElementById('message-modal-title').textContent = 'Send Message';
   
   document.getElementById('message-tenant-id').value = tenantId;
   modal.classList.remove('hidden');
@@ -3118,7 +3121,7 @@ async function openMessageModal(tenantId) {
     // Profile endpoint (not GET /tenants/:id) — only it computes the live
     // balance summary (arrears + rent due + penalties + shortfalls).
     const { tenant: t, summary } = await api.tenantProfile(tenantId);
-    document.getElementById('message-modal-title').textContent = `Send WhatsApp: ${t.name} (${t.tenant_code})`;
+    document.getElementById('message-modal-title').textContent = `Send Message: ${t.name} (${t.tenant_code})`;
 
     // Populate template dropdown
     const select = document.getElementById('message-template-select');
@@ -8857,6 +8860,14 @@ document.getElementById('btn-th-exit-invoice')?.addEventListener('click', () => 
 document.getElementById('occupancy-house')?.addEventListener('change', loadOccupancyHistory);
 document.getElementById('btn-archive-detail-close')?.addEventListener('click', () => {
   document.getElementById('archive-detail-modal').classList.add('hidden');
+});
+
+// Channel selector drives the send button label so the modal always shows
+// where the message will actually go.
+document.getElementById('message-channel')?.addEventListener('change', (e) => {
+  const labels = { whatsapp: 'Send via WhatsApp', sms: 'Send via SMS', both: 'Send via Both' };
+  const btn = document.getElementById('btn-send-message');
+  if (btn) btn.textContent = labels[e.target.value] || 'Send Message';
 });
 
 document.getElementById('message-form')?.addEventListener('submit', async (e) => {

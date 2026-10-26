@@ -3,7 +3,7 @@
 Living record of every update applied to this repository
 (`origin → https://github.com/keemx1/rental-management`, branch `main`).
 
-**Last updated:** 2026-10-25 · app version `v69` · SW cache `gutenberg-v70-irmanage`
+**Last updated:** 2026-10-25 · app version `v70` · SW cache `gutenberg-v71-irmanage`
 
 ---
 
@@ -395,6 +395,13 @@ or both channels:
   chosen channel so queued messages deliver the way they were composed.
 - Default remains WhatsApp when no channel is given (backward compatible
   with every existing caller).
+- Follow-up (v70): the Tenants-section "💬 Msg" / tenant-dashboard message
+  modal is the same compose form, but `openMessageModal()` was re-labelling
+  everything WhatsApp-only on every open (button "Send via WhatsApp", title
+  "Send WhatsApp: …"). The modal now opens as "Send Message: …" and the send
+  button tracks the selector ("Send via WhatsApp" / "Send via SMS" / "Send
+  via Both"), so the tenants-section flow visibly offers all three channels
+  and dispatches the selected one.
 
 ---
 

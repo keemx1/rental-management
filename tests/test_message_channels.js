@@ -185,11 +185,15 @@ async function main() {
     const idx = await (await fetch('http://127.0.0.1:3003/')).text();
     check(idx.includes('id="message-channel"') && idx.includes('WhatsApp + SMS (Both)'),
       '10. channel selector served in the compose modal');
-    const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js?v=69')).text();
+    const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js?v=70')).text();
     check(appJs.includes('message-channel') && appJs.includes("api.sendMessage(tenantId, message, undefined, channel)"),
       '10b. compose handler passes the selected channel');
+    check(appJs.includes('Send via Both') && appJs.includes('Send via SMS'),
+      '10c. channel-aware send button labels (tenants-section modal)');
+    check(appJs.includes('Send Message: ') && !appJs.includes('Send WhatsApp: '),
+      '10d. modal title no longer hardcodes WhatsApp');
     const se = await (await fetch('http://127.0.0.1:3003/js/sync-engine.js')).text();
-    check(se.includes('p.channel'), '10c. offline replay forwards the channel');
+    check(se.includes('p.channel'), '10e. offline replay forwards the channel');
 
     console.log('\n(no real WhatsApp or SMS messages were sent — both gateways stubbed)');
   } finally {
