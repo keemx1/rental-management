@@ -3,7 +3,7 @@
 Living record of every update applied to this repository
 (`origin → https://github.com/keemx1/rental-management`, branch `main`).
 
-**Last updated:** 2026-10-25 · app version `v68` · SW cache `gutenberg-v69-irmanage`
+**Last updated:** 2026-10-25 · app version `v69` · SW cache `gutenberg-v70-irmanage`
 
 ---
 
@@ -30,6 +30,7 @@ Run from the repo root (server must be up on port `3003`):
 | WhatsApp report send | `node tests/test_report_whatsapp.js` | 26 assertions — sent attachment is the same valid .xlsx as Download with the correct spreadsheet mimetype, delivery vs generation failures reported separately (502/500), cleanup never surfaces as an error |
 | House collection position | `node tests/test_house_collection.js` | 29 assertions — expected (rent/deposits/water/garbage/penalties/maintenance/exit charges) and collected (any category) per period, remaining + %, mid-period joiner included, live recompute on charge/payment changes |
 | Payment delivery + receipt | `node tests/test_payment_delivery.js` | 27 assertions — delivery-status flips Sent→Delivered→Read via the real receipt callback, confirmation text AND PDF receipt sent for every payment type (normal/advanced/overpayment/partial/arrears), overpayment workflow preserved |
+| Message channels | `node tests/test_message_channels.js` | 26 assertions — WhatsApp/SMS/Both dispatch with per-channel status, SMS history in the SMS tab, unconfigured-SMS 400, all-failed 502, idempotent replay, offline channel forwarding |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -372,6 +373,29 @@ generation timeout) and all six call sites pass the allocation for that retry.
 
 Workflow and payment-allocation logic unchanged — delivery/automation only.
 
+### 15. Message channel selection: WhatsApp | SMS | Both (app `v69`)
+The SMS gateway (Bytewave/Ultimate SMS v3) was configured but only reachable
+through the Settings test button. Custom messages can now be sent on either
+or both channels:
+
+- **Compose modal** gains a "Send Via" selector: `WhatsApp` (default) /
+  `SMS` / `WhatsApp + SMS (Both)`; the status line reports each channel
+  separately, e.g. "✓ Message sent — WhatsApp: Sent · SMS: Sent" (or the
+  per-channel failure).
+- `POST /api/tenants/:id/send-message` accepts `channel` and dispatches:
+  WhatsApp via the existing session path, SMS via `smsBytewave.sendSms`
+  (normalized phone, same as the Settings test). WhatsApp history keeps its
+  `Custom Message` rows; SMS history is logged as `SMS Custom Message`
+  (type `SMS%` → visible in the Messages → SMS tab).
+- Honest error handling: SMS-only while unconfigured → 400 with a clear
+  message (nothing attempted); partial failure → 200 with per-channel
+  reasons; all requested channels failed → 502.
+- `client_txn_id` idempotency preserved (replays answer `already_synced`
+  without re-sending), and the offline outbox (`notice_send`) forwards the
+  chosen channel so queued messages deliver the way they were composed.
+- Default remains WhatsApp when no channel is given (backward compatible
+  with every existing caller).
+
 ---
 
 ## Open items / next
@@ -407,3 +431,4 @@ Workflow and payment-allocation logic unchanged — delivery/automation only.
 | 12 | House Dashboard: live collection position (expected/collected/remaining/%) | v66 |
 | 13 | Encoding repair: mojibake removed, original symbols/labels restored | v67 |
 | 14 | WhatsApp delivery status auto-updates + PDF receipt for every payment type | v68 |
+| 15 | Message channel selector: WhatsApp / SMS / Both wired end-to-end | v69 |

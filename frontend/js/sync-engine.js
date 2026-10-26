@@ -273,8 +273,8 @@ async function pushOp(op) {
       };
     }
     case 'notice_send': {
-      // Offline notice (Pending Send) — delivered once, exactly once.
-      const res = await api.sendMessage(p.tenant_id, p.message, op.client_txn_id);
+      // Offline notice (Pending Send) - delivered once, exactly once.
+      const res = await api.sendMessage(p.tenant_id, p.message, op.client_txn_id, p.channel);
       return { res, cache: null, row: null };
     }
     case 'exit_create': {

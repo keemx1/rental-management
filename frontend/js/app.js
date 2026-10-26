@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v68';
+const GEHM_VERSION = 'v69';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -8876,9 +8876,10 @@ document.getElementById('message-form')?.addEventListener('submit', async (e) =>
   if (effectiveOffline()) {
     try {
       const clientTxnId = offlineDb.newClientTxnId();
+      const channel = document.getElementById('message-channel')?.value || 'whatsapp';
       await queueOutboxOp({
         type: 'notice_send',
-        payload: { tenant_id: tenantId, message, client_txn_id: clientTxnId },
+        payload: { tenant_id: tenantId, message, channel, client_txn_id: clientTxnId },
       });
       statusEl.textContent = '🟠 Saved — Pending Send. Will deliver automatically when internet returns.';
       statusEl.className = 'text-amber-500 text-sm font-mono mt-2';
@@ -8896,12 +8897,32 @@ document.getElementById('message-form')?.addEventListener('submit', async (e) =>
   }
 
   try {
-    await api.sendMessage(tenantId, message);
-    statusEl.textContent = '✓ Message sent successfully!';
-    statusEl.className = 'text-green-500 text-sm font-mono mt-2';
+    const channel = document.getElementById('message-channel')?.value || 'whatsapp';
+    const res = await api.sendMessage(tenantId, message, undefined, channel);
+    // Per-channel result line: WhatsApp: Sent · SMS: Sent (or the failure).
+    const wa = res.whatsapp || {};
+    const sms = res.sms || {};
+    const parts = [];
+    if (wa.status && wa.status !== 'Skipped') {
+      parts.push(`WhatsApp: ${wa.status}${wa.failureReason ? ` (${wa.failureReason})` : ''}`);
+    }
+    if (sms.status && sms.status !== 'Skipped') {
+      parts.push(`SMS: ${sms.status}${sms.failureReason ? ` (${sms.failureReason})` : ''}`);
+    }
+    const anyFailed = (wa.status === 'Failed') || (sms.status === 'Failed');
+    if (res.already_synced) {
+      statusEl.textContent = 'Already sent earlier — not duplicated.';
+      statusEl.className = 'text-amber-500 text-sm font-mono mt-2';
+    } else if (anyFailed) {
+      statusEl.textContent = `Sent with issues — ${parts.join(' · ')}`;
+      statusEl.className = 'text-amber-500 text-sm font-mono mt-2';
+    } else {
+      statusEl.textContent = `✓ Message sent — ${parts.join(' · ')}`;
+      statusEl.className = 'text-green-500 text-sm font-mono mt-2';
+    }
     setTimeout(() => {
       document.getElementById('message-modal').classList.add('hidden');
-    }, 1500);
+    }, 2500);
   } catch (err) {
     statusEl.textContent = 'Failed to send: ' + err.message;
     statusEl.className = 'text-rose-400 text-sm font-mono mt-2';

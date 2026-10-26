@@ -614,45 +614,101 @@ router.get('/:id/profile', async (req, res) => {
 
 router.post('/:id/send-message', async (req, res) => {
   try {
-    const { message, client_txn_id } = req.body;
+    const { message, client_txn_id, channel } = req.body;
     if (!message) {
       return res.status(400).json({ error: 'message required' });
     }
+    // Delivery channel: whatsapp (default) | sms | both.
+    const chan = ['whatsapp', 'sms', 'both'].includes(channel) ? channel : 'whatsapp';
+    const wantsWa = chan === 'whatsapp' || chan === 'both';
+    const wantsSms = chan === 'sms' || chan === 'both';
+
     // Idempotent replay: an offline notice already delivered on sync.
     if (client_txn_id) {
       const replay = await store.findMessageByClientTxnId(client_txn_id);
       if (replay) {
-        return res.json({ success: true, whatsapp: { status: replay.status || 'Sent' }, already_synced: true });
+        return res.json({ success: true, channel: chan, whatsapp: { status: replay.status || 'Sent' }, already_synced: true });
       }
     }
     const tenant = await store.getTenant(req.params.id);
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
     const whatsapp = require('../config/whatsapp');
-    let status = 'Sent';
-    let failureReason = null;
-    let whatsappMessageId = null;
-    try {
-      const result = await whatsapp.sendTextMessage(tenant.phone_number, message);
-      status = result.status;
-      whatsappMessageId = result.messageId;
-      failureReason = result.failureReason || (result.status === 'Failed' ? 'ack_error' : null);
-    } catch (err) {
-      status = 'Failed';
-      failureReason = err.message;
+    const { normalizePhone } = require('../whatsapp/phone');
+    const smsService = require('../services/smsBytewave');
+
+    const wa = { status: 'Skipped', failureReason: null, whatsappMessageId: null };
+    if (wantsWa) {
+      let status = 'Sent';
+      let failureReason = null;
+      let whatsappMessageId = null;
+      try {
+        const result = await whatsapp.sendTextMessage(tenant.phone_number, message);
+        status = result.status;
+        whatsappMessageId = result.messageId;
+        failureReason = result.failureReason || (result.status === 'Failed' ? 'ack_error' : null);
+      } catch (err) {
+        status = 'Failed';
+        failureReason = err.message;
+      }
+      wa.status = status;
+      wa.failureReason = failureReason;
+      wa.whatsappMessageId = whatsappMessageId;
+      await store.logMessage({
+        tenantId: tenant.id,
+        messageType: 'Custom Message',
+        messageBody: message,
+        status,
+        whatsappMessageId,
+        failureReason,
+        clientTxnId: client_txn_id || null,
+      });
     }
 
-    await store.logMessage({
-      tenantId: tenant.id,
-      messageType: 'Custom Message',
-      messageBody: message,
-      status,
-      whatsappMessageId,
-      failureReason,
-      clientTxnId: client_txn_id || null,
-    });
+    const sms = { status: 'Skipped', failureReason: null };
+    if (wantsSms) {
+      // SMS not configured at all and it is the ONLY channel -> clear 400.
+      let settings = null;
+      try { settings = await smsService.getSmsSettings(); } catch (_) { settings = null; }
+      if (!settings || !settings.api_token) {
+        if (chan === 'sms') {
+          return res.status(400).json({ error: 'SMS is not configured — save the SMS API token in SMS Settings first.' });
+        }
+        sms.status = 'Failed';
+        sms.failureReason = 'SMS not configured (save the SMS API token in SMS Settings)';
+      } else {
+        try {
+          const to = normalizePhone(tenant.phone_number);
+          const result = await smsService.sendSms({ to, message });
+          sms.status = 'Sent';
+          sms.smsId = (result && result.data && (result.data.uid || result.data.id)) || null;
+        } catch (err) {
+          sms.status = 'Failed';
+          sms.failureReason = err.message || 'SMS send failed';
+        }
+        // SMS history (visible in the SMS tab of Messages — type starts with 'SMS')
+        await store.logMessage({
+          tenantId: tenant.id,
+          messageType: 'SMS Custom Message',
+          messageBody: message,
+          status: sms.status,
+          whatsappMessageId: sms.smsId || null,
+          failureReason: sms.failureReason,
+          clientTxnId: client_txn_id || null,
+        });
+      }
+    }
 
-    res.json({ success: true, whatsapp: { status, failureReason } });
+    const requested = [wantsWa ? wa : null, wantsSms ? sms : null].filter(Boolean);
+    const anyFailed = requested.some((c) => c.status === 'Failed');
+    const allSent = requested.every((c) => c.status === 'Sent');
+    if (!allSent && requested.every((c) => c.status === 'Failed')) {
+      return res.status(502).json({
+        error: `All channels failed: ${requested.map((c) => `${c.status}${c.failureReason ? ' (' + c.failureReason + ')' : ''}`).join('; ')}`,
+        channel: chan, whatsapp: wa, sms,
+      });
+    }
+    res.json({ success: allSent, channel: chan, whatsapp: wa, sms });
   } catch (err) {
     if (err && err.code === '23505' && req.body?.client_txn_id) {
       try {

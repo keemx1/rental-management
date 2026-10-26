@@ -390,8 +390,11 @@ export const api = {
   downloadDepositsReport(house_id, month) {
     return blobRequest('/reports/deposits-new-tenants', { mode: 'download', house_id, month });
   },
-  sendMessage(id, message, client_txn_id) {
-    return request(`/tenants/${encodeURIComponent(id)}/send-message`, { method: 'POST', body: JSON.stringify({ message, client_txn_id }) });
+  sendMessage(id, message, client_txn_id, channel) {
+    return request(`/tenants/${encodeURIComponent(id)}/send-message`, {
+      method: 'POST',
+      body: JSON.stringify({ message, client_txn_id, channel }),
+    });
   },
   listInspections({ limit = 100 } = {}) {
     return request(`/inspections?limit=${limit}`);

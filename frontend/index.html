@@ -5249,13 +5249,21 @@
           </select>
         </div>
         <div>
+          <label class="form-label">Send Via</label>
+          <select id="message-channel" class="cyber-input font-mono">
+            <option value="whatsapp">WhatsApp</option>
+            <option value="sms">SMS</option>
+            <option value="both">WhatsApp + SMS (Both)</option>
+          </select>
+        </div>
+        <div>
           <label class="form-label">Message Body</label>
           <textarea id="message-body" rows="6" required class="cyber-input"
             placeholder="Type your message here..."></textarea>
         </div>
         <p id="message-status" class="hidden text-sm font-mono"></p>
         <div class="flex gap-2 pt-2">
-          <button type="submit" id="btn-send-message" class="qc-btn qc-btn-primary flex-1">Send via WhatsApp</button>
+          <button type="submit" id="btn-send-message" class="qc-btn qc-btn-primary flex-1">Send Message</button>
           <button type="button" id="message-modal-cancel" class="qc-btn flex-1">Cancel</button>
         </div>
       </form>
@@ -5492,10 +5500,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=68"></script>
+  <script type="module" src="/js/app.js?v=69"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=68').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=69').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),
