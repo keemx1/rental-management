@@ -18,10 +18,12 @@ const STATES = {
 
 // ─── Transient session-file locks ────────────────────────────────────────────
 // Windows (Defender real-time scanning, backup tools) can momentarily lock the
-// Baileys session JSON files. An "open"/EBUSY failure happens BEFORE any bytes
-// are relayed, so one quick retry prevents a false "Failed" status for a send
-// that then reports delivery problems — and it can never duplicate a message
-// because the failed attempt never transmitted anything.
+// Baileys session JSON files. These errors surface AFTER WhatsApp has accepted
+// the message for relay — the message IS delivered (pre-retry-fix "Failed"
+// sends arrived at the tenant; retrying them duplicated messages). THEREFORE:
+// exactly ONE send attempt, always. A lock-class error returns a soft success
+// without an id so callers log Sent (unconfirmed) instead of Failed, and no
+// caller fallback path can re-send the same message.
 function isTransientLockError(err) {
   if (!err) return false;
   const msg = String(err.message || '');
@@ -31,18 +33,15 @@ function isTransientLockError(err) {
     || /resource busy/i.test(msg);
 }
 
-async function withSessionLockRetry(fn, attempts = 2) {
-  let lastErr = null;
-  for (let i = 0; i <= attempts; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (!isTransientLockError(err) || i === attempts) throw err;
-      await new Promise((r) => setTimeout(r, 500 + i * 250));
+async function sendWithSoftLock(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (isTransientLockError(err)) {
+      return { id: null, unconfirmed: true, lockError: String(err.message || err) };
     }
+    throw err;
   }
-  throw lastErr;
 }
 
 class SessionManager extends EventEmitter {
@@ -295,21 +294,21 @@ class SessionManager extends EventEmitter {
     if (this._state !== STATES.CONNECTED || !this._provider) {
       throw new Error('WhatsApp session is not connected');
     }
-    return withSessionLockRetry(() => this._provider.sendText(phone, text));
+    return sendWithSoftLock(() => this._provider.sendText(phone, text));
   }
 
   async sendMedia(phone, buffer, mimetype, filename) {
     if (this._state !== STATES.CONNECTED || !this._provider) {
       throw new Error('WhatsApp session is not connected');
     }
-    return withSessionLockRetry(() => this._provider.sendMedia(phone, buffer, mimetype, filename));
+    return sendWithSoftLock(() => this._provider.sendMedia(phone, buffer, mimetype, filename));
   }
 
   async sendDocument(phone, buffer, mimetype, filename) {
     if (this._state !== STATES.CONNECTED || !this._provider) {
       throw new Error('WhatsApp session is not connected');
     }
-    return withSessionLockRetry(() => this._provider.sendDocument(phone, buffer, mimetype, filename));
+    return sendWithSoftLock(() => this._provider.sendDocument(phone, buffer, mimetype, filename));
   }
 
   async sendBulk(messages) {
@@ -319,7 +318,7 @@ class SessionManager extends EventEmitter {
     const results = [];
     for (let i = 0; i < messages.length; i++) {
       const { phone, text } = messages[i];
-      const result = await withSessionLockRetry(() => this._provider.sendText(phone, text));
+      const result = await sendWithSoftLock(() => this._provider.sendText(phone, text));
       results.push(result);
       if (i < messages.length - 1) {
         await new Promise((r) => setTimeout(r, 2500));
@@ -350,5 +349,4 @@ class SessionManager extends EventEmitter {
 const sessionManager = new SessionManager();
 // Exposed for tests/diagnostics: transient session-file lock classification.
 sessionManager.isTransientLockError = isTransientLockError;
-sessionManager.withSessionLockRetry = withSessionLockRetry;
 module.exports = sessionManager;

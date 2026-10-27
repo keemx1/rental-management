@@ -31,7 +31,7 @@ Run from the repo root (server must be up on port `3003`):
 | House collection position | `node tests/test_house_collection.js` | 29 assertions — expected (rent/deposits/water/garbage/penalties/maintenance/exit charges) and collected (any category) per period, remaining + %, mid-period joiner included, live recompute on charge/payment changes |
 | Payment delivery + receipt | `node tests/test_payment_delivery.js` | 27 assertions — delivery-status flips Sent→Delivered→Read via the real receipt callback, confirmation text AND PDF receipt sent for every payment type (normal/advanced/overpayment/partial/arrears), overpayment workflow preserved |
 | Message channels | `node tests/test_message_channels.js` | 26 assertions — WhatsApp/SMS/Both dispatch with per-channel status, SMS history in the SMS tab, unconfigured-SMS 400, all-failed 502, idempotent replay, offline channel forwarding |
-| Send retry (session locks) | `node tests/test_send_retry.js` | 11 assertions — transient session-file locks (EPERM-open/EBUSY) retried safely pre-transmission, real failures surfaced immediately, disconnected guard untouched |
+| Send retry (session locks) | `node tests/test_send_retry.js` | 16 assertions — EXACTLY ONE provider call per send (the v66 retry removed: it duplicated deliveries), lock errors soft-success without id (callers log Sent-unconfirmed, no fallback re-send), real failures throw after one attempt, bulk one-per-recipient, config chain end-to-end, disconnected guard |
 | Pre-Exit Inspection Inventory | `node tests/test_preexit_inspection.js` | 56 assertions — unit lookup + tenancy disambiguation, item CRUD with server-side totals (spec 14,500 example), Draft/Shared/Agreed, PDF with exact disclaimer + no refund figures, one-time transfer into the Exit Invoice (repeat/partial retry safe, finalized refused 409), transferred items locked, tenancy seal + archive visibility, re-let protection |
 | Statement period integration | `node tests/test_statement_period.js` | 55 assertions — 7-row period summary (opening/rent/full garbage/charges/due/payments/balance) with month arithmetic + continuity, period-scoped payment & charge histories (no all-time mixing, no duplicate rows), period empty-states, design/letterhead preserved, route validation + PDF, frontend period selector |
 | Broadcast channel (SMS option) | `node tests/test_broadcast_channel.js` | 32 assertions — whatsapp/sms/both dispatch with per-channel tallies and log rows, SMS-only 400 when unconfigured, both+unconfigured degrades to WhatsApp with per-recipient SMS failures, honest per-recipient failure reasons, whatsapp_message_log untouched by SMS legs, house scoping, frontend selector |
@@ -612,6 +612,33 @@ unchanged). Stamps → `?v=75`, SW → `gutenberg-v76-irmanage`.
   ambiguous `next_number` reference (only surfaced on a brand-new prefix
   like the first GEHPM-COM invoice) — now table-qualified.
 
+### 22. WhatsApp duplicate-send fix (backend only, no version bump)
+Operator report: recipients received the same message 2-4 times.
+
+**Root cause (the v66 lock-retry, our own regression):** the EPERM/EBUSY
+session-file errors surface AFTER WhatsApp has accepted the message for
+relay — the pre-v66 evidence already proved it ("Failed" sends were still
+delivered). `withSessionLockRetry` therefore re-sent every such message,
+AND broadcast callers compound it: `try { sessionManager.sendText } catch {
+config.sendTextMessage }` — the fallback calls sessionManager AGAIN (up to
+4 sends on one log row).
+
+**Fix:** exactly ONE provider call per send, always. Lock-class errors now
+return a soft success without an id (`{ id: null, unconfirmed: true }`)
+instead of throwing, so:
+- no retry exists to duplicate,
+- caller fallbacks never trigger (no throw for lock errors),
+- logs record Sent (unconfirmed) instead of a false Failed.
+Real (non-lock) errors still throw after one attempt. Verified end-to-end
+through `config.sendTextMessage` (1 provider call, Sent+null id) and bulk
+(1 call per recipient).
+
+`test_send_retry.js` rewritten (16 assertions) to lock in the
+single-attempt/no-duplicate guarantee. To re-enable deliveries: reconnect
+WhatsApp (scan the QR in the WhatsApp view) — optionally run
+`add-defender-exclusion.bat` first so the underlying session-file locks
+stop occurring at all.
+
 ---
 
 ## Open items / next
@@ -654,3 +681,4 @@ unchanged). Stamps → `?v=75`, SW → `gutenberg-v76-irmanage`.
 | 19 | Broadcast channel selector: WhatsApp / SMS / Both with per-channel tallies and honest statuses | v73 |
 | 20 | Water Bill invoice covers water only (rent/garbage excluded from totals, document and form) | v74 |
 | 21 | Universal Global Search + Landlord Commission Management (per-property ledgers, invoices, payments, statements) | v75 |
+| 22 | WhatsApp duplicate-send fix: exactly one attempt per send; lock errors soft-success (v66 retry removed) | backend |
