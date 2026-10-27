@@ -229,4 +229,75 @@ router.post('/commission-invoices/:invoiceId/void', async (req, res) => {
   }
 });
 
+// ── Landlord Ledger Dashboard: commission + rent remittance, per property ──
+router.get('/:id/properties/:paybill/dashboard', async (req, res) => {
+  try {
+    const dash = await commission.propertyDashboard(req.params.paybill, Number(req.params.id), req.query.month);
+    if (!dash) return res.status(404).json({ error: 'Property not found' });
+    if (dash.landlord && dash.landlord.id !== Number(req.params.id)) {
+      return res.status(403).json({ error: 'This property belongs to a different landlord' });
+    }
+    res.json(dash);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load property dashboard: ' + err.message });
+  }
+});
+
+router.post('/:id/properties/:paybill/remittance-payments', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await commission.recordRemittancePayment({
+      house_paybill_number: req.params.paybill,
+      landlord_id: Number(req.params.id),
+      declared_landlord_id: body.landlord_id != null ? Number(body.landlord_id) : null,
+      billing_month: body.billing_month,
+      payment_date: body.payment_date,
+      amount: body.amount,
+      method: body.method,
+      reference: body.reference,
+      notes: body.notes,
+      actor: req.user?.username,
+    });
+    if (result.error) {
+      const status = result.code === 'NOT_FOUND' ? 404
+        : result.code === 'LANDLORD_MISMATCH' ? 409 : 400;
+      return res.status(status).json({ error: result.error, code: result.code });
+    }
+    await store.logAudit({
+      actor: req.user?.username, action: 'landlord_remittance_recorded',
+      entityType: 'landlord_remittance_payment', entityId: String(result.payment.id),
+      details: { house: req.params.paybill, billing_month: body.billing_month, amount: Number(result.payment.amount), reference: result.payment.reference },
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to record remittance: ' + err.message });
+  }
+});
+
+router.put('/:id/properties/:paybill/remittance-day', async (req, res) => {
+  try {
+    const result = await commission.setRemittanceDay(req.params.paybill, req.body?.day);
+    if (result.error) return res.status(400).json({ error: result.error, code: result.code });
+    await store.logAudit({
+      actor: req.user?.username, action: 'remittance_day_set',
+      entityType: 'house', entityId: req.params.paybill, details: { day: result.remittance_day },
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to set agreed payment day: ' + err.message });
+  }
+});
+
+router.post('/:id/properties/:paybill/remittance-statement', async (req, res) => {
+  try {
+    const { generateAndStoreRemittanceStatement } = require('../services/documentStore');
+    const doc = await generateAndStoreRemittanceStatement(req.params.paybill);
+    if (!doc) return res.status(404).json({ error: 'Property not found' });
+    const rem = await commission.remittanceLedger(req.params.paybill, Number(req.params.id));
+    res.json({ ledger: rem, document: doc });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to build remittance statement: ' + err.message });
+  }
+});
+
 module.exports = router;

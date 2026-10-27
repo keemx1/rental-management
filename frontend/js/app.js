@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v75';
+const GEHM_VERSION = 'v76';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -4102,6 +4102,8 @@ async function openLandlordProfile(id, monthOverride) {
             <td class="font-mono">${llFmt(p.total_commission)}</td>
             <td class="font-mono text-emerald-400">${llFmt(p.total_paid)}</td>
             <td class="font-mono font-bold ${Number(p.outstanding) > 0 ? 'text-amber-400' : 'text-slate-400'}">${llFmt(p.outstanding)}</td>
+            <td class="font-mono font-bold ${Number(p.remittance_outstanding) > 0 ? 'text-emerald-400' : 'text-slate-400'}">${llFmt(p.remittance_outstanding)}</td>
+            <td class="text-xs font-mono text-slate-400">${p.remittance_day ? `${p.remittance_day}th` : '—'}</td>
             <td class="text-right whitespace-nowrap text-xs">
               <button type="button" class="text-cyan-400 hover:text-cyan-300 px-1" data-ll-invoice="${escapeHtml(p.house_paybill_number)}">Invoice</button>
               <button type="button" class="text-emerald-400 hover:text-emerald-300 px-1" data-ll-payment="${escapeHtml(p.house_paybill_number)}">Payment</button>
@@ -4113,6 +4115,8 @@ async function openLandlordProfile(id, monthOverride) {
     }
     const totalEl = document.getElementById('ll-total-outstanding');
     if (totalEl) totalEl.textContent = llFmt(ov.total_outstanding);
+    const totalRem = document.getElementById('ll-total-remittance');
+    if (totalRem) totalRem.textContent = llFmt(ov.total_remittance_outstanding || 0);
   } catch (err) {
     showToast('Failed to load landlord: ' + err.message, 'error');
   }
@@ -4143,16 +4147,58 @@ document.getElementById('ll-props-tbody')?.addEventListener('click', async (e) =
 
 async function openLandlordLedger(paybill) {
   if (!_llState.landlordId) return;
+  const month = document.getElementById('ll-dash-month')?.value || _llState.month || new Date().toISOString().slice(0, 7);
   try {
-    const ledger = await api.landlordLedger(_llState.landlordId, paybill);
-    _llState.ledgerHouse = paybill;
+    const dash = await api.landlordDashboard(_llState.landlordId, paybill, month);
+    _llState.dash = {
+      house: paybill,
+      latestInvoiceDocId: dash.summary.latest_commission_invoice?.document_id || null,
+      landlordPhone: dash.landlord?.phone || null,
+      landlordName: dash.landlord?.name || '',
+      month: dash.month,
+    };
     const modal = document.getElementById('ll-ledger-modal');
     modal?.classList.remove('hidden');
+    const monthEl = document.getElementById('ll-dash-month');
+    if (monthEl && !monthEl.value) monthEl.value = dash.month;
+    const s = dash.summary;
     const sub = document.getElementById('ll-ledger-sub');
-    if (sub) sub.textContent = `${ledger.landlord?.name || ''} · ${ledger.house?.house_name || paybill} (${paybill}) · rate ${Number(ledger.rate_percent).toFixed(2)}%`;
+    if (sub) sub.textContent = `${dash.landlord?.name || ''} · ${dash.house?.house_name || paybill} (${paybill}) · rate ${Number(dash.rate_percent).toFixed(2)}% · ${dash.month}`;
+
+    // Summary (dashboard spec #10)
+    const sum = document.getElementById('ll-dash-summary');
+    if (sum) {
+      const cell = (label, value, cls = '') =>
+        `<div class="bg-slate-800/50 border border-slate-700 rounded p-2">
+           <div class="text-[10px] uppercase text-slate-400">${label}</div>
+           <div class="font-mono font-bold ${cls}">${llFmt(value)}</div>
+         </div>`;
+      sum.innerHTML =
+        cell('Rent collected (month)', s.rent_collected, 'text-cyan-300') +
+        cell('Commission earned (month)', s.commission_earned, 'text-cyan-300') +
+        cell('Other deductions (month)', s.other_deductions) +
+        cell('Net payable — landlord (month)', s.net_payable_month, 'text-emerald-300') +
+        cell('Commission invoiced (total)', s.commission_invoiced) +
+        cell('Commission paid (total)', s.commission_paid, 'text-emerald-400') +
+        cell('Commission OUTSTANDING (GEHPM)', s.commission_outstanding, 'text-amber-400') +
+        cell('Remitted to landlord (total)', s.remittance_paid, 'text-emerald-400') +
+        cell('Remittance OUTSTANDING (landlord)', s.remittance_outstanding, 'text-emerald-300') +
+        `<div class="bg-slate-800/50 border border-slate-700 rounded p-2 col-span-2">
+           <div class="text-[10px] uppercase text-slate-400">Next agreed payment date</div>
+           <div class="font-mono font-bold text-white">${s.next_agreed_date || 'Not set'}</div>
+         </div>`;
+    }
+
+    // Agreed day editor
+    const dayEl = document.getElementById('ll-dash-day');
+    if (dayEl) dayEl.value = s.remittance_day || '';
+    const dayInfo = document.getElementById('ll-dash-day-info');
+    if (dayInfo) dayInfo.textContent = s.next_agreed_date ? `Next payment due: ${s.next_agreed_date}` : 'No agreed day set for this property';
+
+    // A. Commission ledger (invoices + payments, running balance)
     const tbody = document.getElementById('ll-ledger-tbody');
     if (tbody) {
-      tbody.innerHTML = (ledger.events || []).map((e) => e.type === 'invoice' ? `
+      tbody.innerHTML = (dash.commission_events || []).map((e) => e.type === 'invoice' ? `
         <tr class="border-b border-slate-800">
           <td class="font-mono text-xs">${new Date(e.date).toLocaleDateString('en-GB')}</td>
           <td class="font-mono text-xs">${escapeHtml(e.invoice_number)}<div class="text-[10px] text-slate-500">${escapeHtml(e.billing_month || '')}</div></td>
@@ -4168,11 +4214,110 @@ async function openLandlordLedger(paybill) {
           <td class="font-mono text-emerald-300">${llFmt(e.amount)}</td>
           <td class="text-xs text-slate-400">${escapeHtml([e.method, e.reference].filter(Boolean).join(' · '))}</td>
           <td class="font-mono font-bold">${llFmt(e.balance)}</td>
-        </tr>`).join('') || '<tr><td colspan="6" class="text-center py-4 text-slate-500">No activity yet.</td></tr>';
+        </tr>`).join('') || '<tr><td colspan="6" class="text-center py-4 text-slate-500">No commission activity yet.</td></tr>';
     }
-    const sum = document.getElementById('ll-ledger-summary');
-    if (sum) sum.textContent = `Commission ${llFmt(ledger.summary.total_commission)} · Paid ${llFmt(ledger.summary.total_paid)} · Outstanding ${llFmt(ledger.summary.outstanding)}`;
-  } catch (err) { showToast(err.message, 'error'); }
+    const csum = document.getElementById('ll-ledger-summary');
+    if (csum) csum.textContent = `Commission invoiced ${llFmt(s.commission_invoiced)} · Payments received ${llFmt(s.commission_paid)} · Outstanding (GEHPM) ${llFmt(s.commission_outstanding)}`;
+
+    // B. Remittance ledger — monthly rows + payment history
+    const remBody = document.getElementById('ll-rem-tbody');
+    if (remBody) {
+      remBody.innerHTML = (dash.remittance_month_rows || []).map((r) => `
+        <tr class="border-b border-slate-800">
+          <td class="font-mono text-xs">${escapeHtml(r.billing_month)}</td>
+          <td class="font-mono">${llFmt(r.rent_collected)}</td>
+          <td class="font-mono text-cyan-300">${llFmt(r.commission_earned)}</td>
+          <td class="font-mono">${llFmt(r.other_deductions)}</td>
+          <td class="font-mono font-bold text-emerald-300">${llFmt(r.net_payable)}</td>
+          <td class="font-mono text-emerald-400">${llFmt(r.paid_in_month)}</td>
+          <td class="font-mono font-bold ${Number(r.outstanding_after) > 0 ? 'text-amber-400' : 'text-slate-400'}">${llFmt(r.outstanding_after)}</td>
+        </tr>`).join('') || '<tr><td colspan="7" class="text-center py-4 text-slate-500">No rent collections recorded yet.</td></tr>';
+    }
+    const remPayBody = document.getElementById('ll-rem-payments-tbody');
+    if (remPayBody) {
+      const pays = (dash.remittance_events || []).filter((e) => e.type === 'payment');
+      remPayBody.innerHTML = pays.map((e) => `
+        <tr class="border-b border-slate-800">
+          <td class="font-mono text-xs">${new Date(e.date).toLocaleDateString('en-GB')}</td>
+          <td class="font-mono text-xs">${escapeHtml(e.billing_month || '')}</td>
+          <td class="font-mono text-emerald-300">${llFmt(e.amount)}</td>
+          <td class="text-xs">${escapeHtml(e.method || '')}</td>
+          <td class="text-xs font-mono text-slate-400">${escapeHtml(e.reference || '')}</td>
+        </tr>`).join('') || '<tr><td colspan="5" class="text-center py-3 text-slate-500">No remittances recorded yet.</td></tr>';
+    }
+    const rsum = document.getElementById('ll-rem-summary');
+    if (rsum) rsum.textContent = `Net payable (all months) ${llFmt(s.remittance_net_total)} · Remitted ${llFmt(s.remittance_paid)} · Outstanding (landlord) ${llFmt(s.remittance_outstanding)} — separate from the commission balance`;
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function openRemittanceModal(paybill) {
+  if (!_llState.landlordId) return;
+  _llState.paymentCtx = paybill; // reuse ctx for the remittance target
+  _llState.remittanceCtx = paybill;
+  const modal = document.getElementById('ll-remittance-modal');
+  modal?.classList.remove('hidden');
+  const prop = _llState.overview?.properties?.find((p) => p.house_paybill_number === paybill);
+  const sub = document.getElementById('ll-rem-sub');
+  if (sub) sub.textContent = `${_llState.overview?.landlord?.name || ''} · ${prop?.house_name || paybill} (${paybill}) · outstanding ${llFmt(prop?.remittance_outstanding)}`;
+  const monthEl = document.getElementById('llr-billing-month');
+  if (monthEl) monthEl.value = document.getElementById('ll-dash-month')?.value || _llState.month || new Date().toISOString().slice(0, 7);
+  const dateEl = document.getElementById('llr-date');
+  if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+  const amtEl = document.getElementById('llr-amount');
+  if (amtEl) amtEl.value = '';
+  const res = document.getElementById('ll-rem-result');
+  if (res) res.textContent = '';
+}
+
+async function saveRemittancePayment() {
+  if (!_llState.landlordId || !_llState.remittanceCtx) return;
+  const body = {
+    billing_month: document.getElementById('llr-billing-month')?.value,
+    payment_date: document.getElementById('llr-date')?.value,
+    amount: Number(document.getElementById('llr-amount')?.value || 0),
+    method: document.getElementById('llr-method')?.value || 'M-Pesa',
+    reference: document.getElementById('llr-ref')?.value?.trim() || null,
+    notes: document.getElementById('llr-notes')?.value?.trim() || null,
+  };
+  const resEl = document.getElementById('ll-rem-result');
+  try {
+    const res = await api.recordRemittancePayment(_llState.landlordId, _llState.remittanceCtx, body);
+    if (resEl) resEl.textContent = `✓ Recorded — remittance outstanding now ${llFmt(res.outstanding)}.`;
+    document.getElementById('llr-amount').value = '';
+    document.getElementById('llr-ref').value = '';
+    await openLandlordLedger(_llState.remittanceCtx);
+    await loadLandlords();
+    if (_llState.landlordId) await openLandlordProfile(_llState.landlordId, _llState.month);
+  } catch (err) {
+    if (resEl) resEl.textContent = err.message;
+  }
+}
+
+async function dashViewInvoice(mode) {
+  const docId = _llState.dash?.latestInvoiceDocId;
+  if (!docId) {
+    document.getElementById('ll-dash-result').textContent = 'No invoice yet for this property — use "Invoice" in the profile to generate one.';
+    return;
+  }
+  try {
+    const res = await api.document(docId);
+    const doc = res.document || res;
+    if (mode === 'share') {
+      const phone = _llState.dash.landlordPhone;
+      if (!phone) { document.getElementById('ll-dash-result').textContent = 'Landlord has no phone number on file.'; return; }
+      document.getElementById('ll-dash-result').textContent = 'Sharing via WhatsApp…';
+      const r = await api.shareDocument(docId, phone);
+      document.getElementById('ll-dash-result').textContent = r.wa_status === 'Sent' || r.status === 'Sent'
+        ? '✓ Invoice shared with the landlord via WhatsApp.' : `WhatsApp: ${r.wa_status || r.status || 'unknown'}${r.wa_reason ? ' — ' + r.wa_reason : ''}`;
+      return;
+    }
+    if (mode === 'download') { await downloadDocumentFile(doc); return; }
+    await openDocumentViewModal(doc);
+  } catch (err) {
+    document.getElementById('ll-dash-result').textContent = err.message;
+  }
 }
 
 async function downloadCommissionStatement(paybill) {
@@ -4377,9 +4522,42 @@ document.getElementById('btn-ll-invoice-pdf')?.addEventListener('click', async (
 document.getElementById('btn-ll-pay-cancel')?.addEventListener('click', () => document.getElementById('ll-payment-modal')?.classList.add('hidden'));
 document.getElementById('btn-ll-pay-save')?.addEventListener('click', saveCommissionPayment);
 document.getElementById('btn-ll-ledger-close')?.addEventListener('click', () => document.getElementById('ll-ledger-modal')?.classList.add('hidden'));
-document.getElementById('btn-ll-ledger-statement')?.addEventListener('click', () => {
-  if (_llState.ledgerHouse) downloadCommissionStatement(_llState.ledgerHouse);
+document.getElementById('ll-dash-month')?.addEventListener('change', () => {
+  if (_llState.dash?.house) openLandlordLedger(_llState.dash.house);
 });
+document.getElementById('btn-ll-dash-pay-comm')?.addEventListener('click', () => {
+  if (_llState.dash?.house) openCommissionPaymentModal(_llState.dash.house);
+});
+document.getElementById('btn-ll-dash-pay-rem')?.addEventListener('click', () => {
+  if (_llState.dash?.house) openRemittanceModal(_llState.dash.house);
+});
+document.getElementById('btn-ll-dash-view-inv')?.addEventListener('click', () => dashViewInvoice('view'));
+document.getElementById('btn-ll-dash-dl-inv')?.addEventListener('click', () => dashViewInvoice('download'));
+document.getElementById('btn-ll-dash-share-inv')?.addEventListener('click', () => dashViewInvoice('share'));
+document.getElementById('btn-ll-dash-stmt-comm')?.addEventListener('click', () => {
+  if (_llState.dash?.house) downloadCommissionStatement(_llState.dash.house);
+});
+document.getElementById('btn-ll-dash-stmt-rem')?.addEventListener('click', async () => {
+  if (!_llState.landlordId || !_llState.dash?.house) return;
+  try {
+    showToast('Generating remittance statement PDF…', 'info');
+    const res = await api.remittanceStatement(_llState.landlordId, _llState.dash.house);
+    if (res.document) await openDocumentViewModal(res.document);
+    else document.getElementById('ll-dash-result').textContent = 'Statement built but no document returned';
+  } catch (err) { document.getElementById('ll-dash-result').textContent = err.message; }
+});
+document.getElementById('btn-ll-dash-day-save')?.addEventListener('click', async () => {
+  if (!_llState.landlordId || !_llState.dash?.house) return;
+  const day = Number(document.getElementById('ll-dash-day')?.value || 0);
+  try {
+    const res = await api.setRemittanceDay(_llState.landlordId, _llState.dash.house, day);
+    document.getElementById('ll-dash-day-info').textContent = res.next_agreed_date ? `Next payment due: ${res.next_agreed_date}` : '';
+    showToast(`Agreed payment day set to ${res.remittance_day}`, 'success');
+    await loadLandlords();
+  } catch (err) { document.getElementById('ll-dash-result').textContent = err.message; }
+});
+document.getElementById('btn-llr-cancel')?.addEventListener('click', () => document.getElementById('ll-remittance-modal')?.classList.add('hidden'));
+document.getElementById('btn-llr-save')?.addEventListener('click', saveRemittancePayment);
 
 function togglePaymentFields() {
   const method = document.getElementById('house-edit-payment-method').value;

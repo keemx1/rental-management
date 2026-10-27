@@ -38,6 +38,7 @@ Run from the repo root (server must be up on port `3003`):
 | Water invoice water-only scope | `node tests/test_water_invoice_scope.js` | 27 assertions — totals = water bill + WATER arrears only (rent/garbage/other arrears excluded even when supplied), tenant rent never injected, update recomputes water-only, PDF titled WATER BILL INVOICE with no rent/garbage lines + water-only notes, form fields removed, PDF end-to-end |
 | Universal global search | `node tests/test_global_search.js` | 23 assertions — every entity type (tenants, archive, properties, landlords, water/exit invoices, pre-exit forms, payments+M-Pesa with receipt deep links, penalties, work orders, maintenance, mgmt expense invoices, documents, commission invoices/payments), kinds for direct navigation, route + auth, frontend bar |
 | Landlord commissions | `node tests/test_landlord_commissions.js` | 35 assertions — per-property accounts never mixed (300k@5%=15k vs 200k@4%=8k), invoice PDF + numbers, payments to the correct property only, automatic carry-forward (5k→17k−7k→10k→8k), statement ledger with running balance + PDF, regeneration/void, mismatch + unassigned guards, overview split |
+| Landlord ledger dashboard | `node tests/test_landlord_ledger.js` | 33 assertions — spec example exact (100k−5k−2k=93k, pay 80k→13k month row, second partial→8k), carry-forward 55.5k, two balances never offset, per-property isolation, agreed day + next due, both statements PDFs, invoice share via WhatsApp pipeline, guards, overview remittance totals |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -639,6 +640,49 @@ WhatsApp (scan the QR in the WhatsApp view) — optionally run
 `add-defender-exclusion.bat` first so the underlying session-file locks
 stop occurring at all.
 
+### 23. Landlord Ledger Dashboard: commission + rent remittance (v76)
+Extends the v75 landlord system with the SECOND financial side — rental
+income payable TO the landlord — and a full per-property ledger dashboard
+(Landlords → property → Ledger).
+
+**Schema** (`migrate-landlord-ledger.js`): `houses.landlord_remittance_day`
+(per-property agreed payment day 1-31) + `landlord_remittance_payments`
+(billing_month + payment_date + amount + method + reference + notes;
+partial/multiple payments per month allowed). Rent/commission/net payable
+are COMPUTED from existing records — no monthly tables, so duplicate
+remittance entries are structurally impossible.
+
+**Rent Remittance Ledger** (per property, fully separate from commission):
+- net payable per month = ACTUAL rent collected (same receipts/allocation
+  rule as the commission side — `payments.billing_period`, i.e. the
+  post-rollover figures) − commission earned (existing rate%) − other
+  approved deductions (existing landlord-responsibility
+  `maintenance_charges`)
+- spec example reproduced exactly: 100,000 − 5,000 − 2,000 = 93,000; pay
+  80,000 → October row 13,000; second partial 5,000 → 8,000 (never marked
+  fully paid); November net stacks onto the carried balance (→ 55,500)
+- Record Landlord Remittance posts against ONE property only (mismatched
+  landlord 409); commission balance untouched by remittance payments and
+  vice versa — no automatic offsetting
+- agreed payment day per property with computed next due date
+
+**Property Ledger Dashboard modal** (single view): summary (rent
+collected, commission earned/invoiced/paid/outstanding, net payable,
+remitted, remittance outstanding, next agreed date — both balances shown
+separately), Section A commission ledger (invoices + payments, running
+balance), Section B remittance monthly rows + payment history, agreed-day
+editor, and actions: Record Commission Payment, Record Landlord
+Remittance, View/Download/Share invoice (share via the existing
+documents→WhatsApp pipeline), Commission Statement PDF, Remittance
+Statement PDF (new template, chronological rows + running balance).
+Landlord overview now shows per-property remittance outstanding + agreed
+day + combined remittance total.
+
+Rollover: figures are read from `payments.billing_period` exactly like the
+existing commission report, so the previous month's collections and
+commission appear as soon as the rollover has recorded them — no manual
+re-entry, no recalculation. Stamps → `?v=76`, SW → `gutenberg-v77-irmanage`.
+
 ---
 
 ## Open items / next
@@ -682,3 +726,4 @@ stop occurring at all.
 | 20 | Water Bill invoice covers water only (rent/garbage excluded from totals, document and form) | v74 |
 | 21 | Universal Global Search + Landlord Commission Management (per-property ledgers, invoices, payments, statements) | v75 |
 | 22 | WhatsApp duplicate-send fix: exactly one attempt per send; lock errors soft-success (v66 retry removed) | backend |
+| 23 | Landlord Ledger Dashboard: commission + rent remittance ledgers, agreed dates, statements, invoice sharing | v76 |

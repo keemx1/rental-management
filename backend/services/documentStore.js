@@ -2095,6 +2095,80 @@ async function generateAndStoreCommissionStatement(housePaybill) {
   return doc;
 }
 
+// ─── Landlord rent remittance statement (payable TO the landlord) ──────────
+function buildRemittanceStatementHtml(rem, landlordName, asOfDate) {
+  const fmtK = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d) => {
+    if (!d) return '—';
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return String(d).slice(0, 10);
+    return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+  const rows = (rem.events || []).map((e) => {
+    if (e.type === 'net') {
+      return `<tr>
+        <td>${fmtDate(e.date)}</td>
+        <td class="muted">${escDocText(e.billing_month)}</td>
+        <td>Net remittance — rent ${fmtK(e.rent_collected)} − commission ${fmtK(e.commission_earned)}${Number(e.other_deductions) ? ` − deductions ${fmtK(e.other_deductions)}` : ''}</td>
+        <td class="num">${fmtK(e.amount)}</td>
+        <td class="ref">—</td>
+        <td class="num bal">${fmtK(e.balance)}</td>
+      </tr>`;
+    }
+    return `<tr>
+      <td>${fmtDate(e.date)}</td>
+      <td class="muted">${escDocText(e.billing_month || '')}</td>
+      <td>Payment to landlord</td>
+      <td class="num">− ${fmtK(e.amount)}</td>
+      <td class="ref">${escDocText([e.method, e.reference].filter(Boolean).join(' · '))}</td>
+      <td class="num bal">${fmtK(e.balance)}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="6" class="empty-note">No remittance activity recorded for this property yet.</td></tr>`;
+
+  return renderTemplate('landlord_remittance_statement.html', {
+    landlord_name: landlordName || 'Unassigned',
+    property_name: rem.house?.house_name || rem.house?.paybill_number || '',
+    house_paybill: rem.house?.paybill_number || '',
+    rate_percent: Number(rem.rate_percent || 0).toFixed(2),
+    agreed_day: rem.remittance_day ? String(rem.remittance_day) : 'Not set',
+    next_agreed_date: rem.next_agreed_date || '—',
+    as_of_date: asOfDate,
+    rows_html: rows,
+    total_net: fmtK(rem.summary.total_net),
+    total_paid: fmtK(rem.summary.total_paid),
+    outstanding: fmtK(rem.summary.outstanding),
+    date: asOfDate,
+  });
+}
+
+async function generateAndStoreRemittanceStatement(housePaybill) {
+  const ledgerMod = require('./landlordCommission');
+  const rem = await ledgerMod.remittanceLedger(housePaybill);
+  if (!rem) return null;
+  const landlordName = rem.landlord_name || (rem.house?.landlord_id
+    ? (await require('../config/database').query(`SELECT name FROM landlords WHERE id = $1`, [rem.house.landlord_id])).rows[0]?.name
+    : null);
+  const asOf = new Date().toISOString().slice(0, 10);
+  const html = buildRemittanceStatementHtml(rem, landlordName, asOf);
+  const safeHouse = String(housePaybill || '').replace(/[^A-Za-z0-9_-]+/g, '');
+  const filename = `LANDLORD-REMITTANCE-STATEMENT-${safeHouse}-${asOf}.pdf`;
+  ensureDir();
+  const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+  const doc = await store.createDocument({
+    doc_type: 'remittance_statement',
+    doc_number: `REMITSTMT-${housePaybill}`,
+    title: `Landlord Remittance Statement — ${rem.house?.house_name || housePaybill}`,
+    filename,
+    file_path: pdfPath,
+    house_paybill_number: housePaybill,
+    property_name: rem.house?.house_name || null,
+    amount: rem.summary.outstanding,
+    doc_date: asOf,
+    reuse_invoice_doc: true,
+  });
+  return doc;
+}
+
 module.exports = {
   DOCUMENTS_DIR,
   renderTemplate,
@@ -2139,6 +2213,8 @@ module.exports = {
   generateAndStoreCommissionInvoice,
   buildCommissionStatementHtml,
   generateAndStoreCommissionStatement,
+  buildRemittanceStatementHtml,
+  generateAndStoreRemittanceStatement,
   buildWaterBillReportHtml,
   generateWaterBillReportPdf,
   buildLetterHtml,

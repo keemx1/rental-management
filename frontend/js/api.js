@@ -286,6 +286,22 @@ export const api = {
   voidCommissionInvoice(invoiceId) {
     return request(`/landlords/commission-invoices/${invoiceId}/void`, { method: 'POST', body: JSON.stringify({}) });
   },
+  landlordDashboard(id, paybill, month) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/dashboard${month ? `?month=${encodeURIComponent(month)}` : ''}`);
+  },
+  recordRemittancePayment(id, paybill, body) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/remittance-payments`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+  },
+  setRemittanceDay(id, paybill, day) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/remittance-day`, {
+      method: 'PUT', body: JSON.stringify({ day }),
+    });
+  },
+  remittanceStatement(id, paybill) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/remittance-statement`, { method: 'POST', body: JSON.stringify({}) });
+  },
   deleteArchive(id) {
     return request(`/archive/${id}`, { method: 'DELETE' });
   },
