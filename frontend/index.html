@@ -310,7 +310,7 @@
         <!-- Search + notification bell -->
         <div class="glass-panel p-3 relative flex items-center gap-3" id="global-search-panel">
           <input id="global-search" type="text" autocomplete="off"
-            class="cyber-input flex-1 !py-2.5" title="Search" />
+            class="cyber-input flex-1 !py-2.5" placeholder="Search anything" title="Search anything" />
           <button type="button" id="ne-bell" class="ne-bell" title="Notifications">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -670,6 +670,25 @@
         </header>
 
         <!-- Payment Status Bar -->
+        <!-- Overpayment / credit consolidation (receipts kept separate) -->
+        <div id="td-credit-panel" class="glass-panel p-4 hidden">
+          <div class="flex items-center justify-between mb-2">
+            <span class="sys-tag">[OVERPAYMENT_CREDIT]</span>
+            <span class="text-xs font-mono text-slate-400">Remaining credit:
+              <span id="td-credit-remaining" class="font-mono font-bold text-lg text-emerald-400">KES 0</span></span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="cyber-table text-xs">
+              <thead><tr><th>Receipt</th><th>Date</th><th>Payment</th><th>Overpayment</th></tr></thead>
+              <tbody id="td-credit-receipts-tbody"></tbody>
+              <tfoot><tr>
+                <td colspan="3" class="text-right font-semibold">Total combined credit from receipts</td>
+                <td class="text-right font-bold font-mono" id="td-credit-total">KES 0</td>
+              </tr></tfoot>
+            </table>
+          </div>
+          <div id="td-credit-allocs" class="text-xs font-mono text-slate-400 mt-2 space-y-1"></div>
+        </div>
         <div id="td-payment-status-bar" class="glass-panel p-4">
           <div class="flex items-center justify-between mb-2">
             <div>
@@ -5880,10 +5899,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=80"></script>
+  <script type="module" src="/js/app.js?v=82"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=80').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=82').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

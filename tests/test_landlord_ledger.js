@@ -54,6 +54,7 @@ async function cleanup() {
     filePaths = docs.rows.map((r) => r.file_path).filter(Boolean);
   } catch (_) {}
   for (const sql of [
+    `DELETE FROM notification_log WHERE alert_key LIKE '%999987%' OR alert_key LIKE '%999986%' OR title ILIKE '%ZZLD%'`,
     `DELETE FROM landlord_remittance_payments WHERE house_paybill_number IN ($1,$2)`,
     `DELETE FROM commission_payments WHERE house_paybill_number IN ($1,$2)`,
     `DELETE FROM commission_invoices WHERE house_paybill_number IN ($1,$2)`,
@@ -65,6 +66,7 @@ async function cleanup() {
     `DELETE FROM tenants WHERE tenant_code LIKE 'ZZLD-%'`,
     `DELETE FROM houses WHERE paybill_number IN ($1,$2)`,
     `DELETE FROM landlords WHERE name LIKE 'ZZLD Landlord%'`,
+    `DELETE FROM audit_log WHERE entity_id LIKE 'ZZLD%' OR details::text LIKE '%ZZLD-%'`,
   ]) {
     try { await query(sql, sql.includes('$1') ? [HOUSE_A, HOUSE_B] : []); } catch (e) { console.error('[cleanup]', e.message); }
   }

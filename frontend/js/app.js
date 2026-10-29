@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v80';
+const GEHM_VERSION = 'v82';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -658,6 +658,40 @@ function applyRoute() {
   return false;
 }
 
+// Overpayment transparency (tenant dashboard): consolidated view of the
+// ORIGINAL receipts (never merged) + their allocations + remaining credit.
+function renderTenantCreditPanel(oc) {
+  const panel = document.getElementById('td-credit-panel');
+  if (!panel) return;
+  if (!oc || !oc.has_activity) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  const fmt = (v) => `KES ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const tbody = document.getElementById('td-credit-receipts-tbody');
+  if (tbody) {
+    tbody.innerHTML = (oc.receipts || []).map((r) => `
+      <tr class="border-b border-slate-800">
+        <td class="font-mono text-cyan-400">${escapeHtml(r.receipt_number || '—')}</td>
+        <td class="font-mono text-slate-400">${escapeHtml(r.payment_date || '—')}</td>
+        <td class="font-mono">${fmt(r.payment_amount)}${r.billing_period ? ` <span class="text-[10px] text-slate-500">(${escapeHtml(r.billing_period)})</span>` : ''}</td>
+        <td class="font-mono text-amber-300 font-bold">${fmt(r.overpayment)}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="text-slate-500 py-2">No overpayments recorded.</td></tr>';
+  }
+  const total = document.getElementById('td-credit-total');
+  if (total) total.textContent = fmt(oc.total_overpaid);
+  const remaining = document.getElementById('td-credit-remaining');
+  if (remaining) remaining.textContent = fmt(oc.remaining_credit);
+  const allocs = document.getElementById('td-credit-allocs');
+  if (allocs) {
+    const parts = [];
+    (oc.allocations || []).forEach((a) => {
+      parts.push(`<div>Allocated to ${escapeHtml(a.target)}${a.reason ? ` — ${escapeHtml(a.reason)}` : ''}: <span class="text-cyan-300">${fmt(a.amount)}</span>${a.applied_at ? ` <span class="text-slate-600">${escapeHtml(a.applied_at)}</span>` : ''}</div>`);
+    });
+    if (Number(oc.total_allocated) > 0) parts.push(`<div class="text-slate-300">Total allocated: <span class="text-cyan-300 font-bold">${fmt(oc.total_allocated)}</span></div>`);
+    if (Number(oc.advance_rent_balance) > 0) parts.push(`<div>Advance rent: <span class="text-emerald-300">${fmt(oc.advance_rent_balance)}</span>${oc.advance_rent_until ? ` <span class="text-slate-500">(paid up to ${escapeHtml(String(oc.advance_rent_until).slice(0, 10))})</span>` : ''}</div>`);
+    allocs.innerHTML = parts.join('') || '<div class="text-slate-500">No allocations recorded yet.</div>';
+  }
+}
+
 async function loadTenantDashboard(code) {
   if (!code) return;
 
@@ -731,7 +765,8 @@ async function loadTenantDashboard(code) {
   loadTenantArrangements(code).catch(() => {});
 
   try {
-    const { tenant, house, payments, totalPaid, pendingAmount, summary, maintenanceCharges } = await api.tenantProfile(code);
+    const { tenant, house, payments, totalPaid, pendingAmount, summary, maintenanceCharges, overpayment_consolidation: oc } = await api.tenantProfile(code);
+    renderTenantCreditPanel(oc);
     const s = summary || {};
 
     // Header

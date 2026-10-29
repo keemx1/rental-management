@@ -606,6 +606,7 @@ router.get('/:id/profile', async (req, res) => {
         advance_rent_balance: Number(tenant.advance_rent_balance || 0),
       },
       maintenanceCharges,
+      overpayment_consolidation: await store.getOverpaymentConsolidation(tenant.tenant_code).catch(() => null),
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load tenant profile: ' + err.message });

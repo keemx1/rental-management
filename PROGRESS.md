@@ -802,6 +802,36 @@ Polling, deep links, history and all alert semantics unchanged. Stamps →
 
 ---
 
+### 27. Overpayment transparency & advance-rent allocations (v82)
+Presentation-only enhancement (receipts, payment processing, allocation
+workflow untouched — verified: no approve/receipt/allocation code changed).
+
+- **`store.getOverpaymentConsolidation(tenant)`**: per-receipt overpayments
+  (receipt no, date, payment, overpayment — never merged, current tenancy
+  only) + combined credit from receipts + recorded allocations
+  (credit_allocations: target/reason/approver/date) + remaining credit =
+  `tenant.credit_balance` (ALREADY net of allocations → allocated credit can
+  never be offered twice) + advance rent balance/until reported separately.
+- **Rent acknowledgement**: `sendPaymentConfirmation` appends a consolidated
+  block (via `appendCreditConsolidation`) listing EVERY overpaid receipt,
+  total combined credit, each allocation, total allocated, advance rent and
+  remaining credit — appended only when credit activity exists; the base
+  acknowledgement text is unchanged.
+- **Tenant dashboard**: new `[OVERPAYMENT_CREDIT]` panel above the payment
+  status bar — receipt-level table (Receipt/Date/Payment/Overpayment + total
+  combined credit), allocation lines with dates, advance rent, and the big
+  remaining-credit figure; fed by `overpayment_consolidation` added to
+  `GET /api/tenants/:id/profile`.
+- Verified with the spec example (2,000 + 8,000 = 10,000 combined; 6,000
+  allocated; 4,000 remaining; invariant allocated + remaining = combined)
+  and READ-ONLY against the real units: **EX001 – Ian Kamau** (2 receipts,
+  45,400 combined) and **BH46** (2 receipts, 9,000 combined).
+- `tests/test_overpayment_summary.js` (23 assertions): receipts intact,
+  no double counting, advance separate, acknowledgement lines, profile
+  payload, frontend panel. Carried over: "Search anything" placeholder.
+  Stamps → `?v=82`, SW → `gutenberg-v83-irmanage`.
+
+---
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -847,3 +877,4 @@ Polling, deep links, history and all alert semantics unchanged. Stamps →
 | 24 | Landlord accounts: agreements, transfer verification, reconciliation, finalization, false-payment reversal, totals strip + menu fix | v77/v78 |
 | 25 | Central Notification Bar: live alert detection, emergency pulse, deep links, auto-updates, history | v79 |
 | 26 | Minimal dashboard header: bare search input + notification bell with count badge | v80 |
+| 27 | Overpayment transparency: consolidated credit summary in acknowledgement + tenant dashboard | v82 |

@@ -49,6 +49,7 @@ async function cleanup() {
     filePaths = docs.rows.map((r) => r.file_path).filter(Boolean);
   } catch (_) {}
   for (const sql of [
+    `DELETE FROM notification_log WHERE alert_key LIKE '%999985%' OR alert_key LIKE '%999984%' OR title ILIKE '%ZZLA%'`,
     `DELETE FROM landlord_reviews WHERE house_paybill_number IN ($1,$2)`,
     `DELETE FROM landlord_ledger_finalizations WHERE house_paybill_number IN ($1,$2)`,
     `DELETE FROM landlord_remittance_payments WHERE house_paybill_number IN ($1,$2)`,

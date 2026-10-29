@@ -303,7 +303,41 @@ async function sendNewTenancyConfirmation(tenant, payment, allocation) {
 }
 
 async function sendPaymentConfirmation(tenant, payment, allocation) {
-  return sendReceiptText(tenant, buildPaymentConfirmation(tenant, payment, allocation), 'Payment Confirmation');
+  let body = buildPaymentConfirmation(tenant, payment, allocation);
+  // Overpayment transparency: append the CONSOLIDATED credit summary so the
+  // acknowledgement shows previous overpayment(s) + this payment + how the
+  // combined credit was allocated (receipts themselves stay unchanged).
+  try {
+    const store = require('../storage/store');
+    const cons = await store.getOverpaymentConsolidation(tenant.tenant_code);
+    body = appendCreditConsolidation(body, cons);
+  } catch (_) {}
+  return sendReceiptText(tenant, body, 'Payment Confirmation');
+}
+
+// Consolidated overpayment summary appended to rent acknowledgements.
+// Pure presentation: every figure comes from the original receipts
+// (payments.overpayment_amount) and the recorded allocations
+// (credit_allocations) — nothing is merged, double-counted or invented.
+function appendCreditConsolidation(msg, cons) {
+  if (!cons || !cons.has_activity || !cons.receipts.length) return msg;
+  const fmt = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const lines = ['', '', '— OVERPAYMENT & CREDIT SUMMARY —'];
+  for (const r of cons.receipts) {
+    lines.push(`Overpayment from receipt ${r.receipt_number || '(no receipt)'}${r.payment_date ? ` dated ${r.payment_date}` : ''}: KES ${fmt(r.overpayment)} (payment KES ${fmt(r.payment_amount)})`);
+  }
+  lines.push(`Total combined credit from receipts: KES ${fmt(cons.total_overpaid)}`);
+  if (cons.allocations.length) {
+    for (const a of cons.allocations) {
+      lines.push(`Allocated to ${a.target}${a.reason ? ` (${a.reason})` : ''}: KES ${fmt(a.amount)}${a.applied_at ? ` on ${a.applied_at}` : ''}`);
+    }
+    lines.push(`Total allocated: KES ${fmt(cons.total_allocated)}`);
+  }
+  if (Number(cons.advance_rent_balance) > 0) {
+    lines.push(`Advance rent: KES ${fmt(cons.advance_rent_balance)}${cons.advance_rent_until ? ` (paid up to ${cons.advance_rent_until})` : ''}`);
+  }
+  lines.push(`Remaining credit available: KES ${fmt(cons.remaining_credit)}`);
+  return `${msg}\n${lines.join('\n')}`;
 }
 
 // Receipt delivery through the linked Baileys session (your own number).
@@ -516,6 +550,7 @@ async function sendCustomText(tenant, body, messageType) {
 module.exports = {
   buildMonthlyInitialReminder,
   buildPaymentConfirmation,
+  appendCreditConsolidation,
   buildNewTenancyConfirmation,
   buildAdvanceRentConfirmation,
   buildCreditBalanceConfirmation,

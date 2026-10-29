@@ -8996,6 +8996,63 @@ async function getTenantInvoiceData(tenantCode) {
   return res.rows[0] || null;
 }
 
+// ─── Overpayment transparency: consolidated credit view (presentation only) ──
+// Each original receipt stays intact and individually traceable; this
+// combines their overpayments with the recorded allocations so management
+// and tenants can see how separate transactions contribute to rent/advance.
+// Remaining credit = tenant.credit_balance (already net of allocations), so
+// an allocated credit can never be counted again as available.
+async function getOverpaymentConsolidation(tenantCode) {
+  const tenant = await getTenant(tenantCode);
+  if (!tenant) return null;
+  const receipts = (await query(
+    `SELECT id, receipt_number, payment_date::text AS payment_date, amount, overpayment_amount, billing_period
+       FROM payments
+      WHERE tenant_code = $1 AND status = 'Approved' AND COALESCE(overpayment_amount, 0) > 0
+        AND tenancy_id IS NULL
+      ORDER BY payment_date ASC, id ASC`,
+    [tenantCode]
+  )).rows.map((r) => ({
+    payment_id: r.id,
+    receipt_number: r.receipt_number || null,
+    payment_date: r.payment_date ? String(r.payment_date).slice(0, 10) : null,
+    billing_period: r.billing_period || null,
+    payment_amount: roundMoney(r.amount),
+    overpayment: roundMoney(r.overpayment_amount),
+  }));
+  const allocations = (await query(
+    `SELECT id, amount, target, reason, approved_by, applied_at::text AS applied_at
+       FROM credit_allocations WHERE tenant_code = $1 AND tenancy_id IS NULL
+      ORDER BY applied_at ASC, id ASC`,
+    [tenantCode]
+  )).rows.map((a) => ({
+    id: a.id,
+    amount: roundMoney(a.amount),
+    target: a.target,
+    reason: a.reason || null,
+    approved_by: a.approved_by || null,
+    applied_at: a.applied_at ? String(a.applied_at).slice(0, 10) : null,
+  }));
+  const totalOverpaid = roundMoney(receipts.reduce((s, r) => s + r.overpayment, 0));
+  const totalAllocated = roundMoney(allocations.reduce((s, a) => s + a.amount, 0));
+  const remainingCredit = roundMoney(tenant.credit_balance || 0);
+  const advanceRentBalance = roundMoney(tenant.advance_rent_balance || 0);
+  return {
+    receipts,
+    allocations,
+    total_overpaid: totalOverpaid,
+    total_allocated: totalAllocated,
+    remaining_credit: remainingCredit,
+    advance_rent_balance: advanceRentBalance,
+    advance_rent_until: tenant.advance_rent_until || null,
+    has_activity: receipts.length > 0 || allocations.length > 0,
+  };
+}
+
+function roundMoney(n) {
+  return Math.round(Number(n || 0) * 100) / 100;
+}
+
 module.exports = {
   init,
   findUserByUsername,
@@ -9215,6 +9272,7 @@ module.exports = {
   generateWaterInvoiceNumber,
   generateCommissionInvoiceNumber,
   globalSearch,
+  getOverpaymentConsolidation,
   createWaterInvoice,
   getWaterInvoice,
   listWaterInvoices,
