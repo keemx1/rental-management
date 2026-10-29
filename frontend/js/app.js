@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v76';
+const GEHM_VERSION = 'v78';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -1650,6 +1650,11 @@ async function handleWhatsappReset() {
   }
 }
 
+function setTxtSafe(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
 async function loadDashboard() {
   try {
     const data = await api.metrics();
@@ -1663,6 +1668,14 @@ async function loadDashboard() {
     document.getElementById('metric-pending').textContent = r.pending_count ?? 0;
     document.getElementById('metric-revenue').textContent = `KES ${Number(r.revenue_mtd || 0).toLocaleString()}`;
     document.getElementById('metric-arrears').textContent = `KES ${Number(r.total_arrears || 0).toLocaleString()}`;
+    // Landlord accounts strip — the two obligations kept separate + overdue + reviews
+    const la = data.landlord_accounts;
+    const laFmt = (v) => `KES ${Number(v || 0).toLocaleString()}`;
+    setTxtSafe('la-rem-payable', laFmt(la?.remittances_payable_to_landlords));
+    setTxtSafe('la-mfi-payable', laFmt(la?.mfi_payable_to_gehm));
+    setTxtSafe('la-rem-overdue', `${la?.overdue_remittances_count ?? 0} (${laFmt(la?.overdue_remittances_amount)})`);
+    setTxtSafe('la-mfi-overdue', `${la?.overdue_mfi_count ?? 0} (${laFmt(la?.overdue_mfi_amount)})`);
+    setTxtSafe('la-reviews', `${la?.pending_reviews ?? 0} reviews · ${laFmt(la?.pending_verification_total)} pending verification`);
     // Collection Progress panel — expected / collected / outstanding / percent
     const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     setTxt('cp-period', c.period_label || '—');
@@ -1931,7 +1944,7 @@ async function loadPayments() {
         <td>
           <div class="flex items-center gap-2">
             ${p.status === 'Pending' ? `<button type="button" class="qc-btn qc-btn-primary !py-1 !px-2 text-xs" data-approve-payment="${p.id}">Approve</button>` : ''}
-            ${p.status === 'Approved' ? `<button type="button" class="action-btn !py-1 !px-2 text-xs" data-view-receipt="${p.id}">Receipt</button><button type="button" class="action-btn !py-1 !px-2 text-xs" data-download-receipt="${p.id}">PDF</button>` : ''}
+            ${p.status === 'Approved' ? `<button type="button" class="action-btn !py-1 !px-2 text-xs" data-view-receipt="${p.id}">Receipt</button><button type="button" class="action-btn !py-1 !px-2 text-xs" data-download-receipt="${p.id}">PDF</button><button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-reverse-payment="${p.id}">Reverse (false)</button>` : ''}
             <button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-delete-payment="${p.id}">Delete</button>
           </div>
         </td>
@@ -4047,6 +4060,17 @@ const llFmt = (v) => `KES ${Number(v || 0).toLocaleString('en-US', { minimumFrac
 async function loadLandlords() {
   const monthEl = document.getElementById('ll-month');
   if (monthEl && !monthEl.value) monthEl.value = new Date().toISOString().slice(0, 7);
+  // Landlord accounts summary strip (same data the dashboard reports, shown here)
+  try {
+    const m = await api.metrics();
+    const la = m.landlord_accounts;
+    const laFmt = (v) => `KES ${Number(v || 0).toLocaleString()}`;
+    setTxtSafe('la-rem-payable', laFmt(la?.remittances_payable_to_landlords));
+    setTxtSafe('la-mfi-payable', laFmt(la?.mfi_payable_to_gehm));
+    setTxtSafe('la-rem-overdue', `${la?.overdue_remittances_count ?? 0} (${laFmt(la?.overdue_remittances_amount)})`);
+    setTxtSafe('la-mfi-overdue', `${la?.overdue_mfi_count ?? 0} (${laFmt(la?.overdue_mfi_amount)})`);
+    setTxtSafe('la-reviews', `${la?.pending_reviews ?? 0} reviews · ${laFmt(la?.pending_verification_total)} pending verification`);
+  } catch (_) {}
   const tbody = document.getElementById('ll-list-tbody');
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5 text-slate-500">Loading…</td></tr>';
@@ -4182,6 +4206,7 @@ async function openLandlordLedger(paybill) {
         cell('Commission paid (total)', s.commission_paid, 'text-emerald-400') +
         cell('Commission OUTSTANDING (GEHPM)', s.commission_outstanding, 'text-amber-400') +
         cell('Remitted to landlord (total)', s.remittance_paid, 'text-emerald-400') +
+        cell('Pending verification', s.remittance_pending_verification || 0, 'text-amber-300') +
         cell('Remittance OUTSTANDING (landlord)', s.remittance_outstanding, 'text-emerald-300') +
         `<div class="bg-slate-800/50 border border-slate-700 rounded p-2 col-span-2">
            <div class="text-[10px] uppercase text-slate-400">Next agreed payment date</div>
@@ -4243,10 +4268,29 @@ async function openLandlordLedger(paybill) {
           <td class="font-mono text-emerald-300">${llFmt(e.amount)}</td>
           <td class="text-xs">${escapeHtml(e.method || '')}</td>
           <td class="text-xs font-mono text-slate-400">${escapeHtml(e.reference || '')}</td>
-        </tr>`).join('') || '<tr><td colspan="5" class="text-center py-3 text-slate-500">No remittances recorded yet.</td></tr>';
+          <td class="text-xs">${e.verified
+            ? `<span class="text-emerald-400">Verified</span>${e.verified_by ? `<div class="text-[10px] text-slate-500">by ${escapeHtml(e.verified_by)}</div>` : ''}`
+            : `<span class="text-amber-400">Pending Verification</span>
+               <button type="button" class="text-cyan-400 underline ml-1" data-ll-verify="${e.id}">Verify</button>`}</td>
+        </tr>`).join('') || '<tr><td colspan="6" class="text-center py-3 text-slate-500">No remittances recorded yet.</td></tr>';
     }
     const rsum = document.getElementById('ll-rem-summary');
-    if (rsum) rsum.textContent = `Net payable (all months) ${llFmt(s.remittance_net_total)} · Remitted ${llFmt(s.remittance_paid)} · Outstanding (landlord) ${llFmt(s.remittance_outstanding)} — separate from the commission balance`;
+    if (rsum) rsum.textContent = `Net payable (all months) ${llFmt(s.remittance_net_total)} · Verified transfers ${llFmt(s.remittance_paid)} · Pending verification ${llFmt(s.remittance_pending_verification || 0)} · Outstanding (landlord) ${llFmt(s.remittance_outstanding)} — separate from the commission balance`;
+
+    // Reconciliation + finalization status
+    const reconEl = document.getElementById('ll-dash-recon');
+    const rec = dash.reconciliation;
+    if (reconEl && rec) {
+      const color = rec.status === 'ok' ? 'text-emerald-400' : 'text-amber-400';
+      const items = (rec.items || []).map((i) => `· ${i.message}${i.difference != null ? ` (${llFmt(Math.abs(i.difference))})` : ''}`).join('  ');
+      reconEl.innerHTML = `<span class="${color} font-bold">Reconciliation: ${rec.status === 'ok' ? 'OK' : 'REVIEW REQUIRED'}</span>`
+        + (dash.finalized ? ' · <span class="text-emerald-400 font-bold">MONTH FINALIZED</span>' : '')
+        + (items ? `<div class="text-slate-400 mt-1">${escapeHtml(items)}</div>` : '');
+    }
+    const finBtn = document.getElementById('btn-ll-dash-finalize');
+    const reopenBtn = document.getElementById('btn-ll-dash-reopen');
+    if (finBtn) finBtn.classList.toggle('hidden', !!dash.finalized);
+    if (reopenBtn) reopenBtn.classList.toggle('hidden', !dash.finalized);
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -4280,11 +4324,12 @@ async function saveRemittancePayment() {
     method: document.getElementById('llr-method')?.value || 'M-Pesa',
     reference: document.getElementById('llr-ref')?.value?.trim() || null,
     notes: document.getElementById('llr-notes')?.value?.trim() || null,
+    proof_note: document.getElementById('llr-proof')?.value?.trim() || null,
   };
   const resEl = document.getElementById('ll-rem-result');
   try {
     const res = await api.recordRemittancePayment(_llState.landlordId, _llState.remittanceCtx, body);
-    if (resEl) resEl.textContent = `✓ Recorded — remittance outstanding now ${llFmt(res.outstanding)}.`;
+    if (resEl) resEl.textContent = `✓ Recorded as Pending Verification — remittance outstanding (verified transfers only) now ${llFmt(res.outstanding)}.`;
     document.getElementById('llr-amount').value = '';
     document.getElementById('llr-ref').value = '';
     await openLandlordLedger(_llState.remittanceCtx);
@@ -4422,6 +4467,12 @@ function openLandlordForm(landlord) {
   document.getElementById('ll-form-phone').value = landlord?.phone || '';
   document.getElementById('ll-form-email').value = landlord?.email || '';
   document.getElementById('ll-form-idno').value = landlord?.id_number || '';
+  document.getElementById('ll-form-remday').value = landlord?.default_remittance_day || '';
+  document.getElementById('ll-form-mfiday').value = landlord?.default_mfi_due_day || '';
+  document.getElementById('ll-form-mpesa').value = landlord?.mpesa_number || '';
+  document.getElementById('ll-form-bank').value = landlord?.bank_name || '';
+  document.getElementById('ll-form-acct').value = landlord?.bank_account || '';
+  document.getElementById('ll-form-paynote').value = landlord?.payment_details_note || '';
   document.getElementById('ll-form-notes').value = landlord?.notes || '';
   const res = document.getElementById('ll-form-result');
   if (res) res.textContent = '';
@@ -4434,6 +4485,12 @@ async function saveLandlordForm() {
     phone: document.getElementById('ll-form-phone')?.value?.trim() || null,
     email: document.getElementById('ll-form-email')?.value?.trim() || null,
     id_number: document.getElementById('ll-form-idno')?.value?.trim() || null,
+    default_remittance_day: document.getElementById('ll-form-remday')?.value ? Number(document.getElementById('ll-form-remday').value) : null,
+    default_mfi_due_day: document.getElementById('ll-form-mfiday')?.value ? Number(document.getElementById('ll-form-mfiday').value) : null,
+    mpesa_number: document.getElementById('ll-form-mpesa')?.value?.trim() || null,
+    bank_name: document.getElementById('ll-form-bank')?.value?.trim() || null,
+    bank_account: document.getElementById('ll-form-acct')?.value?.trim() || null,
+    payment_details_note: document.getElementById('ll-form-paynote')?.value?.trim() || null,
     notes: document.getElementById('ll-form-notes')?.value?.trim() || null,
   };
   if (!body.name) { document.getElementById('ll-form-result').textContent = 'Name is required'; return; }
@@ -4558,6 +4615,45 @@ document.getElementById('btn-ll-dash-day-save')?.addEventListener('click', async
 });
 document.getElementById('btn-llr-cancel')?.addEventListener('click', () => document.getElementById('ll-remittance-modal')?.classList.add('hidden'));
 document.getElementById('btn-llr-save')?.addEventListener('click', saveRemittancePayment);
+document.getElementById('ll-rem-payments-tbody')?.addEventListener('click', async (e) => {
+  const id = e.target.closest('[data-ll-verify]')?.dataset.llVerify;
+  if (!id) return;
+  try {
+    const res = await api.verifyRemittancePayment(id);
+    showToast(res.already ? 'Transfer already verified.' : '✓ Transfer verified (admin).', 'success');
+    if (_llState.dash?.house) await openLandlordLedger(_llState.dash.house);
+  } catch (err) { showToast(err.message, 'error'); }
+});
+document.getElementById('btn-ll-dash-finalize')?.addEventListener('click', async () => {
+  if (!_llState.landlordId || !_llState.dash?.house) return;
+  const month = document.getElementById('ll-dash-month')?.value || _llState.dash.month;
+  if (!confirm(`Finalize the landlord ledger for ${month}? Finalized months reject new transfers until reopened (admin).`)) return;
+  try {
+    await api.finalizeLandlordLedger(_llState.landlordId, _llState.dash.house, month);
+    showToast(`✓ ${month} finalized.`, 'success');
+    await openLandlordLedger(_llState.dash.house);
+  } catch (err) { showToast(err.message, 'error'); }
+});
+document.getElementById('btn-ll-dash-reopen')?.addEventListener('click', async () => {
+  if (!_llState.landlordId || !_llState.dash?.house) return;
+  const month = document.getElementById('ll-dash-month')?.value || _llState.dash.month;
+  try {
+    await api.reopenLandlordLedger(_llState.landlordId, _llState.dash.house, month);
+    showToast(`✓ ${month} reopened.`, 'success');
+    await openLandlordLedger(_llState.dash.house);
+  } catch (err) { showToast(err.message, 'error'); }
+});
+document.getElementById('btn-ll-dash-flag')?.addEventListener('click', async () => {
+  if (!_llState.landlordId || !_llState.dash?.house) return;
+  const month = document.getElementById('ll-dash-month')?.value || _llState.dash.month;
+  const reason = prompt(`Flag ${month} as Under Review — enter the reason:`);
+  if (!reason || !reason.trim()) return;
+  try {
+    await api.flagLandlordReview(_llState.landlordId, _llState.dash.house, { billing_month: month, reason: reason.trim(), target_type: 'ledger' });
+    showToast('Flagged Under Review.', 'success');
+    await openLandlordLedger(_llState.dash.house);
+  } catch (err) { showToast(err.message, 'error'); }
+});
 
 function togglePaymentFields() {
   const method = document.getElementById('house-edit-payment-method').value;
@@ -6658,6 +6754,19 @@ document.getElementById('payments-tbody')?.addEventListener('click', async (e) =
   const deleteId = e.target.dataset.deletePayment;
   const viewReceiptId = e.target.dataset.viewReceipt;
   const downloadReceiptId = e.target.dataset.downloadReceipt;
+  const reverseId = e.target.dataset.reversePayment;
+
+  if (reverseId) {
+    const reason = prompt('Reverse this payment as FALSE? Enter the reason (kept in the audit trail):');
+    if (!reason || !reason.trim()) return;
+    if (!confirm(`This removes the payment from ALL financial calculations (arrears restore, rent collections, landlord ledger). Continue?`)) return;
+    try {
+      const res = await api.reverseFalsePayment(reverseId, reason.trim());
+      showToast(res.already ? 'Payment was already reversed.' : `Payment reversed${res.tenant_repaired ? ' and balances recomputed' : ''}.`, 'success');
+      loadPayments();
+    } catch (err) { alert(err.message); }
+    return;
+  }
 
   if (viewReceiptId) {
     try {

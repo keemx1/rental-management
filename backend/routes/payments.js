@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const ExcelJS = require('exceljs');
-const { requireAuthActive } = require('../middleware/auth');
+const { requireAuthActive, requireAdmin } = require('../middleware/auth');
 const store = require('../storage/store');
 const { generateAndStoreReceipt } = require('../services/documentStore');
 const { sendPaymentConfirmation, buildPaymentConfirmation, sendNewTenancyConfirmation, buildNewTenancyConfirmation, buildSkipOverpaymentConfirmation } = require('../services/messages');
@@ -1394,6 +1394,27 @@ router.all('/collection-report', async (req, res) => {
       });
     }
     res.status(500).json({ stage: 'generate', error: 'Failed to generate collection report: ' + err.message });
+  }
+});
+
+// Reverse a FALSE tenant payment confirmation (authorized/admin only).
+// The row is retained (status -> Reversed) and audited; every financial
+// calculation (arrears sync, rent collections, landlord ledger) excludes it.
+router.post('/:id/reverse-false', requireAdmin, async (req, res) => {
+  try {
+    const { reverseFalsePayment } = require('../services/landlordCommission');
+    const result = await reverseFalsePayment(Number(req.params.id), {
+      actor: req.user?.username,
+      reason: req.body?.reason,
+      recompute: req.body?.recompute !== false,
+    });
+    if (result.error) {
+      const status = result.code === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ error: result.error, code: result.code });
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Reversal failed: ' + err.message });
   }
 });
 

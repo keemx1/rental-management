@@ -302,6 +302,27 @@ export const api = {
   remittanceStatement(id, paybill) {
     return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/remittance-statement`, { method: 'POST', body: JSON.stringify({}) });
   },
+  verifyRemittancePayment(paymentId) {
+    return request(`/landlords/remittance-payments/${paymentId}/verify`, { method: 'POST', body: JSON.stringify({}) });
+  },
+  landlordReconciliation(id, paybill, month) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/reconciliation${month ? `?month=${encodeURIComponent(month)}` : ''}`);
+  },
+  finalizeLandlordLedger(id, paybill, billingMonth) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/finalize`, { method: 'POST', body: JSON.stringify({ billing_month: billingMonth }) });
+  },
+  reopenLandlordLedger(id, paybill, billingMonth) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/reopen`, { method: 'POST', body: JSON.stringify({ billing_month: billingMonth }) });
+  },
+  flagLandlordReview(id, paybill, body) {
+    return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/reviews`, { method: 'POST', body: JSON.stringify(body) });
+  },
+  resolveLandlordReview(reviewId) {
+    return request(`/landlords/reviews/${reviewId}/resolve`, { method: 'POST', body: JSON.stringify({}) });
+  },
+  reverseFalsePayment(paymentId, reason) {
+    return request(`/payments/${paymentId}/reverse-false`, { method: 'POST', body: JSON.stringify({ reason }) });
+  },
   deleteArchive(id) {
     return request(`/archive/${id}`, { method: 'DELETE' });
   },

@@ -173,9 +173,10 @@ async function main() {
     r = await call('POST', `/${ll.id}/properties/${HOUSE_A}/remittance-payments`, {
       billing_month: '2026-10', payment_date: '2026-10-10', amount: 80000, method: 'M-Pesa', reference: 'MPLDREM1',
     });
-    check(r.status === 200, `3. payment of 80,000 accepted (HTTP ${r.status})`);
-    r = await call('GET', `/${ll.id}/properties/${HOUSE_A}/dashboard?month=2026-10`);
-    let octRow = r.json.remittance_month_rows.find((x) => x.billing_month === '2026-10');
+      check(r.status === 200, `3. payment of 80,000 accepted (HTTP ${r.status})`);
+      await call('POST', `/remittance-payments/${r.json.payment.id}/verify`); // v77: only Verified reduces balances
+      r = await call('GET', `/${ll.id}/properties/${HOUSE_A}/dashboard?month=2026-10`);
+      let octRow = r.json.remittance_month_rows.find((x) => x.billing_month === '2026-10');
     // Spec example: 93,000 − 80,000 = 13,000 (October's own month balance)
     check(octRow && octRow.outstanding_after === 13000,
       `3b. October row: 93,000 − 80,000 = 13,000 (got ${octRow && octRow.outstanding_after})`);
@@ -184,9 +185,10 @@ async function main() {
       `3c. cumulative outstanding includes Nov net (got ${r.json.summary.remittance_outstanding})`);
     // Second partial payment against the SAME month
     r = await call('POST', `/${ll.id}/properties/${HOUSE_A}/remittance-payments`, {
-      billing_month: '2026-10', payment_date: '2026-10-20', amount: 5000, method: 'Bank', reference: 'BNKLDREM1',
-    });
-    r = await call('GET', `/${ll.id}/properties/${HOUSE_A}/dashboard?month=2026-10`);
+        billing_month: '2026-10', payment_date: '2026-10-20', amount: 5000, method: 'Bank', reference: 'BNKLDREM1',
+      });
+      await call('POST', `/remittance-payments/${r.json.payment.id}/verify`);
+      r = await call('GET', `/${ll.id}/properties/${HOUSE_A}/dashboard?month=2026-10`);
     octRow = r.json.remittance_month_rows.find((x) => x.billing_month === '2026-10');
     check(octRow && octRow.outstanding_after === 8000,
       `3d. second partial payment → October row 8,000 (got ${octRow && octRow.outstanding_after})`);
@@ -197,9 +199,10 @@ async function main() {
       `4. two balances: commission 5,000 + remittance 55,500 cumulative (never offset)`,
       { c: s.commission_outstanding, r: s.remittance_outstanding });
     r = await call('POST', `/${ll.id}/properties/${HOUSE_B}/remittance-payments`, {
-      billing_month: '2026-10', payment_date: '2026-10-12', amount: 1000, method: 'M-Pesa', reference: 'MPLDBREM1',
-    });
-    check(r.status === 200, `4b. Property B payment accepted`);
+        billing_month: '2026-10', payment_date: '2026-10-12', amount: 1000, method: 'M-Pesa', reference: 'MPLDBREM1',
+      });
+      check(r.status === 200, `4b. Property B payment accepted`);
+      await call('POST', `/remittance-payments/${r.json.payment.id}/verify`);
     r = await call('GET', `/${ll.id}/properties/${HOUSE_A}/dashboard?month=2026-10`);
     check(r.json.summary.remittance_outstanding === 55500,
       `4c. A untouched by B's payment (still 55,500, got ${r.json.summary.remittance_outstanding})`);

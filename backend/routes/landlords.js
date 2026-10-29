@@ -7,7 +7,7 @@
  */
 const express = require('express');
 const fs = require('fs');
-const { requireAuthActive } = require('../middleware/auth');
+const { requireAuthActive, requireAdmin } = require('../middleware/auth');
 const store = require('../storage/store');
 const commission = require('../services/landlordCommission');
 
@@ -36,12 +36,17 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, phone, email, id_number, notes } = req.body || {};
+    const { name, phone, email, id_number, notes, default_remittance_day, default_mfi_due_day,
+      mpesa_number, bank_name, bank_account, payment_details_note } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'name is required' });
     const { query } = require('../config/database');
     const row = (await query(
-      `INSERT INTO landlords (name, phone, email, id_number, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [String(name).trim(), phone || null, email || null, id_number || null, notes || null]
+      `INSERT INTO landlords (name, phone, email, id_number, notes, default_remittance_day, default_mfi_due_day,
+         mpesa_number, bank_name, bank_account, payment_details_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [String(name).trim(), phone || null, email || null, id_number || null, notes || null,
+        default_remittance_day || null, default_mfi_due_day || null,
+        mpesa_number || null, bank_name || null, bank_account || null, payment_details_note || null]
     )).rows[0];
     await store.logAudit({
       actor: req.user?.username, action: 'landlord_created',
@@ -67,15 +72,38 @@ router.get('/:id', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { query } = require('../config/database');
-    const { name, phone, email, id_number, notes } = req.body || {};
+    const { name, phone, email, id_number, notes, default_remittance_day, default_mfi_due_day,
+      mpesa_number, bank_name, bank_account, payment_details_note } = req.body || {};
+    const before = (await query(`SELECT * FROM landlords WHERE id = $1`, [Number(req.params.id)])).rows[0];
     const row = (await query(
       `UPDATE landlords SET name = COALESCE($1, name), phone = COALESCE($2, phone),
               email = COALESCE($3, email), id_number = COALESCE($4, id_number),
-              notes = COALESCE($5, notes), updated_at = NOW()
-        WHERE id = $6 RETURNING *`,
-      [name || null, phone || null, email || null, id_number || null, notes || null, Number(req.params.id)]
+              notes = COALESCE($5, notes),
+              default_remittance_day = COALESCE($6, default_remittance_day),
+              default_mfi_due_day = COALESCE($7, default_mfi_due_day),
+              mpesa_number = COALESCE($8, mpesa_number),
+              bank_name = COALESCE($9, bank_name),
+              bank_account = COALESCE($10, bank_account),
+              payment_details_note = COALESCE($11, payment_details_note),
+              updated_at = NOW()
+        WHERE id = $12 RETURNING *`,
+      [name || null, phone || null, email || null, id_number || null, notes || null,
+        default_remittance_day || null, default_mfi_due_day || null,
+        mpesa_number || null, bank_name || null, bank_account || null, payment_details_note || null,
+        Number(req.params.id)]
     )).rows[0];
     if (!row) return res.status(404).json({ error: 'Landlord not found' });
+    // Payment-details changes are audited (previous details stay in history).
+    if (before && (row.mpesa_number !== before.mpesa_number || row.bank_account !== before.bank_account || row.bank_name !== before.bank_name)) {
+      await store.logAudit({
+        actor: req.user?.username, action: 'landlord_payment_details_changed',
+        entityType: 'landlord', entityId: String(row.id),
+        details: {
+          previous: { mpesa_number: before.mpesa_number, bank_name: before.bank_name, bank_account: before.bank_account },
+          new: { mpesa_number: row.mpesa_number, bank_name: row.bank_name, bank_account: row.bank_account },
+        },
+      });
+    }
     res.json({ landlord: row });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update landlord: ' + err.message });
@@ -256,11 +284,12 @@ router.post('/:id/properties/:paybill/remittance-payments', async (req, res) => 
       method: body.method,
       reference: body.reference,
       notes: body.notes,
+      proof_note: body.proof_note,
       actor: req.user?.username,
     });
     if (result.error) {
       const status = result.code === 'NOT_FOUND' ? 404
-        : result.code === 'LANDLORD_MISMATCH' ? 409 : 400;
+        : result.code === 'LANDLORD_MISMATCH' || result.code === 'FINALIZED' ? 409 : 400;
       return res.status(status).json({ error: result.error, code: result.code });
     }
     await store.logAudit({
@@ -297,6 +326,100 @@ router.post('/:id/properties/:paybill/remittance-statement', async (req, res) =>
     res.json({ ledger: rem, document: doc });
   } catch (err) {
     res.status(500).json({ error: 'Failed to build remittance statement: ' + err.message });
+  }
+});
+
+// ── Verification, reconciliation, finalization, reviews (authorization) ────
+router.post('/remittance-payments/:paymentId/verify', requireAdmin, async (req, res) => {
+  try {
+    const result = await commission.verifyRemittancePayment(Number(req.params.paymentId), req.user?.username);
+    if (result.error) return res.status(result.code === 'NOT_FOUND' ? 404 : 400).json({ error: result.error, code: result.code });
+    await store.logAudit({
+      actor: req.user?.username, action: 'remittance_verified',
+      entityType: 'landlord_remittance_payment', entityId: String(result.payment.id),
+      details: { amount: Number(result.payment.amount), house: result.payment.house_paybill_number, reference: result.payment.reference },
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Verification failed: ' + err.message });
+  }
+});
+
+router.get('/:id/properties/:paybill/reconciliation', async (req, res) => {
+  try {
+    const rec = await commission.reconciliation(req.params.paybill, req.query.month || new Date().toISOString().slice(0, 7));
+    res.json(rec);
+  } catch (err) {
+    res.status(500).json({ error: 'Reconciliation failed: ' + err.message });
+  }
+});
+
+router.post('/:id/properties/:paybill/finalize', requireAdmin, async (req, res) => {
+  try {
+    const month = req.body?.billing_month || req.query.month;
+    const result = await commission.finalizeLedger(req.params.paybill, month, req.user?.username);
+    if (result.error) {
+      return res.status(result.code === 'RECONCILIATION' ? 409 : 400).json({ error: result.error, code: result.code, reconciliation: result.reconciliation });
+    }
+    await store.logAudit({
+      actor: req.user?.username, action: 'landlord_ledger_finalized',
+      entityType: 'house', entityId: req.params.paybill, details: { billing_month: month },
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Finalization failed: ' + err.message });
+  }
+});
+
+router.post('/:id/properties/:paybill/reopen', requireAdmin, async (req, res) => {
+  try {
+    const month = req.body?.billing_month || req.query.month;
+    const result = await commission.reopenLedger(req.params.paybill, month, req.user?.username);
+    await store.logAudit({
+      actor: req.user?.username, action: 'landlord_ledger_reopened',
+      entityType: 'house', entityId: req.params.paybill, details: { billing_month: month },
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Reopen failed: ' + err.message });
+  }
+});
+
+router.post('/:id/properties/:paybill/reviews', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await commission.flagReview({
+      house_paybill_number: req.params.paybill,
+      billing_month: body.billing_month,
+      target_type: body.target_type,
+      target_id: body.target_id,
+      reason: body.reason,
+      evidence_note: body.evidence_note,
+      actor: req.user?.username,
+    });
+    if (result.error) return res.status(400).json({ error: result.error, code: result.code });
+    await store.logAudit({
+      actor: req.user?.username, action: 'landlord_review_flagged',
+      entityType: 'landlord_review', entityId: String(result.review.id),
+      details: { house: req.params.paybill, billing_month: body.billing_month, reason: result.review.reason },
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Flagging review failed: ' + err.message });
+  }
+});
+
+router.post('/reviews/:reviewId/resolve', requireAdmin, async (req, res) => {
+  try {
+    const result = await commission.resolveReview(Number(req.params.reviewId), req.user?.username);
+    if (result.error) return res.status(result.code === 'NOT_FOUND' ? 404 : 400).json({ error: result.error, code: result.code });
+    await store.logAudit({
+      actor: req.user?.username, action: 'landlord_review_resolved',
+      entityType: 'landlord_review', entityId: String(req.params.reviewId), details: {},
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Resolve failed: ' + err.message });
   }
 });
 

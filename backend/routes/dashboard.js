@@ -9,8 +9,16 @@ router.use(requireAuthActive);
 router.get('/metrics', async (req, res) => {
   try {
     const metrics = await store.getDashboardMetrics();
+    // Landlord accounts: the two obligations kept separate + overdue +
+    // pending reviews (never combined into one number).
+    let landlord_accounts = null;
+    try {
+      const { landlordAccountTotals } = require('../services/landlordCommission');
+      landlord_accounts = await landlordAccountTotals();
+    } catch (_) {}
     res.json({
       ...metrics,
+      landlord_accounts,
       whatsapp: whatsapp.getGatewayState(),
     });
   } catch (err) {

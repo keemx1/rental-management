@@ -39,6 +39,7 @@ Run from the repo root (server must be up on port `3003`):
 | Universal global search | `node tests/test_global_search.js` | 23 assertions — every entity type (tenants, archive, properties, landlords, water/exit invoices, pre-exit forms, payments+M-Pesa with receipt deep links, penalties, work orders, maintenance, mgmt expense invoices, documents, commission invoices/payments), kinds for direct navigation, route + auth, frontend bar |
 | Landlord commissions | `node tests/test_landlord_commissions.js` | 35 assertions — per-property accounts never mixed (300k@5%=15k vs 200k@4%=8k), invoice PDF + numbers, payments to the correct property only, automatic carry-forward (5k→17k−7k→10k→8k), statement ledger with running balance + PDF, regeneration/void, mismatch + unassigned guards, overview split |
 | Landlord ledger dashboard | `node tests/test_landlord_ledger.js` | 33 assertions — spec example exact (100k−5k−2k=93k, pay 80k→13k month row, second partial→8k), carry-forward 55.5k, two balances never offset, per-property isolation, agreed day + next due, both statements PDFs, invoice share via WhatsApp pipeline, guards, overview remittance totals |
+| Landlord accounts enhancement | `node tests/test_landlord_accounts.js` | 35 assertions — all 10 acceptance points: rollover-first, MFI invoice + agreed due date, net calc 93k, Pending≠paid (verified-only balances, 403 for non-admin verify), carry-forward once, reconciliation mismatch flagged + finalize gate + reopen, false-payment reversal + restricted audit, statement versions v1/v2, transfer proof/recipient snapshots, dashboard separate totals + overdue + reviews |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -685,6 +686,59 @@ re-entry, no recalculation. Stamps → `?v=76`, SW → `gutenberg-v77-irmanage`.
 
 ---
 
+### 24. Landlord accounts enhancement + menu fix (v77/v78)
+Implemented the proposal as an EXTENSION of the existing system (no new
+portals/Document Centres; tenant payment/rent/rollover workflows untouched).
+
+**Menu fix (user report):** the desktop sidebar (grouped sections) never got
+the Landlords link — it had only been added to the mobile drawer. Both lists
+now carry **Landlords** and **Pre-Exit Inspection** (Financial section), and
+the `[LANDLORD_ACCOUNTS]` summary strip moved from the main dashboard into
+the Landlords section where it belongs (dashboard keeps the Global Search).
+
+**Schema** (`migrate-landlord-agreements.js`): landlord agreement terms
+(default remittance day + MFI due day, per-property override via
+`houses.landlord_mfi_due_day`), approved payment details (M-Pesa/bank/note —
+changes audited with previous values retained), transfer verification
+columns (status, proof_note, recipient snapshot, verified_by/at,
+authorized_by — existing transfers backfilled Verified),
+`landlord_ledger_finalizations` (unique active row per property-month),
+`landlord_reviews` (Under Review / Resolved), `commission_invoices.due_date`.
+
+**Behaviour:**
+- **Historical terms**: remittance months use the rate/commission SNAPPED on
+  that month's commission invoice (else latest prior, else current) —
+  changing an agreement never rewrites history; MFI due date = agreed day of
+  the following month, snapshotted on the invoice.
+- **Transfer verification**: recorded transfers start _Pending Verification_
+  (proof note + recipient-details snapshot) and do NOT reduce balances;
+  admin verification (`requireAdmin`) makes them balance-reducing. Two
+  separate partial transfers stay separate records.
+- **Reconciliation** (`GET .../reconciliation`): compares invoice figures vs
+  verified collections, flags mismatch amounts + missing invoices + pending
+  verifications + open reviews — NEVER alters figures.
+- **Monthly finalization**: admin-only, blocked (409) while reconciliation
+  needs review; finalized months reject new transfers (409) until an
+  authorized reopen.
+- **False payment reversal**: `POST /api/payments/:id/reverse-false` (admin)
+  — row kept as Reversed + restricted audit with the original confirmation;
+  excluded from rent collections/landlord figures immediately; optional full
+  historical recompute (existing sync tool). UI: "Reverse (false)" action on
+  Approved payment rows.
+- **Disputes**: Flag Under Review / Resolve on the ledger (audited);
+  finalization blocked while open.
+- **Statement versions**: remittance statements versioned
+  (`REMITSTMT-<house>-v1/-v2`…) — original + corrected both retrievable.
+- **Dashboard totals**: GET /metrics carries `landlord_accounts`
+  (remittances payable, mgmt-fee invoices payable, overdue counts/amounts,
+  pending reviews + verification) shown as the strip under Landlords.
+- **Document sharing** audited (recipient, doc, user, status).
+- Fixes en route: reconciliation expected-commission `/100` bug; reopen no
+  longer violates the finalization status check.
+- Stamps → `?v=78`, SW → `gutenberg-v79-irmanage`.
+
+---
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -727,3 +781,4 @@ re-entry, no recalculation. Stamps → `?v=76`, SW → `gutenberg-v77-irmanage`.
 | 21 | Universal Global Search + Landlord Commission Management (per-property ledgers, invoices, payments, statements) | v75 |
 | 22 | WhatsApp duplicate-send fix: exactly one attempt per send; lock errors soft-success (v66 retry removed) | backend |
 | 23 | Landlord Ledger Dashboard: commission + rent remittance ledgers, agreed dates, statements, invoice sharing | v76 |
+| 24 | Landlord accounts: agreements, transfer verification, reconciliation, finalization, false-payment reversal, totals strip + menu fix | v77/v78 |

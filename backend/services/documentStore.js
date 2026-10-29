@@ -1975,6 +1975,9 @@ function buildCommissionInvoiceHtml(invoice, landlord, house) {
   return renderTemplate('commission_invoice.html', {
     invoice_number: invoice.invoice_number,
     invoice_date: new Date(invoice.created_at).toISOString().slice(0, 10),
+    due_date: invoice.due_date
+      ? new Date(invoice.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
+      : 'As per agreement',
     landlord_name: landlord?.name || '',
     landlord_phone: landlord?.phone || '—',
     property_name: house?.house_name || invoice.house_paybill_number,
@@ -2154,9 +2157,15 @@ async function generateAndStoreRemittanceStatement(housePaybill) {
   const filename = `LANDLORD-REMITTANCE-STATEMENT-${safeHouse}-${asOf}.pdf`;
   ensureDir();
   const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+  // Versioned documents: every generation is preserved so an original and a
+  // corrected statement can BOTH be retrieved later (audit requirement).
+  const prior = (await require('../config/database').query(
+    `SELECT COUNT(*)::int AS n FROM documents WHERE doc_number LIKE $1`,
+    [`REMITSTMT-${housePaybill}-v%`]
+  )).rows[0].n;
   const doc = await store.createDocument({
     doc_type: 'remittance_statement',
-    doc_number: `REMITSTMT-${housePaybill}`,
+    doc_number: `REMITSTMT-${housePaybill}-v${prior + 1}`,
     title: `Landlord Remittance Statement — ${rem.house?.house_name || housePaybill}`,
     filename,
     file_path: pdfPath,
@@ -2164,7 +2173,7 @@ async function generateAndStoreRemittanceStatement(housePaybill) {
     property_name: rem.house?.house_name || null,
     amount: rem.summary.outstanding,
     doc_date: asOf,
-    reuse_invoice_doc: true,
+    reuse_invoice_doc: false,
   });
   return doc;
 }

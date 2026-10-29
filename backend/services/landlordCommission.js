@@ -60,6 +60,279 @@ async function rateForHouse(housePaybill) {
   return Number(rates[housePaybill] || 0);
 }
 
+// Historical rate for a billing month: prefer the rate SNAPPED on that
+// month's (or the latest prior) commission invoice so changing the current
+// agreement never silently rewrites historical accounts.
+async function rateForMonth(housePaybill, month) {
+  const { query } = require('../config/database');
+  const inv = (await query(
+    `SELECT commission_rate FROM commission_invoices
+      WHERE house_paybill_number = $1 AND status = 'Issued' AND billing_month <= $2
+      ORDER BY billing_month DESC LIMIT 1`,
+    [housePaybill, month]
+  )).rows[0];
+  if (inv) return Number(inv.commission_rate || 0);
+  return rateForHouse(housePaybill);
+}
+
+function clampDay(day, y, mo) {
+  const d = Number(day);
+  if (!(d >= 1 && d <= 31)) return null;
+  return Math.min(d, new Date(y, mo, 0).getDate());
+}
+
+// Agreed terms: per-property override wins, else landlord default.
+function effectiveRemittanceDay(house, landlord) {
+  return (house && house.landlord_remittance_day) || (landlord && landlord.default_remittance_day) || null;
+}
+function effectiveMfiDueDay(house, landlord) {
+  return (house && house.landlord_mfi_due_day) || (landlord && landlord.default_mfi_due_day) || null;
+}
+
+// Management-fee invoice due date: agreed day of the month FOLLOWING the
+// billing month (fee earned in month M, invoiced, due in M+1).
+function mfiDueDate(billingMonth, dueDay) {
+  const [y, m] = String(billingMonth || '').split('-').map(Number);
+  if (!y || !m || !dueDay) return null;
+  let dy = m + 1; let yy = y;
+  if (dy > 12) { dy = 1; yy += 1; }
+  const day = clampDay(dueDay, yy, dy);
+  if (!day) return null;
+  return `${yy}-${String(dy).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+async function isLedgerFinalized(housePaybill, month) {
+  const { query } = require('../config/database');
+  const r = (await query(
+    `SELECT id FROM landlord_ledger_finalizations
+      WHERE house_paybill_number = $1 AND billing_month = $2 AND status = 'Finalized'`,
+    [housePaybill, month]
+  )).rows[0];
+  return r ? r.id : null;
+}
+
+// Reconciliation: compares the ledger's figures against the underlying
+// records. NEVER changes anything — only flags discrepancies for review.
+async function reconciliation(housePaybill, month) {
+  const { query } = require('../config/database');
+  const house = await store.getHouse(housePaybill);
+  const { commissionable } = await rentCollectedForMonth(housePaybill, month);
+  const rate = await rateForMonth(housePaybill, month);
+  const invoice = (await query(
+    `SELECT * FROM commission_invoices WHERE house_paybill_number = $1 AND billing_month = $2 AND status = 'Issued'`,
+    [housePaybill, month]
+  )).rows[0] || null;
+  const pending = (await query(
+    `SELECT id, amount, payment_date::text AS payment_date, reference FROM landlord_remittance_payments
+      WHERE house_paybill_number = $1 AND billing_month = $2 AND status = 'Pending Verification'`,
+    [housePaybill, month]
+  )).rows;
+  const openReviews = (await query(
+    `SELECT * FROM landlord_reviews WHERE house_paybill_number = $1 AND status = 'Under Review'
+       AND (billing_month = $2 OR billing_month IS NULL)`,
+    [housePaybill, month]
+  )).rows;
+
+  const items = [];
+  if (invoice) {
+    const rentDiff = Math.round((Number(invoice.rent_collected) - commissionable) * 100) / 100;
+    if (rentDiff !== 0) {
+      items.push({
+        type: 'rent_mismatch', severity: 'blocker',
+        message: `Invoice rent collected ${rentDiff > 0 ? 'exceeds' : 'is below'} verified tenant payments`,
+        invoice_value: Number(invoice.rent_collected), verified_value: commissionable, difference: rentDiff,
+      });
+    }
+    const expectedCommission = Math.round((commissionable * Number(invoice.commission_rate || rate)) / 100 * 100) / 100;
+    const commDiff = Math.round((Number(invoice.commission_amount) - expectedCommission) * 100) / 100;
+    if (commDiff !== 0) {
+      items.push({
+        type: 'commission_mismatch', severity: 'blocker',
+        message: `Commission on invoice differs from ${invoice.commission_rate}% of verified collections`,
+        invoice_value: Number(invoice.commission_amount), verified_value: expectedCommission, difference: commDiff,
+      });
+    }
+  } else if (commissionable > 0) {
+    items.push({ type: 'invoice_missing', severity: 'info', message: 'Collections exist but no management-fee invoice generated yet', verified_value: commissionable });
+  }
+  if (pending.length) {
+    items.push({ type: 'pending_verification', severity: 'info', message: `${pending.length} transfer(s) awaiting verification`, transfers: pending });
+  }
+  for (const rev of openReviews) {
+    items.push({ type: 'open_review', severity: 'blocker', review_id: rev.id, message: `Under review: ${rev.reason}` });
+  }
+
+  const finalizedId = await isLedgerFinalized(housePaybill, month);
+  return {
+    house_paybill_number: housePaybill,
+    billing_month: month,
+    status: items.some((i) => i.severity === 'blocker') ? 'review' : 'ok',
+    finalized: !!finalizedId,
+    items,
+  };
+}
+
+async function finalizeLedger(housePaybill, month, actor) {
+  const { query } = require('../config/database');
+  const rec = await reconciliation(housePaybill, month);
+  if (rec.status !== 'ok') {
+    return { error: 'Reconciliation must pass before finalizing this month.', code: 'RECONCILIATION', reconciliation: rec };
+  }
+  const existing = await isLedgerFinalized(housePaybill, month);
+  if (existing) return { finalized_id: existing, already: true };
+  const row = (await query(
+    `INSERT INTO landlord_ledger_finalizations (house_paybill_number, billing_month, finalized_by)
+     VALUES ($1,$2,$3) RETURNING *`,
+    [housePaybill, month, actor || null]
+  )).rows[0];
+  return { finalization: row, reconciliation: rec };
+}
+
+async function reopenLedger(housePaybill, month, actor) {
+  const { query } = require('../config/database');
+  // Delete the finalization row (the unique partial index only covers
+  // Finalized rows, so removal cleanly allows a later re-finalization).
+  const result = await query(
+    `DELETE FROM landlord_ledger_finalizations
+      WHERE house_paybill_number = $1 AND billing_month = $2 AND status = 'Finalized'`,
+    [housePaybill, month]
+  );
+  return { reopened: result.rowCount > 0, actor: actor || null };
+}
+
+async function flagReview({ house_paybill_number, billing_month, target_type, target_id, reason, evidence_note, actor }) {
+  const { query } = require('../config/database');
+  if (!reason || !String(reason).trim()) return { error: 'reason is required', code: 'VALIDATION' };
+  const row = (await query(
+    `INSERT INTO landlord_reviews (house_paybill_number, billing_month, target_type, target_id, reason, evidence_note, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [house_paybill_number, billing_month || null, target_type || 'ledger', target_id || null,
+      String(reason).trim(), evidence_note || null, actor || null]
+  )).rows[0];
+  return { review: row };
+}
+
+async function resolveReview(reviewId, actor) {
+  const { query } = require('../config/database');
+  const row = (await query(
+    `UPDATE landlord_reviews SET status = 'Resolved', resolved_by = $1, resolved_at = NOW()
+      WHERE id = $2 AND status = 'Under Review' RETURNING *`,
+    [actor || null, Number(reviewId)]
+  )).rows[0];
+  if (!row) return { error: 'Review not found or already resolved', code: 'NOT_FOUND' };
+  return { review: row };
+}
+
+async function verifyRemittancePayment(paymentId, actor) {
+  const { query } = require('../config/database');
+  const row = (await query(
+    `UPDATE landlord_remittance_payments
+        SET status = 'Verified', verified_by = $1, verified_at = NOW(),
+            authorized_by = COALESCE(authorized_by, $1)
+      WHERE id = $2 AND status = 'Pending Verification'
+      RETURNING *`,
+    [actor || null, Number(paymentId)]
+  )).rows[0];
+  if (!row) {
+    const existing = (await query(`SELECT * FROM landlord_remittance_payments WHERE id = $1`, [Number(paymentId)])).rows[0];
+    if (existing && existing.status === 'Verified') return { payment: existing, already: true };
+    return { error: 'Transfer not found', code: 'NOT_FOUND' };
+  }
+  return { payment: row };
+}
+
+// Reverse a FALSE tenant payment confirmation: excluded from all financial
+// calculations (status no longer 'Approved'), original row + audit retained.
+async function reverseFalsePayment(paymentId, { actor, reason, recompute = true } = {}) {
+  const { query } = require('../config/database');
+  if (!reason || !String(reason).trim()) return { error: 'reason is required', code: 'VALIDATION' };
+  const p = (await query(`SELECT * FROM payments WHERE id = $1`, [Number(paymentId)])).rows[0];
+  if (!p) return { error: 'Payment not found', code: 'NOT_FOUND' };
+  if (String(p.status) === 'Reversed') return { payment: p, already: true };
+  if (String(p.status) !== 'Approved') return { error: `Only Approved payments can be reversed (status: ${p.status})`, code: 'VALIDATION' };
+  const upd = (await query(
+    `UPDATE payments SET status = 'Reversed', notes = COALESCE(notes || ' | ', '') || $1 WHERE id = $2 RETURNING *`,
+    [`[REVERSED as false by ${actor || 'system'}: ${String(reason).trim()}]`, Number(paymentId)]
+  )).rows[0];
+  await query(
+    `INSERT INTO audit_log (actor, action, entity_type, entity_id, details)
+     VALUES ($1, 'payment_reversed_false', 'payments', $2, $3)`,
+    [actor || 'system', String(paymentId), JSON.stringify({
+      reason: String(reason).trim(),
+      original: {
+        tenant_code: p.tenant_code, amount: Number(p.amount), payment_date: p.payment_date,
+        receipt_number: p.receipt_number, mpesa_reference: p.mpesa_reference, status: p.status,
+      },
+    })]
+  );
+  let tenantRepaired = false;
+  if (recompute && p.tenant_code) {
+    try {
+      await store.syncHistoricalPayments();
+      tenantRepaired = true;
+    } catch (e) {
+      console.error('[Landlord] historical recompute after reversal failed:', e.message);
+    }
+  }
+  return { payment: upd, tenant_repaired: tenantRepaired };
+}
+
+// Main-dashboard totals: the two obligations kept separate + overdue +
+// pending reviews (never combined into one number).
+async function landlordAccountTotals() {
+  const { query } = require('../config/database');
+  const houses = (await query(
+    `SELECT h.paybill_number, h.landlord_id, h.landlord_remittance_day, h.landlord_mfi_due_day,
+            l.default_remittance_day, l.default_mfi_due_day
+       FROM houses h JOIN landlords l ON l.id = h.landlord_id`
+  )).rows;
+  const today = new Date().toISOString().slice(0, 10);
+  let mfiPayable = 0;
+  let remittancesPayable = 0;
+  let overdueRemCount = 0;
+  let overdueRemAmount = 0;
+  let overdueMfiCount = 0;
+  let overdueMfiAmount = 0;
+  for (const h of houses) {
+    const led = await getLedger(h.paybill_number, h.landlord_id);
+    const rem = await remittanceLedger(h.paybill_number, h.landlord_id);
+    mfiPayable += Math.max(0, led.summary.outstanding);
+    remittancesPayable += Math.max(0, rem.summary.outstanding);
+    // Overdue = still outstanding AND this month's agreed payment day passed.
+    const day = effectiveRemittanceDay(h, h);
+    const todayDate = new Date().getDate();
+    if (rem.summary.outstanding > 0 && day && todayDate > Number(day)) {
+      overdueRemCount += 1;
+      overdueRemAmount += rem.summary.outstanding;
+    }
+    const openInv = (await query(
+      `SELECT due_date::text AS due_date, total_payable FROM commission_invoices
+        WHERE house_paybill_number = $1 AND status = 'Issued' AND total_payable > 0 AND due_date IS NOT NULL AND due_date < $2`,
+      [h.paybill_number, today]
+    )).rows;
+    for (const inv of openInv) {
+      overdueMfiCount += 1;
+      overdueMfiAmount += Number(inv.total_payable || 0);
+    }
+  }
+  const pendingReviews = (await query(`SELECT COUNT(*)::int AS n FROM landlord_reviews WHERE status = 'Under Review'`)).rows[0].n;
+  const pendingVerification = (await query(
+    `SELECT COALESCE(SUM(amount), 0)::float8 AS total FROM landlord_remittance_payments WHERE status = 'Pending Verification'`
+  )).rows[0].total;
+  const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+  return {
+    properties: houses.length,
+    mfi_payable_to_gehm: round2(mfiPayable),
+    remittances_payable_to_landlords: round2(remittancesPayable),
+    overdue_remittances_count: overdueRemCount,
+    overdue_remittances_amount: round2(overdueRemAmount),
+    overdue_mfi_count: overdueMfiCount,
+    overdue_mfi_amount: round2(overdueMfiAmount),
+    pending_reviews: pendingReviews,
+    pending_verification_total: round2(pendingVerification),
+  };
+}
+
 async function ledgerTotals(housePaybill, month) {
   const { query } = require('../config/database');
   const inv = await query(
@@ -167,6 +440,8 @@ async function generateCommissionInvoice(housePaybill, billingMonth, { actor } =
   const commission = round2((commissionable * rate) / 100);
   const { balance_before, payments_in_month } = await ledgerTotals(housePaybill, billingMonth);
   const totalPayable = round2(balance_before + commission - payments_in_month);
+  const dueDay = effectiveMfiDueDay(house, landlord);
+  const dueDate = mfiDueDate(billingMonth, dueDay);
 
   // Upsert: one ACTIVE invoice per property-month; regeneration refreshes it.
   const existing = (await query(
@@ -180,9 +455,9 @@ async function generateCommissionInvoice(housePaybill, billingMonth, { actor } =
       `UPDATE commission_invoices
           SET rent_collected = $1, commission_rate = $2, commission_amount = $3,
               previous_balance = $4, payments_applied = $5, total_payable = $6,
-              updated_at = NOW()
-        WHERE id = $7 RETURNING *`,
-      [commissionable, rate, commission, balance_before, payments_in_month, totalPayable, existing.id]
+              due_date = COALESCE($7, due_date), updated_at = NOW()
+        WHERE id = $8 RETURNING *`,
+      [commissionable, rate, commission, balance_before, payments_in_month, totalPayable, dueDate, existing.id]
     )).rows[0];
   } else {
     const invoiceNumber = await store.generateCommissionInvoiceNumber();
@@ -190,11 +465,11 @@ async function generateCommissionInvoice(housePaybill, billingMonth, { actor } =
       `INSERT INTO commission_invoices
          (invoice_number, landlord_id, house_paybill_number, billing_month, rent_collected,
           commission_rate, commission_amount, previous_balance, payments_applied, total_payable,
-          status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Issued',$11)
+          due_date, status, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Issued',$12)
        RETURNING *`,
       [invoiceNumber, landlord.id, housePaybill, billingMonth, commissionable,
-        rate, commission, balance_before, payments_in_month, totalPayable, actor || null]
+        rate, commission, balance_before, payments_in_month, totalPayable, dueDate, actor || null]
     )).rows[0];
   }
 
@@ -251,7 +526,9 @@ async function landlordOverview(landlordId, month) {
   const landlord = (await query(`SELECT * FROM landlords WHERE id = $1`, [landlordId])).rows[0];
   if (!landlord) return null;
   const houses = (await query(
-    `SELECT paybill_number, house_name, landlord_remittance_day FROM houses WHERE landlord_id = $1 ORDER BY house_name`,
+    `SELECT h.paybill_number, h.house_name, h.landlord_remittance_day, h.landlord_mfi_due_day,
+            l.default_remittance_day, l.default_mfi_due_day
+       FROM houses h JOIN landlords l ON l.id = h.landlord_id WHERE l.id = $1 ORDER BY h.house_name`,
     [landlordId]
   )).rows;
   const m = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(month || '')) ? String(month) : new Date().toISOString().slice(0, 7);
@@ -273,9 +550,10 @@ async function landlordOverview(landlordId, month) {
       total_paid: ledger.summary.total_paid,
       outstanding: ledger.summary.outstanding,
       // Rent remittance side (kept fully separate from commission)
-      remittance_day: h.landlord_remittance_day || null,
+      remittance_day: effectiveRemittanceDay(h, landlord),
       remittance_net_month: rem.monthRows.find((r) => r.billing_month === m)?.net_payable || 0,
       remittance_paid: rem.summary.total_paid,
+      remittance_pending: rem.summary.pending_verification,
       remittance_outstanding: rem.summary.outstanding,
       next_agreed_date: rem.next_agreed_date,
       landlord: ledger.landlord,
@@ -332,6 +610,10 @@ async function remittanceLedger(housePaybill, landlordId = null) {
   const { query } = require('../config/database');
   const house = await store.getHouse(housePaybill);
   if (!house) return null;
+  const landlord = house.landlord_id
+    ? (await query(`SELECT * FROM landlords WHERE id = $1`, [house.landlord_id])).rows[0] || null
+    : null;
+  // Historical months use the rate snapped on their commission invoice.
   const rate = await rateForHouse(housePaybill);
 
   // Months that have activity: rent collections, commission invoices, payments.
@@ -360,10 +642,25 @@ async function remittanceLedger(housePaybill, landlordId = null) {
   let cumulative = 0;
   for (const m of months) {
     const { commissionable } = await rentCollectedForMonth(housePaybill, m);
-    const commission = round2((commissionable * rate) / 100);
+    // Historical months: prefer the invoiced rate/amount (agreement of that
+    // period) — changing the current agreement never rewrites history.
+    const mRate = await rateForMonth(housePaybill, m);
+    const invoiceM = (await query(
+      `SELECT commission_amount, commission_rate FROM commission_invoices
+        WHERE house_paybill_number = $1 AND billing_month = $2 AND status = 'Issued'`,
+      [housePaybill, m]
+    )).rows[0];
+    const commission = invoiceM
+      ? round2(invoiceM.commission_amount)
+      : round2((commissionable * mRate) / 100);
     const deductions = await otherDeductionsForMonth(housePaybill, m);
     const net = round2(commissionable - commission - deductions);
-    const paidInMonth = round2(payAll.filter((p) => p.billing_month === m).reduce((s, p) => s + Number(p.amount), 0));
+    const paidInMonth = round2(payAll
+      .filter((p) => p.billing_month === m && p.status === 'Verified')
+      .reduce((s, p) => s + Number(p.amount), 0));
+    const pendingInMonth = round2(payAll
+      .filter((p) => p.billing_month === m && p.status === 'Pending Verification')
+      .reduce((s, p) => s + Number(p.amount), 0));
     cumulative = round2(cumulative + net - paidInMonth);
     monthRows.push({
       billing_month: m,
@@ -372,15 +669,14 @@ async function remittanceLedger(housePaybill, landlordId = null) {
       other_deductions: deductions,
       net_payable: net,
       paid_in_month: paidInMonth,
+      pending_in_month: pendingInMonth,
       outstanding_after: cumulative,
     });
   }
 
-  // Chronological payment history with running remittance balance.
+  // Chronological events; ONLY Verified transfers reduce the running balance.
   let balance = 0;
   const events = [];
-  const rowByMonth = new Map(monthRows.map((r) => [r.billing_month, r]));
-  // Merge: walk months, inserting the month's net row then its payments.
   for (const r of monthRows) {
     balance = round2(balance + r.net_payable);
     events.push({
@@ -389,29 +685,22 @@ async function remittanceLedger(housePaybill, landlordId = null) {
       other_deductions: r.other_deductions, amount: r.net_payable, balance,
     });
     for (const p of payAll.filter((x) => x.billing_month === r.billing_month)) {
-      balance = round2(balance - Number(p.amount));
+      const verified = p.status === 'Verified';
+      if (verified) balance = round2(balance - Number(p.amount));
       events.push({
         type: 'payment', date: p.payment_date, billing_month: p.billing_month,
         amount: Number(p.amount), method: p.method, reference: p.reference,
         notes: p.notes || null, id: p.id, balance,
-      });
-    }
-  }
-  // Payments whose month has no computed row (defensive)
-  for (const p of payAll) {
-    if (!rowByMonth.has(p.billing_month)) {
-      balance = round2(balance - Number(p.amount));
-      events.push({
-        type: 'payment', date: p.payment_date, billing_month: p.billing_month,
-        amount: Number(p.amount), method: p.method, reference: p.reference,
-        notes: p.notes || null, id: p.id, balance,
+        status: p.status, verified,
+        verified_by: p.verified_by || null, proof_note: p.proof_note || null,
       });
     }
   }
 
   const totalNet = round2(monthRows.reduce((s, r) => s + r.net_payable, 0));
-  const totalPaid = round2(payAll.reduce((s, p) => s + Number(p.amount), 0));
-  const day = house.landlord_remittance_day || null;
+  const totalPaid = round2(payAll.filter((p) => p.status === 'Verified').reduce((s, p) => s + Number(p.amount), 0));
+  const totalPending = round2(payAll.filter((p) => p.status === 'Pending Verification').reduce((s, p) => s + Number(p.amount), 0));
+  const day = effectiveRemittanceDay(house, landlord);
 
   return {
     house: { paybill_number: house.paybill_number, house_name: house.house_name, landlord_id: house.landlord_id || null },
@@ -424,12 +713,13 @@ async function remittanceLedger(housePaybill, landlordId = null) {
     summary: {
       total_net: totalNet,
       total_paid: totalPaid,
+      pending_verification: totalPending,
       outstanding: round2(totalNet - totalPaid),
     },
   };
 }
 
-async function recordRemittancePayment({ house_paybill_number, landlord_id, declared_landlord_id, billing_month, payment_date, amount, method, reference, notes, actor }) {
+async function recordRemittancePayment({ house_paybill_number, landlord_id, declared_landlord_id, billing_month, payment_date, amount, method, reference, notes, proof_note, actor }) {
   const { query } = require('../config/database');
   const house = await store.getHouse(house_paybill_number);
   if (!house) return { error: 'Property not found', code: 'NOT_FOUND' };
@@ -446,12 +736,22 @@ async function recordRemittancePayment({ house_paybill_number, landlord_id, decl
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(billing_month || ''))) {
     return { error: 'billing_month must be YYYY-MM', code: 'VALIDATION' };
   }
+  const finalizedId = await isLedgerFinalized(house_paybill_number, billing_month);
+  if (finalizedId) {
+    return { error: 'This month\'s landlord ledger is FINALIZED — reopen it before recording transfers.', code: 'FINALIZED' };
+  }
+  const landlord = (await query(`SELECT * FROM landlords WHERE id = $1`, [house.landlord_id])).rows[0] || {};
+  const recipientSnapshot = [
+    landlord.mpesa_number ? `M-Pesa ${landlord.mpesa_number}` : null,
+    landlord.bank_name ? `Bank ${landlord.bank_name} ${landlord.bank_account || ''}`.trim() : null,
+    landlord.payment_details_note || null,
+  ].filter(Boolean).join(' · ') || 'not set';
 
   const payment = (await query(
-    `INSERT INTO landlord_remittance_payments (landlord_id, house_paybill_number, billing_month, payment_date, amount, method, reference, notes, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    `INSERT INTO landlord_remittance_payments (landlord_id, house_paybill_number, billing_month, payment_date, amount, method, reference, notes, proof_note, recipient_details, status, authorized_by, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Pending Verification',$11,$11) RETURNING *`,
     [house.landlord_id, house_paybill_number, billing_month, String(payment_date).slice(0, 10), round2(amt),
-      method || 'M-Pesa', reference || null, notes || null, actor || null]
+      method || 'M-Pesa', reference || null, notes || null, proof_note || null, recipientSnapshot, actor || null]
   )).rows[0];
   const rem = await remittanceLedger(house_paybill_number);
   return { payment, outstanding: rem.summary.outstanding, ledger_summary: rem.summary };
@@ -479,11 +779,21 @@ async function propertyDashboard(housePaybill, landlordId, month) {
   const commissionEarned = monthRow ? monthRow.commission_earned : round2((rentCollected * rate) / 100);
   const commissionInvoiced = commissionLedger.summary.total_commission;
   const latestInvoice = commissionLedger.events.filter((e) => e.type === 'invoice').slice(-1)[0] || null;
+  const recon = await reconciliation(housePaybill, m).catch(() => null);
+  const finalizedId = await isLedgerFinalized(housePaybill, m).catch(() => null);
+  const { query } = require('../config/database');
+  const houseRow = (await query(`SELECT * FROM houses WHERE paybill_number = $1`, [housePaybill])).rows[0] || null;
+  const landlordRow = commissionLedger.landlord
+    ? (await query(`SELECT * FROM landlords WHERE id = $1`, [commissionLedger.landlord.id])).rows[0] || null
+    : null;
   return {
     month: m,
     house: commissionLedger.house,
     landlord: commissionLedger.landlord,
     rate_percent: rate,
+    reconciliation: recon,
+    finalized: !!finalizedId,
+    mfi_due_day: effectiveMfiDueDay(houseRow, landlordRow),
     summary: {
       // Month figures
       rent_collected: rentCollected,
@@ -497,6 +807,7 @@ async function propertyDashboard(housePaybill, landlordId, month) {
       // Remittance account (cumulative)
       remittance_net_total: rem.summary.total_net,
       remittance_paid: rem.summary.total_paid,
+      remittance_pending_verification: rem.summary.pending_verification,
       remittance_outstanding: rem.summary.outstanding,
       // Agreed dates
       remittance_day: rem.remittance_day,
@@ -524,4 +835,17 @@ module.exports = {
   recordRemittancePayment,
   setRemittanceDay,
   propertyDashboard,
+  rateForMonth,
+  effectiveRemittanceDay,
+  effectiveMfiDueDay,
+  mfiDueDate,
+  isLedgerFinalized,
+  reconciliation,
+  finalizeLedger,
+  reopenLedger,
+  flagReview,
+  resolveReview,
+  verifyRemittancePayment,
+  reverseFalsePayment,
+  landlordAccountTotals,
 };

@@ -653,6 +653,13 @@ router.post('/:id/share-whatsapp', async (req, res) => {
     if (waStatus !== 'Sent') {
       return res.status(502).json({ error: 'WhatsApp delivery failed: ' + (waReason || 'could not deliver the document') });
     }
+    await store.logAudit({
+      actor: req.user?.username,
+      action: 'document_shared_whatsapp',
+      entityType: 'document',
+      entityId: String(doc.id),
+      details: { doc_number: doc.doc_number, doc_type: doc.doc_type, recipient: phone, wa_status: waStatus },
+    });
     res.json({ success: true, whatsapp: { status: waStatus, messageId: waMessageId }, phone });
   } catch (err) {
     res.status(500).json({ error: 'WhatsApp share failed: ' + err.message });

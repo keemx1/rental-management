@@ -113,6 +113,14 @@
             <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9 9h6v6H9z"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
             <span class="sidebar-label">Commissions</span>
           </a>
+          <a href="#" data-nav="preexit-inspection" class="sidebar-link" title="Pre-Exit Inspection">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span class="sidebar-label">Pre-Exit Inspection</span>
+          </a>
+          <a href="#" data-nav="landlords" class="sidebar-link" title="Landlords (Ledger & Remittances)">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/><path d="M9 10h.01M15 10h.01"/></svg>
+            <span class="sidebar-label">Landlords</span>
+          </a>
 
           <!-- COMMUNICATIONS -->
           <div class="sidebar-section-label">Communications</div>
@@ -4454,17 +4462,28 @@
 
   <!-- LANDLORDS & COMMISSIONS LEDGER -->
   <section data-view="landlords" class="hidden space-y-6">
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <span class="sys-tag">[LANDLORD_COMMISSIONS]</span>
-        <h2 class="section-title mt-1">Landlord <span class="accent">Commission Ledger</span></h2>
-        <p class="section-desc">One landlord profile → many properties — each property keeps its own commission account, invoices, payments and balance.</p>
-      </div>
-      <div class="flex gap-2">
-        <button type="button" id="btn-ll-assign" class="qc-btn hidden">Assign Property</button>
-        <button type="button" id="btn-ll-new" class="qc-btn qc-btn-primary">+ New Landlord</button>
-      </div>
-    </div>
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <span class="sys-tag">[LANDLORD_ACCOUNTS]</span>
+            <h2 class="section-title mt-1">Landlord <span class="accent">Commission Ledger</span></h2>
+            <p class="section-desc">One landlord profile → many properties — each property keeps its own commission account, invoices, payments and balance.</p>
+          </div>
+          <div class="flex gap-2">
+            <button type="button" id="btn-ll-assign" class="qc-btn hidden">Assign Property</button>
+            <button type="button" id="btn-ll-new" class="qc-btn qc-btn-primary">+ New Landlord</button>
+          </div>
+        </div>
+
+        <!-- Landlord accounts summary (moved here from the main dashboard) -->
+        <div class="glass-panel p-4" id="landlord-accounts-strip">
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-center" id="landlord-accounts-grid">
+            <div class="bg-slate-800/50 rounded p-2"><div class="text-[10px] uppercase text-slate-400">Remittances payable</div><div class="font-mono font-bold text-emerald-300" id="la-rem-payable">KES 0</div></div>
+            <div class="bg-slate-800/50 rounded p-2"><div class="text-[10px] uppercase text-slate-400">Mgmt fees payable (GEHPM)</div><div class="font-mono font-bold text-cyan-300" id="la-mfi-payable">KES 0</div></div>
+            <div class="bg-slate-800/50 rounded p-2"><div class="text-[10px] uppercase text-slate-400">Overdue remittances</div><div class="font-mono font-bold text-amber-400" id="la-rem-overdue">0</div></div>
+            <div class="bg-slate-800/50 rounded p-2"><div class="text-[10px] uppercase text-slate-400">Overdue mgmt-fee invoices</div><div class="font-mono font-bold text-amber-400" id="la-mfi-overdue">0</div></div>
+            <div class="bg-slate-800/50 rounded p-2"><div class="text-[10px] uppercase text-slate-400">Pending reviews / verification</div><div class="font-mono font-bold text-rose-400" id="la-reviews">0</div></div>
+          </div>
+        </div>
 
     <div class="glass-panel p-4">
       <h3 class="font-orbitron text-lg text-white mb-3">Landlords</h3>
@@ -4967,6 +4986,16 @@
             <div><label class="form-label">Phone</label><input id="ll-form-phone" class="cyber-input" /></div>
             <div><label class="form-label">Email</label><input id="ll-form-email" class="cyber-input" /></div>
             <div><label class="form-label">ID number</label><input id="ll-form-idno" class="cyber-input" /></div>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label class="form-label">Default remittance day (1-31)</label><input type="number" min="1" max="31" id="ll-form-remday" class="cyber-input" /></div>
+              <div><label class="form-label">Mgmt-fee invoice due day (1-31)</label><input type="number" min="1" max="31" id="ll-form-mfiday" class="cyber-input" /></div>
+            </div>
+            <div><label class="form-label">Approved M-Pesa number</label><input id="ll-form-mpesa" class="cyber-input" placeholder="e.g. 07xx…" /></div>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label class="form-label">Bank name</label><input id="ll-form-bank" class="cyber-input" /></div>
+              <div><label class="form-label">Bank account</label><input id="ll-form-acct" class="cyber-input" /></div>
+            </div>
+            <div><label class="form-label">Payment details note</label><input id="ll-form-paynote" class="cyber-input" /></div>
             <div><label class="form-label">Notes</label><textarea id="ll-form-notes" rows="2" class="cyber-input"></textarea></div>
           </div>
           <p id="ll-form-result" class="text-sm font-mono mt-2"></p>
@@ -5022,6 +5051,7 @@
             </div>
             <div><label class="form-label">M-Pesa / bank reference</label><input id="ll-pay-ref" class="cyber-input" /></div>
             <div><label class="form-label">Notes</label><input id="ll-pay-notes" class="cyber-input" /></div>
+            <div><label class="form-label">Proof note (M-Pesa confirmation / bank ref text)</label><input id="ll-pay-proof" class="cyber-input" placeholder="Optional — transfer stays Pending Verification until verified" /></div>
           </div>
           <p id="ll-payment-result" class="text-sm font-mono mt-2"></p>
           <div class="flex gap-2 mt-4">
@@ -5074,11 +5104,14 @@
           </div>
           <div class="overflow-x-auto mb-3">
             <table class="cyber-table">
-              <thead><tr><th>Date</th><th>Month</th><th>Amount</th><th>Method</th><th>Reference</th></tr></thead>
+              <thead><tr><th>Date</th><th>Month</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th></tr></thead>
               <tbody id="ll-rem-payments-tbody"></tbody>
             </table>
           </div>
           <div class="font-mono text-xs text-emerald-200 mb-3" id="ll-rem-summary">—</div>
+
+          <!-- Reconciliation + month status -->
+          <div id="ll-dash-recon" class="mb-3 text-xs font-mono rounded p-2 border border-slate-700 bg-slate-800/40">Reconciliation: —</div>
 
           <div class="flex flex-wrap gap-2">
             <button type="button" id="btn-ll-dash-pay-comm" class="qc-btn text-xs">Record Commission Payment</button>
@@ -5088,6 +5121,9 @@
             <button type="button" id="btn-ll-dash-share-inv" class="qc-btn text-xs">Share Invoice with Landlord</button>
             <button type="button" id="btn-ll-dash-stmt-comm" class="qc-btn text-xs">Commission Statement</button>
             <button type="button" id="btn-ll-dash-stmt-rem" class="qc-btn text-xs">Remittance Statement</button>
+            <button type="button" id="btn-ll-dash-flag" class="qc-btn text-xs">Flag Under Review</button>
+            <button type="button" id="btn-ll-dash-finalize" class="qc-btn text-xs">Finalize Month</button>
+            <button type="button" id="btn-ll-dash-reopen" class="qc-btn text-xs hidden">Reopen Month</button>
             <button type="button" id="btn-ll-ledger-close" class="qc-btn text-xs ml-auto">Close</button>
           </div>
           <p id="ll-dash-result" class="text-sm font-mono mt-2"></p>
@@ -5108,6 +5144,7 @@
             </div>
             <div><label class="form-label">M-Pesa / bank reference</label><input id="llr-ref" class="cyber-input" /></div>
             <div><label class="form-label">Notes</label><input id="llr-notes" class="cyber-input" /></div>
+            <div><label class="form-label">Proof note (M-Pesa confirmation / bank receipt text)</label><input id="llr-proof" class="cyber-input" placeholder="Optional — transfer stays Pending Verification until verified" /></div>
           </div>
           <p id="ll-rem-result" class="text-sm font-mono mt-2"></p>
           <div class="flex gap-2 mt-4">
@@ -5810,10 +5847,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=76"></script>
+  <script type="module" src="/js/app.js?v=78"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=76').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=78').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),
