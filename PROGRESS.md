@@ -789,6 +789,19 @@ all current code (watchdog respawns within ~15s).
 
 ---
 
+### 26. Minimal dashboard header: search + notification bell (v80)
+Per user feedback the verbose dashboard header was simplified to ONE clean
+row: a bare search input (no `[GLOBAL_SEARCH]` tag, no long placeholder —
+hover tooltip only) and a **notification bell with a count badge**. The big
+dark banner (and its "Notifications unavailable" state) is gone; the bell
+hides at zero, shows the total (99+ cap), turns red and pulses its badge
+while any critical/overdue alert exists, dims when the endpoint is
+unreachable, and opens the same filterable notification modal on click.
+Polling, deep links, history and all alert semantics unchanged. Stamps →
+`?v=80`, SW → `gutenberg-v81-irmanage`.
+
+---
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -833,3 +846,4 @@ all current code (watchdog respawns within ~15s).
 | 23 | Landlord Ledger Dashboard: commission + rent remittance ledgers, agreed dates, statements, invoice sharing | v76 |
 | 24 | Landlord accounts: agreements, transfer verification, reconciliation, finalization, false-payment reversal, totals strip + menu fix | v77/v78 |
 | 25 | Central Notification Bar: live alert detection, emergency pulse, deep links, auto-updates, history | v79 |
+| 26 | Minimal dashboard header: bare search input + notification bell with count badge | v80 |

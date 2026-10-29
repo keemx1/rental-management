@@ -1461,3 +1461,23 @@ div[id$="modal"] label {
 .ne-row-priority.due_soon { color: #fcd34d; }
 .ne-row-priority.pending { color: #93c5fd; }
 .ne-row-priority.review { color: #c4b5fd; }
+
+/* ── Minimal notification bell + count badge ──────────────────────────────── */
+.ne-bell {
+  position: relative; width: 40px; height: 40px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 10px; border: 1px solid transparent; background: transparent;
+  color: #94a3b8; cursor: pointer; transition: background .2s, color .2s;
+}
+.ne-bell:hover { background: #1e293b; color: #e2e8f0; }
+.ne-bell svg { width: 22px; height: 22px; }
+.ne-bell.emergency { color: #f87171; }
+.ne-bell.emergency:hover { color: #fca5a5; }
+.ne-bell.unavailable { opacity: .35; }
+.ne-badge {
+  position: absolute; top: 3px; right: 3px;
+  min-width: 18px; padding: 1px 5px; border-radius: 999px;
+  background: #334155; color: #fff; font-size: 10px; font-weight: 800;
+  line-height: 1.4; text-align: center; font-family: ui-monospace, monospace;
+}
+.ne-badge.urgent { background: #ef4444; animation: ne-pulse 1.3s cubic-bezier(.4,0,.6,1) infinite; }

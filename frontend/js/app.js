@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v79';
+const GEHM_VERSION = 'v80';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -4677,34 +4677,27 @@ async function loadNotifications() {
     _neState.alerts = data.alerts || [];
     renderNeBar(data.summary || {});
   } catch (err) {
-    const bar = document.getElementById('ne-bar');
-    if (bar) bar.classList.remove('emergency');
-    setTxtSafe('ne-title', 'Notifications unavailable');
-    setTxtSafe('ne-sub', err.message || '');
+    // Backend not reachable yet — keep the bell neutral and silent.
+    renderNeBar({ total: 0, emergency: false }, true);
   }
 }
 
-function renderNeBar(summary) {
-  const bar = document.getElementById('ne-bar');
-  if (!bar) return;
-  const emergency = !!summary.emergency;
-  bar.classList.toggle('emergency', emergency);
-  setTxtSafe('ne-title', emergency
-    ? `URGENT ATTENTION REQUIRED — ${summary.total} ALERT${summary.total === 1 ? '' : 'S'}`
-    : (summary.total ? `${summary.total} notification${summary.total === 1 ? '' : 's'}` : 'All clear — no outstanding alerts'));
-  const bits = [];
-  if (summary.critical) bits.push(`${summary.critical} critical`);
-  if (summary.overdue) bits.push(`${summary.overdue} overdue`);
-  if (summary.due_soon) bits.push(`${summary.due_soon} due soon`);
-  if (summary.pending) bits.push(`${summary.pending} pending action`);
-  if (summary.review) bits.push(`${summary.review} under review`);
-  setTxtSafe('ne-sub', bits.length ? bits.join(' · ') : 'All underlying issues are clear.');
-  const chips = document.getElementById('ne-chips');
-  if (chips) {
-    chips.innerHTML = ['critical', 'overdue', 'due_soon', 'pending', 'review']
-      .filter((p) => summary[p])
-      .map((p) => `<span class="ne-chip ${p}">${summary[p]} ${p.replace('_', ' ')}</span>`).join('');
+function renderNeBar(summary, unavailable) {
+  const bell = document.getElementById('ne-bell');
+  const badge = document.getElementById('ne-badge');
+  if (!bell || !badge) return;
+  const n = summary.total || 0;
+  bell.classList.toggle('emergency', !!summary.emergency);
+  bell.classList.toggle('unavailable', !!unavailable);
+  if (unavailable || n === 0) {
+    badge.classList.add('hidden');
+    bell.title = unavailable ? 'Notifications unavailable' : 'No notifications';
+    return;
   }
+  badge.classList.remove('hidden');
+  badge.textContent = n > 99 ? '99+' : String(n);
+  badge.classList.toggle('urgent', !!summary.emergency);
+  bell.title = `${n} notification${n === 1 ? '' : 's'}${summary.emergency ? ' — urgent attention required' : ''}`;
 }
 
 function nePriorityLabel(p) {
@@ -4791,14 +4784,7 @@ async function handleNotificationGo(link) {
   }
 }
 
-document.getElementById('ne-bar')?.addEventListener('click', (e) => {
-  if (e.target.closest('#btn-ne-open')) return;
-  openNotificationsModal();
-});
-document.getElementById('btn-ne-open')?.addEventListener('click', (e) => {
-  e.stopPropagation();
-  openNotificationsModal();
-});
+document.getElementById('ne-bell')?.addEventListener('click', () => openNotificationsModal());
 document.getElementById('btn-ne-close')?.addEventListener('click', () => document.getElementById('ne-modal')?.classList.add('hidden'));
 document.getElementById('ne-filter')?.addEventListener('change', renderNeList);
 document.getElementById('ne-show-history')?.addEventListener('change', renderNeList);

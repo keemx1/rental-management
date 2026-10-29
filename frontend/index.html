@@ -307,24 +307,17 @@
 
       <!-- DASHBOARD -->
       <section data-view="dashboard" class="hidden space-y-8">
-        <!-- Central Notification Bar (emergency indicator) -->
-        <div class="ne-bar" id="ne-bar" title="Open notifications">
-          <span class="ne-dot" id="ne-dot"></span>
-          <div class="flex-1 min-w-[220px]">
-            <div class="ne-title" id="ne-title">Checking alerts…</div>
-            <div class="text-[11px] font-mono text-slate-400" id="ne-sub">Scanning tenant, landlord, work-order and system records…</div>
-          </div>
-          <div class="ne-chips" id="ne-chips"></div>
-          <button type="button" class="qc-btn text-xs" id="btn-ne-open">View All Notifications</button>
-        </div>
-        <!-- Universal Global Search -->
-        <div class="glass-panel p-4 relative" id="global-search-panel">
-          <div class="flex items-center gap-3">
-            <span class="sys-tag shrink-0">[GLOBAL_SEARCH]</span>
-            <input id="global-search" type="text" autocomplete="off"
-              class="cyber-input flex-1 !py-3 text-base"
-              placeholder="Search ANYTHING — tenant, unit, property, invoice no, M-Pesa ref, landlord, receipt, work order, report…" />
-          </div>
+        <!-- Search + notification bell -->
+        <div class="glass-panel p-3 relative flex items-center gap-3" id="global-search-panel">
+          <input id="global-search" type="text" autocomplete="off"
+            class="cyber-input flex-1 !py-2.5" title="Search" />
+          <button type="button" id="ne-bell" class="ne-bell" title="Notifications">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span id="ne-badge" class="ne-badge hidden">0</span>
+          </button>
           <div id="global-search-results"
             class="hidden absolute left-0 right-0 top-full mt-1 z-40 max-h-[70vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900/95 shadow-2xl"></div>
         </div>
@@ -5887,10 +5880,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=79"></script>
+  <script type="module" src="/js/app.js?v=80"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=79').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=80').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

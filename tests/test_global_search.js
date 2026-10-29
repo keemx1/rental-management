@@ -184,9 +184,9 @@ async function main() {
 
     // Frontend markers
     const idx = await (await fetch('http://127.0.0.1:3003/')).text();
-    check(idx.includes('id="global-search"') && idx.includes('GLOBAL_SEARCH')
+    check(idx.includes('id="global-search"') && idx.includes('id="ne-bell"')
       && idx.includes('data-nav="preexit-inspection"') && idx.includes('id="btn-ei-preexit"'),
-      '16. dashboard search bar + pre-exit placement served');
+      '16. minimal search bar + bell + pre-exit placement served');
     const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js')).text();
     check(appJs.includes('handleSearchResultGo') && appJs.includes("case 'commission_invoice'")
       && appJs.includes("case 'preexit'") && appJs.includes('openPreExitForUnit'),

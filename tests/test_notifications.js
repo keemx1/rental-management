@@ -242,16 +242,18 @@ async function main() {
 
     // ── Frontend surface ────────────────────────────────────────────────────
     const idx = await (await fetch('http://127.0.0.1:3003/')).text();
-    check(idx.includes('id="ne-bar"') && idx.includes('id="ne-modal"')
-      && idx.includes('id="ne-tbody"') && /rental-theme\.css\?v=\d+/.test(idx),
-      '14. notification bar + modal served');
+    check(idx.includes('id="ne-bell"') && idx.includes('id="ne-badge"')
+      && idx.includes('id="ne-modal"') && idx.includes('id="ne-tbody"')
+      && idx.includes('id="global-search"') && /rental-theme\.css\?v=\d+/.test(idx),
+      '14. minimal search + notification bell (with badge) served');
+    check(!idx.includes('id="ne-bar"'), '14d. old verbose notification bar removed');
     const css = await (await fetch('http://127.0.0.1:3003/css/rental-theme.css?v=6')).text();
-    check(css.includes('ne-pulse') && css.includes('.ne-bar.emergency'),
-      '14b. pulsing emergency CSS served');
+    check(css.includes('ne-pulse') && css.includes('.ne-badge.urgent'),
+      '14b. pulsing urgent badge CSS served');
     const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js')).text();
     check(appJs.includes('startNePolling') && appJs.includes('handleNotificationGo')
-      && appJs.includes('URGENT ATTENTION REQUIRED') && appJs.includes('loadNotifications'),
-      '14c. bar logic + deep-link dispatcher + auto-polling served');
+      && appJs.includes('loadNotifications') && appJs.includes('ne-badge'),
+      '14c. bell logic + deep-link dispatcher + auto-polling served');
 
     console.log('\n(no records outside the fixture were modified)');
   } finally {
