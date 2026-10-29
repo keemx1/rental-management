@@ -40,6 +40,7 @@ Run from the repo root (server must be up on port `3003`):
 | Landlord commissions | `node tests/test_landlord_commissions.js` | 35 assertions — per-property accounts never mixed (300k@5%=15k vs 200k@4%=8k), invoice PDF + numbers, payments to the correct property only, automatic carry-forward (5k→17k−7k→10k→8k), statement ledger with running balance + PDF, regeneration/void, mismatch + unassigned guards, overview split |
 | Landlord ledger dashboard | `node tests/test_landlord_ledger.js` | 33 assertions — spec example exact (100k−5k−2k=93k, pay 80k→13k month row, second partial→8k), carry-forward 55.5k, two balances never offset, per-property isolation, agreed day + next due, both statements PDFs, invoice share via WhatsApp pipeline, guards, overview remittance totals |
 | Landlord accounts enhancement | `node tests/test_landlord_accounts.js` | 35 assertions — all 10 acceptance points: rollover-first, MFI invoice + agreed due date, net calc 93k, Pending≠paid (verified-only balances, 403 for non-admin verify), carry-forward once, reconciliation mismatch flagged + finalize gate + reopen, false-payment reversal + restricted audit, statement versions v1/v2, transfer proof/recipient snapshots, dashboard separate totals + overdue + reviews |
+| Central notification bar | `node tests/test_notifications.js` | 28 assertions — emergency activation for critical/overdue, per-priority counts, deep links to exact records, viewing never resolves, dedupe (one Open row), partial payment updates amount only, auto-resolve on clearance, unrelated alerts survive, history with resolution, reopen, critical→review downgrade, read-only vs ledger, operator read access, bar/modal/pulse CSS/polling served |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -739,6 +740,55 @@ authorized_by — existing transfers backfilled Verified),
 
 ---
 
+### 25. Central Notification Bar + emergency indicator (v79)
+Proactive dashboard monitoring computed LIVE from existing records (the
+notification system never changes a balance, approval or ledger — it only
+reports and links).
+
+**Schema** (`migrate-notifications.js`): `notification_log` — lifecycle only:
+one **Open** row per issue identity (partial unique index on alert_key),
+auto-resolved when the underlying record clears, history preserved with
+resolution text.
+
+**Detection** (`services/notifications.js`, `GET /api/notifications`):
+- tenant rent arrears (overdue) → tenant dashboard deep link
+- payments awaiting approval (pending) → Payments
+- landlord remittances: overdue past the agreed day / due within 3 days /
+  transfers awaiting verification → landlord ledger (with balance, due date,
+  transferred-vs-payable, status, recommended action)
+- management-fee invoices overdue / due soon (agreed due dates) → ledger
+- reconciliation discrepancies for current+previous month: **Critical** when
+  unexplained, **Under Review** when a dispute exists (blockers only; never
+  alters figures) → ledger reconciliation view
+- open landlord reviews (review) → ledger
+- work orders pending approval / past expected completion → Work Orders
+- failed sends in the last 24h (aggregate) → WhatsApp
+Priorities: critical / overdue / due_soon / pending / review; **emergency =
+any critical or overdue**.
+
+**Sync semantics**: every read upserts the Open row (details/amount refresh —
+partial payments update amounts without resolving), auto-resolves keys that
+disappeared (`Auto-resolved: underlying issue cleared`), re-raises fresh
+alerts if issues return; deduped by the partial unique index; reads never
+mutate money (asserted).
+
+**UI** (dashboard top): the notification bar — pulsing red dot +
+"URGENT ATTENTION REQUIRED — N ALERTS" + priority chips + View All →
+filterable modal (priority filter, resolved-history toggle); every row opens
+the exact record via the deep-link dispatcher (viewing never dismisses);
+60-second auto-polling while on the dashboard (stops on navigation) —
+counts and the light update without refresh; the light clears only when the
+last critical/overdue issue is genuinely resolved. CSS pulse in
+`rental-theme.css` (bumped ?v=6). Stamps → `?v=79`, SW →
+`gutenberg-v80-irmanage`.
+
+**Operational note:** the long-running elevated node process (PID 5568,
+started from an admin console) resisted automated restarts and predates the
+v75+ backend routes — run **`restart-server.bat` as administrator** to load
+all current code (watchdog respawns within ~15s).
+
+---
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -782,3 +832,4 @@ authorized_by — existing transfers backfilled Verified),
 | 22 | WhatsApp duplicate-send fix: exactly one attempt per send; lock errors soft-success (v66 retry removed) | backend |
 | 23 | Landlord Ledger Dashboard: commission + rent remittance ledgers, agreed dates, statements, invoice sharing | v76 |
 | 24 | Landlord accounts: agreements, transfer verification, reconciliation, finalization, false-payment reversal, totals strip + menu fix | v77/v78 |
+| 25 | Central Notification Bar: live alert detection, emergency pulse, deep links, auto-updates, history | v79 |

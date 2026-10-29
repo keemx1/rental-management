@@ -323,6 +323,12 @@ export const api = {
   reverseFalsePayment(paymentId, reason) {
     return request(`/payments/${paymentId}/reverse-false`, { method: 'POST', body: JSON.stringify({ reason }) });
   },
+  getNotifications() {
+    return request('/notifications');
+  },
+  notificationsHistory(status, limit) {
+    return request(`/notifications/history?status=${encodeURIComponent(status ?? 'Resolved')}${limit ? `&limit=${limit}` : ''}`);
+  },
   deleteArchive(id) {
     return request(`/archive/${id}`, { method: 'DELETE' });
   },

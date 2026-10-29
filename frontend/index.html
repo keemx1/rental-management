@@ -9,7 +9,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/css/rental-theme.css?v=5" />
+  <link rel="stylesheet" href="/css/rental-theme.css?v=6" />
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#6366f1" />
   <meta name="description" content="Rental Messaging & Property Management System" />
@@ -307,6 +307,16 @@
 
       <!-- DASHBOARD -->
       <section data-view="dashboard" class="hidden space-y-8">
+        <!-- Central Notification Bar (emergency indicator) -->
+        <div class="ne-bar" id="ne-bar" title="Open notifications">
+          <span class="ne-dot" id="ne-dot"></span>
+          <div class="flex-1 min-w-[220px]">
+            <div class="ne-title" id="ne-title">Checking alerts…</div>
+            <div class="text-[11px] font-mono text-slate-400" id="ne-sub">Scanning tenant, landlord, work-order and system records…</div>
+          </div>
+          <div class="ne-chips" id="ne-chips"></div>
+          <button type="button" class="qc-btn text-xs" id="btn-ne-open">View All Notifications</button>
+        </div>
         <!-- Universal Global Search -->
         <div class="glass-panel p-4 relative" id="global-search-panel">
           <div class="flex items-center gap-3">
@@ -4976,6 +4986,36 @@
         </div>
       </div>
 
+      <!-- Notifications modal -->
+      <div id="ne-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+        <div class="glass-panel p-6 w-full max-w-5xl max-h-[88vh] overflow-y-auto">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h3 class="font-orbitron text-xl text-white">Notifications</h3>
+            <div class="flex items-center gap-2">
+              <select id="ne-filter" class="cyber-input !py-1 text-sm">
+                <option value="">All priorities</option>
+                <option value="critical">Critical</option>
+                <option value="overdue">Overdue</option>
+                <option value="due_soon">Due Soon</option>
+                <option value="pending">Pending Action</option>
+                <option value="review">Under Review</option>
+              </select>
+              <label class="text-xs font-mono text-slate-400 flex items-center gap-1">
+                <input type="checkbox" id="ne-show-history" class="accent-slate-400" /> History (resolved)
+              </label>
+              <button type="button" class="qc-btn text-xs" id="btn-ne-close">Close</button>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="cyber-table">
+              <thead><tr><th>Priority</th><th>Issue</th><th>Property / Account</th><th>Outstanding</th><th>Status</th><th></th></tr></thead>
+              <tbody id="ne-tbody"></tbody>
+            </table>
+          </div>
+          <p class="text-[11px] text-slate-500 font-mono mt-3">Notifications are generated from live records. Viewing never resolves an alert — only the underlying issue clearing does.</p>
+        </div>
+      </div>
+
       <!-- Landlord modal (create / edit) -->
       <div id="landlord-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
         <div class="glass-panel p-6 w-full max-w-md">
@@ -5847,10 +5887,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=78"></script>
+  <script type="module" src="/js/app.js?v=79"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=78').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=79').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

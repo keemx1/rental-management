@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v78';
+const GEHM_VERSION = 'v79';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -568,6 +568,7 @@ function showView(name) {
     a.classList.toggle('active', a.dataset.nav === name);
   });
   window.scrollTo(0, 0);
+  if (name === 'dashboard') startNePolling(); else stopNePolling();
   if (name === 'dashboard') loadDashboard();
   if (name === 'houses') loadHouses();
   if (name === 'tenants') loadTenants();
@@ -4653,6 +4654,159 @@ document.getElementById('btn-ll-dash-flag')?.addEventListener('click', async () 
     showToast('Flagged Under Review.', 'success');
     await openLandlordLedger(_llState.dash.house);
   } catch (err) { showToast(err.message, 'error'); }
+});
+
+// ─── Central Notification Bar ───────────────────────────────────────────────
+// Live alerts computed from existing records (read-only). Viewing never
+// resolves an alert; the light clears only when the underlying issues do.
+let _neTimer = null;
+let _neState = { alerts: [], history: [] };
+
+function startNePolling() {
+  loadNotifications();
+  stopNePolling();
+  _neTimer = setInterval(loadNotifications, 60000);
+}
+function stopNePolling() {
+  if (_neTimer) { clearInterval(_neTimer); _neTimer = null; }
+}
+
+async function loadNotifications() {
+  try {
+    const data = await api.getNotifications();
+    _neState.alerts = data.alerts || [];
+    renderNeBar(data.summary || {});
+  } catch (err) {
+    const bar = document.getElementById('ne-bar');
+    if (bar) bar.classList.remove('emergency');
+    setTxtSafe('ne-title', 'Notifications unavailable');
+    setTxtSafe('ne-sub', err.message || '');
+  }
+}
+
+function renderNeBar(summary) {
+  const bar = document.getElementById('ne-bar');
+  if (!bar) return;
+  const emergency = !!summary.emergency;
+  bar.classList.toggle('emergency', emergency);
+  setTxtSafe('ne-title', emergency
+    ? `URGENT ATTENTION REQUIRED — ${summary.total} ALERT${summary.total === 1 ? '' : 'S'}`
+    : (summary.total ? `${summary.total} notification${summary.total === 1 ? '' : 's'}` : 'All clear — no outstanding alerts'));
+  const bits = [];
+  if (summary.critical) bits.push(`${summary.critical} critical`);
+  if (summary.overdue) bits.push(`${summary.overdue} overdue`);
+  if (summary.due_soon) bits.push(`${summary.due_soon} due soon`);
+  if (summary.pending) bits.push(`${summary.pending} pending action`);
+  if (summary.review) bits.push(`${summary.review} under review`);
+  setTxtSafe('ne-sub', bits.length ? bits.join(' · ') : 'All underlying issues are clear.');
+  const chips = document.getElementById('ne-chips');
+  if (chips) {
+    chips.innerHTML = ['critical', 'overdue', 'due_soon', 'pending', 'review']
+      .filter((p) => summary[p])
+      .map((p) => `<span class="ne-chip ${p}">${summary[p]} ${p.replace('_', ' ')}</span>`).join('');
+  }
+}
+
+function nePriorityLabel(p) {
+  return { critical: 'Critical', overdue: 'Overdue', due_soon: 'Due Soon', pending: 'Pending', review: 'Review' }[p] || p;
+}
+
+async function openNotificationsModal(showHistory) {
+  const modal = document.getElementById('ne-modal');
+  modal?.classList.remove('hidden');
+  const hist = document.getElementById('ne-show-history');
+  if (hist && showHistory != null) hist.checked = showHistory;
+  await renderNeList();
+}
+
+async function renderNeList() {
+  const tbody = document.getElementById('ne-tbody');
+  if (!tbody) return;
+  const showHistory = document.getElementById('ne-show-history')?.checked;
+  const filter = document.getElementById('ne-filter')?.value || '';
+  try {
+    let rows = [];
+    let links = [];
+    if (showHistory) {
+      const h = await api.notificationsHistory();
+      rows = (h.notifications || []).filter((n) => !filter || n.priority === filter).map((n) => ({
+        priority: n.priority, title: n.title, details: typeof n.details === 'string' ? JSON.parse(n.details) : (n.details || {}),
+        amount: n.amount, resolved: true, resolution: n.resolution,
+      }));
+    } else {
+      if (!_neState.alerts.length) await loadNotifications();
+      rows = _neState.alerts.filter((a) => !filter || a.priority === filter);
+      links = rows.map((a) => a.link || {});
+    }
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-500">${showHistory ? 'No resolved notifications yet.' : 'No notifications — everything is clear.'}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map((a, i) => {
+      const d = a.details || {};
+      return `<tr class="border-b border-slate-800 hover:bg-slate-800/30 ${a.resolved ? '' : 'cursor-pointer'}" ${a.resolved ? '' : `data-ne-go="${i}"`}>
+        <td><span class="ne-row-priority ${a.priority}">${nePriorityLabel(a.priority)}</span></td>
+        <td class="text-sm text-white">${escapeHtml(a.title)}<div class="text-[10px] text-slate-500 font-mono">${escapeHtml(d.reason || d.issue_type || '')}</div></td>
+        <td class="text-xs font-mono text-slate-300">${escapeHtml([d.property, d.unit ? `Unit ${d.unit}` : '', d.invoice || ''].filter(Boolean).join(' · '))}${d.due_date ? `<div class="text-[10px] text-slate-500">Due ${escapeHtml(String(d.due_date).slice(0, 10))}</div>` : ''}</td>
+        <td class="font-mono text-sm ${Number(a.amount) > 0 ? 'text-amber-300' : 'text-slate-500'}">${Number(a.amount) > 0 ? llFmt(a.amount) : '—'}</td>
+        <td class="text-xs">${a.resolved ? `<span class="text-slate-500">Resolved</span><div class="text-[10px] text-slate-600">${escapeHtml(a.resolution || '')}</div>` : escapeHtml(d.status || 'Open')}</td>
+        <td class="text-xs text-cyan-400">${a.resolved ? '' : 'Open →'}</td>
+      </tr>`;
+    }).join('');
+    tbody._links = links;
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function handleNotificationGo(link) {
+  if (!link) return;
+  document.getElementById('ne-modal')?.classList.add('hidden');
+  try {
+    switch (link.kind) {
+      case 'tenant':
+        activeTenantCode = link.id;
+        showView('tenant-dashboard');
+        break;
+      case 'payments':
+        showView('payments');
+        break;
+      case 'work_order':
+        showView('work-orders');
+        loadWorkOrders();
+        break;
+      case 'whatsapp':
+        showView('whatsapp');
+        break;
+      case 'landlord_ledger':
+        showView('landlords');
+        if (link.landlord_id) await openLandlordProfile(link.landlord_id);
+        if (link.paybill) await openLandlordLedger(link.paybill);
+        break;
+      default:
+        showView('dashboard');
+    }
+  } catch (err) {
+    console.error('Notification navigation failed:', err);
+  }
+}
+
+document.getElementById('ne-bar')?.addEventListener('click', (e) => {
+  if (e.target.closest('#btn-ne-open')) return;
+  openNotificationsModal();
+});
+document.getElementById('btn-ne-open')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  openNotificationsModal();
+});
+document.getElementById('btn-ne-close')?.addEventListener('click', () => document.getElementById('ne-modal')?.classList.add('hidden'));
+document.getElementById('ne-filter')?.addEventListener('change', renderNeList);
+document.getElementById('ne-show-history')?.addEventListener('change', renderNeList);
+document.getElementById('ne-tbody')?.addEventListener('click', (e) => {
+  const tr = e.target.closest('[data-ne-go]');
+  if (!tr) return;
+  const links = document.getElementById('ne-tbody')._links || [];
+  handleNotificationGo(links[Number(tr.dataset.neGo)]);
 });
 
 function togglePaymentFields() {

@@ -1416,3 +1416,48 @@ div[id$="modal"] label {
     display: none !important;
   }
 }
+
+
+/* ── GEHPM Central Notification Bar + emergency indicator ─────────────────── */
+.ne-bar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  border: 1px solid #334155; border-radius: 10px; padding: 12px 16px;
+  background: #0f172a; cursor: pointer; transition: border-color .3s, background .3s;
+}
+.ne-bar:hover { border-color: #475569; }
+.ne-bar.emergency {
+  border-color: #b91c1c;
+  background: linear-gradient(90deg, rgba(127,29,29,.35), rgba(15,23,42,1) 60%);
+}
+.ne-dot {
+  width: 16px; height: 16px; border-radius: 50%; background: #475569;
+  display: inline-block; flex-shrink: 0;
+}
+.ne-bar.emergency .ne-dot {
+  background: #ef4444;
+  animation: ne-pulse 1.3s cubic-bezier(.4,0,.6,1) infinite;
+}
+@keyframes ne-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(239,68,68,.75); transform: scale(1); }
+  70% { box-shadow: 0 0 0 14px rgba(239,68,68,0); transform: scale(1.15); }
+  100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); transform: scale(1); }
+}
+.ne-title { font-weight: 800; letter-spacing: .04em; font-size: 13px; text-transform: uppercase; }
+.ne-bar.emergency .ne-title { color: #fecaca; }
+.ne-bar:not(.emergency) .ne-title { color: #86efac; }
+.ne-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.ne-chip {
+  font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid #334155; color: #cbd5e1; background: #1e293b; font-family: ui-monospace, monospace;
+}
+.ne-chip.critical { background: #7f1d1d; border-color: #b91c1c; color: #fecaca; }
+.ne-chip.overdue { background: #78350f; border-color: #b45309; color: #fde68a; }
+.ne-chip.due_soon { background: #713f12; border-color: #a16207; color: #fde68a; }
+.ne-chip.pending { background: #1e3a8a; border-color: #1d4ed8; color: #bfdbfe; }
+.ne-chip.review { background: #4c1d95; border-color: #7c3aed; color: #ddd6fe; }
+.ne-row-priority { font-weight: 800; text-transform: uppercase; font-size: 10px; }
+.ne-row-priority.critical { color: #f87171; }
+.ne-row-priority.overdue { color: #fbbf24; }
+.ne-row-priority.due_soon { color: #fcd34d; }
+.ne-row-priority.pending { color: #93c5fd; }
+.ne-row-priority.review { color: #c4b5fd; }
