@@ -246,6 +246,8 @@ async function main() {
       && idx.includes('id="ne-modal"') && idx.includes('id="ne-tbody"')
       && idx.includes('id="global-search"') && /rental-theme\.css\?v=\d+/.test(idx),
       '14. minimal search + notification bell (with badge) served');
+    check(idx.includes('gehm_css_heal'),
+      '14g. stylesheet self-heal guard present (stale-cache recovery)');
     check(!idx.includes('id="ne-bar"'), '14d. old verbose notification bar removed');
     const css = await (await fetch('http://127.0.0.1:3003/css/rental-theme.css?v=6')).text();
     check(css.includes('ne-pulse') && css.includes('.ne-badge.urgent'),

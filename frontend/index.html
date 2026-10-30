@@ -4,6 +4,48 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Self-healing stylesheets: if the main CSS is missing/broken after load
+       (stale service worker, poisoned cache, unreachable cache entry), then
+       unregister ALL service workers, wipe caches and reload ONCE. -->
+  <script>
+    (function () {
+      function gehmHeal() {
+        try {
+          if (sessionStorage.getItem('gehm_css_heal') === '1') return;
+          sessionStorage.setItem('gehm_css_heal', '1');
+        } catch (_) { return; }
+        (async function () {
+          try {
+            var regs = (navigator.serviceWorker && navigator.serviceWorker.getRegistrations)
+              ? await navigator.serviceWorker.getRegistrations() : [];
+            for (var i = 0; i < regs.length; i++) { try { await regs[i].unregister(); } catch (_) {} }
+          } catch (_) {}
+          try {
+            var keys = (typeof caches !== 'undefined') ? await caches.keys() : [];
+            await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          } catch (_) {}
+          location.reload();
+        })();
+      }
+      function cssApplied() {
+        try {
+          var sheets = document.styleSheets;
+          for (var i = 0; i < sheets.length; i++) {
+            var h = sheets[i].href;
+            if (h && h.indexOf('rental-theme') !== -1) {
+              // Same-origin sheet with zero rules means it never applied.
+              try { if (sheets[i].cssRules && sheets[i].cssRules.length === 0) return false; } catch (_) {}
+              return true;
+            }
+          }
+          return false;
+        } catch (_) { return true; }
+      }
+      window.addEventListener('load', function () {
+        setTimeout(function () { if (!cssApplied()) gehmHeal(); }, 800);
+      });
+    })();
+  </script>
   <title>Rental Messaging Sys</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link
@@ -5902,7 +5944,7 @@
   <script type="module" src="/js/app.js?v=83"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=84').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=85').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

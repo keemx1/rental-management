@@ -946,6 +946,13 @@ bumped to `gutenberg-v85-irmanage`, registration `sw.js?v=84`.
 Regression asserts added in `test_notifications` (three `ignoreSearch`
 sites + cache-name marker).
 
+**Second layer — self-healing loader (index head):** on `load`, if the
+main stylesheet is missing or has zero rules (any stale-SW / poisoned
+cache / wrong-host variant), the page unregisters ALL service workers,
+wipes every cache and reloads ONCE per session — styled rendering
+recovers automatically without DevTools. Cache bumped again
+(`gutenberg-v86`, `sw.js?v=85`); heal-script presence asserted.
+
 ---
 ## Open items / next
 
