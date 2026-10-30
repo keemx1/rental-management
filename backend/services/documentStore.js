@@ -249,7 +249,8 @@ function buildReceiptHtml(tenant, payment, allocation, creditSummary = null) {
   const housePaybill = tenant?.house_id || tenant?.house_paybill_number || '';
   const unitLabel = tenant?.unit_label || tenant?.tenant_code || '';
   const mpesaRef = payment?.mpesa_reference || '—';
-  const paymentType = payment?.payment_type === 'deposit' ? 'Deposit' : 'Rent';
+  const paymentType = payment?.payment_type === 'deposit' ? 'Deposit'
+    : payment?.payment_type === 'other' ? 'Other' : 'Rent';
   const allocationHtml = buildAllocationHtml(allocation);
 
   // Rent period = billing_period (the rent cycle being paid), NOT payment_date
@@ -265,6 +266,9 @@ function buildReceiptHtml(tenant, payment, allocation, creditSummary = null) {
     unit_label: unitLabel,
     property_name: propertyName,
     house_paybill: housePaybill,
+    tenant_phone: tenant?.phone_number || '—',
+    tenant_national_id: tenant?.national_id || '—',
+    tenant_code: tenant?.tenant_code || tenant?.id || '—',
     amount_paid: KES(amount),
     payment_type: paymentType,
     payment_mode: payment?.payment_mode || '—',

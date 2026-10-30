@@ -350,6 +350,17 @@ async function activateFutureTenancy(futureTenancyId, store) {
       const payDate = fpDateStr
         ? new Date(fpDateStr + 'T' + (fp.payment_time || '12:00:00')).toISOString()
         : new Date().toISOString();
+      // Continuous receipt numbering: take the NEXT number from the SAME
+      // global sequence the system already uses (never restart, never
+      // duplicate). Original booking receipts are kept verbatim.
+      let receiptNo = fp.receipt_number || null;
+      if (!receiptNo) {
+        receiptNo = await store.generateReceiptNumber(run);
+        await run(
+          'UPDATE future_payments SET receipt_number = $1, updated_at = NOW() WHERE id = $2',
+          [receiptNo, fp.id]
+        );
+      }
       const lineage = 'Moved from booking payment #' + fp.id + ' (' + (fp.purpose || 'Down Payment') +
         (fp.allocated_month ? ' for ' + fp.allocated_month : '') + ')';
       const notes = fp.notes ? fp.notes + ' - ' + lineage : lineage;
@@ -364,7 +375,7 @@ async function activateFutureTenancy(futureTenancyId, store) {
          fp.payment_mode || null, payDate,
          fp.approved_at || new Date().toISOString(),
          fp.created_at || new Date().toISOString(),
-         fp.allocated_month || null, fp.receipt_number || null, fp.id]
+         fp.allocated_month || null, receiptNo, fp.id]
       );
       movedPayments++;
     }
@@ -384,7 +395,61 @@ async function activateFutureTenancy(futureTenancyId, store) {
     } catch (_) {
       tenant = { tenant_code: finalTenantCode, name: ft.tenant_name };
     }
-    return { tenant: tenant, totalPaid: totalPaid, depositPaid: depositPaid, rentPaid: rentPaid, otherPaid: otherPaid, movedPayments: movedPayments };
+
+    // ── Automatic PDF receipts for every moved booking payment ─────────────
+    // Runs AFTER commit (receipts need the committed state) and is fully
+    // idempotent: existing receipt documents are recognised and kept, missing
+    // receipt numbers (rows moved by older activations) are back-filled from
+    // the same global sequence, and a receipt failure never fails activation.
+    let receipts = [];
+    try {
+      const { generateAndStoreReceipt } = require('../services/documentStore');
+      const movedRows = (await pool.query(
+        `SELECT p.* FROM payments p
+           JOIN future_payments fp ON p.future_payment_id = fp.id
+          WHERE fp.future_tenancy_id = $1
+          ORDER BY p.payment_date ASC, p.id ASC`,
+        [futureTenancyId]
+      )).rows;
+      for (const p of movedRows) {
+        if (!p.receipt_number) {
+          p.receipt_number = await store.generateReceiptNumber();
+          await pool.query(`UPDATE payments SET receipt_number = $1 WHERE id = $2`, [p.receipt_number, p.id]);
+        }
+        const existing = await store.findReceiptDocument(p.id);
+        if (existing) {
+          receipts.push({
+            payment_id: p.id, receipt_number: p.receipt_number,
+            document_id: existing.id, filename: existing.filename, existing: true,
+          });
+          continue;
+        }
+        try {
+          const amount = Number(p.amount || 0);
+          const allocation = p.payment_type === 'deposit'
+            ? { paymentType: 'deposit', depositSettled: amount, overpayment: 0, remainingBalance: 0 }
+            : p.payment_type === 'other'
+              ? { paymentType: 'other', otherSettled: amount, overpayment: 0, remainingBalance: 0 }
+              : { paymentType: 'rent', rentSettled: amount, overpayment: 0, remainingBalance: 0 };
+          const doc = await generateAndStoreReceipt(tenant, p, allocation);
+          if (doc) {
+            receipts.push({
+              payment_id: p.id, receipt_number: p.receipt_number,
+              document_id: doc.id, filename: doc.filename,
+            });
+          }
+        } catch (rcErr) {
+          console.error('[FutureTenancy] Receipt generation failed for payment', p.id, rcErr.message);
+        }
+      }
+    } catch (genErr) {
+      console.error('[FutureTenancy] Post-activation receipt step failed:', genErr.message);
+    }
+
+    return {
+      tenant: tenant, totalPaid: totalPaid, depositPaid: depositPaid, rentPaid: rentPaid,
+      otherPaid: otherPaid, movedPayments: movedPayments, receipts,
+    };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;

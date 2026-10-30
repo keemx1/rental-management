@@ -198,6 +198,9 @@ router.post('/:id/activate', async (req, res) => {
       deposit_paid: result.depositPaid,
       rent_paid: result.rentPaid,
       other_paid: result.otherPaid,
+      moved_payments: result.movedPayments,
+      receipts: result.receipts || [],
+      receipts_generated: (result.receipts || []).filter((r) => !r.existing).length,
     });
   } catch (err) {
     if (err && err.code === 'UNIT_OCCUPIED') {

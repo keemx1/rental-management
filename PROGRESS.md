@@ -859,6 +859,39 @@ approval, allocation and advance-rent logic untouched).
   PDF end-to-end and the real-unit reads.
 
 ---
+### 29. Future Tenancy activation: receipts + numbering (v83)
+Reservation activation enhancement (the transfer of tenant data + booking
+payments already existed; this adds the missing receipt layer) — payment,
+approval and registration workflows unchanged.
+
+- **In-transaction receipt numbering**: every moved booking payment takes
+  the NEXT number from the SAME global sequence (`receipt_counters`,
+  GEHPM-RCT-…) via `generateReceiptNumber(run)` and stores it back on the
+  future payment — continuous with pre-activation receipts, never restarts,
+  never duplicates; original booking receipt numbers are kept verbatim.
+- **Automatic PDF receipts**: after commit, EVERY moved payment gets its
+  receipt generated (`generateAndStoreReceipt`) — linked by `payment_id`
+  so Payment History's Receipt/Preview/Download/WhatsApp buttons work
+  immediately; existing documents are recognised (retries generate nothing
+  new and even reuse the number-matched document of a re-created payment);
+  a receipt failure never fails activation.
+- **Receipt content**: customer block now shows PHONE, ID NUMBER and
+  TENANT CODE (spec §5) alongside the unchanged design; purpose labels
+  fixed for non-rent bookings (`Other` instead of Rent) with the
+  allocation row showing the original purpose (Deposit paid / Rent settled
+  / Other charges settled).
+- **Retry safety**: re-activation on an ACTIVE tenancy is refused (400, no
+  duplicates, no numbers burned); a partial-loss retry re-moves ONLY the
+  missing payment, retains the original numbers of the rest and generates
+  zero new documents (all recognised).
+- `POST /:id/activate` now returns `receipts[]` + `receipts_generated`.
+- `tests/test_future_activation_receipts.js` (44 assertions) covers the
+  full checklist: data/balance/credit transfer, original dates/refs/modes/
+  allocations preserved, counter continuity (N, N+1, N+2), PDFs ready
+  instantly, receipt field checklist, profile visibility, and both retry
+  paths. WhatsApp stubbed. Stamps → `?v=83`, SW → `gutenberg-v84-irmanage`.
+
+---
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -906,3 +939,4 @@ approval, allocation and advance-rent logic untouched).
 | 26 | Minimal dashboard header: bare search input + notification bell with count badge | v80 |
 | 27 | Overpayment transparency: consolidated credit summary in acknowledgement + tenant dashboard | v82 |
 | 28 | PDF receipts: accumulated overpayment summary section (display only) | backend |
+| 29 | Future Tenancy activation: continuous receipt numbering + automatic PDF receipts | v83 |
