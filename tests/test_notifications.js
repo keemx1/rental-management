@@ -254,6 +254,10 @@ async function main() {
     check(appJs.includes('startNePolling') && appJs.includes('handleNotificationGo')
       && appJs.includes('loadNotifications') && appJs.includes('ne-badge'),
       '14c. bell logic + deep-link dispatcher + auto-polling served');
+    const sw = await (await fetch('http://127.0.0.1:3003/sw.js')).text();
+    check(sw.includes('ignoreSearch: true') && (sw.match(/ignoreSearch/g) || []).length >= 3,
+      '14e. SW offline fallback matches versioned URLs (styling survives offline)');
+    check(/CACHE_NAME = 'gutenberg-v\d+-irmanage'/.test(sw), '14f. SW cache name present');
 
     console.log('\n(no records outside the fixture were modified)');
   } finally {

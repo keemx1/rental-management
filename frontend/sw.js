@@ -9,7 +9,7 @@
  * - Same-origin assets are cached on http AND https (field devices often use
  *   plain http over the local network; the old SW only cached on https).
  */
-const CACHE_NAME = 'gutenberg-v84-irmanage';
+const CACHE_NAME = 'gutenberg-v85-irmanage';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -87,7 +87,7 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() =>
-          caches.match(event.request).then((cached) => cached || caches.match('/index.html'))
+          caches.match(event.request, { ignoreSearch: true }).then((cached) => cached || caches.match('/index.html', { ignoreSearch: true }))
         )
     );
     return;
@@ -102,13 +102,15 @@ self.addEventListener('fetch', (event) => {
           if (response && response.status === 200) putInCache(event.request, response);
           return response;
         })
-        .catch(() => caches.match(event.request))
+        // ignoreSearch: the app cache-busts with ?v=N but the precache key
+        // is the bare path — without this, offline loads lost ALL styling.
+        .catch(() => caches.match(event.request, { ignoreSearch: true }))
     );
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
+    caches.match(event.request, { ignoreSearch: true }).then((cached) => {
       const fetched = fetch(event.request).then((response) => {
         if (response && response.status === 200) putInCache(event.request, response);
         return response;

@@ -928,6 +928,25 @@ agreements_inbox/
   mid-copy skip and the endpoints (uploader stubbed — no network).
 
 ---
+### 31. Service-worker fix: offline styling loss (backend n/a)
+User screenshot: completely unstyled raw HTML. Server verified healthy
+(CSS 200/33KB, both stylesheet links present), so the cause was client-side:
+
+**Root cause** — the page's HTML came from the service worker's offline
+cache (server was mid-restart/unreachable at load), but the cached HTML
+requests `/css/rental-theme.css?v=6` while the precache key is the BARE
+path (`/css/rental-theme.css`). The strict `caches.match(request)` never
+matched versioned URLs, the offline CSS fallback returned nothing, and the
+app rendered with zero styling (Google Fonts also unreachable offline).
+
+**Fix** — all three SW cache-match fallbacks (navigate, JS/CSS, default)
+now use `{ ignoreSearch: true }` so `?v=N` cache-busted URLs resolve to the
+preached copies; stale query-key entries are ignored either way. Cache name
+bumped to `gutenberg-v85-irmanage`, registration `sw.js?v=84`.
+Regression asserts added in `test_notifications` (three `ignoreSearch`
+sites + cache-name marker).
+
+---
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -977,3 +996,4 @@ agreements_inbox/
 | 28 | PDF receipts: accumulated overpayment summary section (display only) | backend |
 | 29 | Future Tenancy activation: continuous receipt numbering + automatic PDF receipts | v83 |
 | 30 | Agreements Inbox: per-house drop folders, auto-store to tenant Agreements, no sending | backend |
+| 31 | Service worker: ignoreSearch cache fallback (offline styling loss) | v83+sw |
