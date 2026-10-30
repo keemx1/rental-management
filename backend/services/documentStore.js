@@ -2230,6 +2230,89 @@ async function generateAndStoreRemittanceStatement(housePaybill) {
   return doc;
 }
 
+// ─── Deposit reinstatement receipt (confirmation — NOT a new payment) ───────
+function buildDepositReinstatementHtml(inst, tenantNow, exitInv) {
+  const fmt = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d) => {
+    if (!d) return '—';
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return String(d).slice(0, 10);
+    return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+  const isReassign = inst.outcome === 'REASSIGNED';
+  const isHold = inst.outcome === 'DEPOSIT_ONLY';
+  const description = isReassign ? 'Deposit Reinstatement / Transfer to New Unit'
+    : isHold ? 'Deposit Reinstatement — Deposit Held (No Unit Yet)'
+      : 'Deposit Reinstatement';
+  const currentProperty = isReassign || isHold
+    ? (tenantNow?.property_name || inst.new_house_paybill || '—')
+    : (inst.original_house_paybill || '—');
+  const currentUnit = isReassign || isHold ? (tenantNow?.tenant_code || inst.new_unit || '—') : (inst.original_unit || '—');
+  const reassignBlock = isReassign ? `
+    <div class="alloc-row new"><span>Current allocation</span><b>${escDocText(currentProperty)} · Unit ${escDocText(currentUnit)} · KES ${fmt(inst.deposit_restored)}${inst.new_rent ? ` (rent KES ${fmt(inst.new_rent)})` : ''} · allocated ${fmtDate(new Date())}</b></div>` : '';
+  const holdBlock = isHold ? `
+    <div class="alloc-row new"><span>Deposit held on account</span><b>KES ${fmt(inst.deposit_restored)} — no unit assigned yet (profile ${escDocText(String(inst.new_tenant_code || ''))})</b></div>` : '';
+
+  return renderTemplate('deposit_reinstatement.html', {
+    receipt_no: `REINST-${inst.id}`,
+    date: fmtDate(inst.reinstated_at),
+    tenant_name: tenantNow?.name || inst.original_tenant_name || '',
+    original_tenant_code: inst.original_tenant_code,
+    current_tenant_code: tenantNow?.tenant_code || '—',
+    original_property: inst.original_house_paybill || '—',
+    original_unit: inst.original_unit || '—',
+    current_property: currentProperty,
+    current_unit: currentUnit,
+    deposit_amount: `KES ${fmt(inst.deposit_restored)}`,
+    original_reference: inst.original_reference || '—',
+    original_receipt: inst.original_receipt_number || '—',
+    original_payment_date: fmtDate(inst.original_payment_date),
+    original_payment_method: inst.original_payment_method || '—',
+    reinstatement_date: fmtDate(inst.reinstated_at),
+    refund_invoice_number: inst.refund_invoice_number || (exitInv?.exit_number || '—'),
+    transaction_description: description,
+    deposit_balance_after: `KES ${fmt(Number(tenantNow?.deposit_paid || 0))}`,
+    origin_row: `<div class="alloc-row"><span>Original payment source (permanent)</span><b>${escDocText(inst.original_house_paybill || '—')} · Unit ${escDocText(inst.original_unit || '—')} · KES ${fmt(inst.original_amount)} · ref ${escDocText(inst.original_reference || '—')} · ${fmtDate(inst.original_payment_date)} · ${escDocText(inst.original_payment_method || '—')}</b></div>`,
+    allocation_row: (isReassign || isHold ? `<div class="alloc-row new"><span>Current allocation</span><b>${escDocText(currentProperty)} · Unit ${escDocText(currentUnit)} · KES ${fmt(inst.deposit_restored)}</b></div>`
+      : `<div class="alloc-row"><span>Current allocation</span><b>${escDocText(currentProperty)} · Unit ${escDocText(currentUnit)} · KES ${fmt(inst.deposit_restored)}</b></div>`),
+    reassign_extra: reassignBlock,
+    hold_extra: holdBlock,
+    reason: escDocText(inst.reason || ''),
+    actor: escDocText(inst.actor || 'management'),
+    GEHM_STAMP_LINE: '{{GEHM_STAMP_LINE}}',
+  });
+}
+
+async function generateAndStoreDepositReinstatement(inst, tenantNow, exitInv) {
+  try {
+    const html = buildDepositReinstatementHtml(inst, tenantNow, exitInv);
+    const unit = String(inst.new_unit || inst.original_unit || '').replace(/[^A-Za-z0-9_-]+/g, '') || 'unit';
+    const date = new Date(inst.reinstated_at).toISOString().slice(0, 10);
+    const filename = `DEPOSIT-REINSTATEMENT-${unit}-${date}.pdf`;
+    ensureDir();
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+    const doc = await store.createDocument({
+      doc_type: 'deposit_reinstatement',
+      doc_number: `REINST-${inst.id}`,
+      title: `Deposit Reinstatement — ${tenantNow?.name || inst.original_tenant_name || ''} (${unit})`,
+      filename,
+      file_path: pdfPath,
+      tenant_code: tenantNow?.tenant_code || inst.original_tenant_code,
+      house_paybill_number: inst.new_house_paybill || inst.original_house_paybill || null,
+      property_name: tenantNow?.property_name || null,
+      unit_label: unit,
+      amount: Number(inst.deposit_restored || 0),
+      doc_date: date,
+      payment_id: inst.original_payment_id, // links to the ORIGINAL deposit payment
+      reuse_invoice_doc: true,
+    });
+    return doc;
+  } catch (err) {
+    console.error('[Documents] Deposit reinstatement receipt failed:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   DOCUMENTS_DIR,
   renderTemplate,
@@ -2276,6 +2359,8 @@ module.exports = {
   generateAndStoreCommissionStatement,
   buildRemittanceStatementHtml,
   generateAndStoreRemittanceStatement,
+  buildDepositReinstatementHtml,
+  generateAndStoreDepositReinstatement,
   buildWaterBillReportHtml,
   generateWaterBillReportPdf,
   buildLetterHtml,

@@ -981,6 +981,48 @@ First real batch (4 house folders) surfaced three defects, all fixed:
 
 Fixture hygiene: after any test session run `node tests/sweep-fixtures.js --apply` — idempotent purge of every test marker (999979-999999 / ZZ* houses, tenants, landlords, users, audit) with a CLEAN/DIRTY residue check; dry-run mode is read-only.
 
+### 33. Deposit Refund Cancellation / Deposit Restoration / Reinstatement (v84)
+New management action on the Deposit Refund detail screen (NOT inside the
+exit-invoice preview, whose four buttons are untouched): **Cancel Refund /
+Reinstate Deposit**, shown only when the exit is finalized, the refund is
+unpaid and not already processed.
+
+- **Confirmation window** lists the original records exactly per spec
+  (tenant name/code, property/unit, deposit amount, original reference,
+  payment date, method, refund invoice number, refundable, live occupancy)
+  and requires a cancellation reason.
+- **Three scenarios**: A original tenant still in the unit → profile/code/
+  unit retained, Active status + deposit restored (no duplicate profile);
+  B unit vacant → the blanked row is refilled from the archived profile;
+  C unit re-let → the current occupant is NEVER touched; Option 1 reassigns
+  the original tenant to a management-confirmed vacant unit (profile +
+  deposit travel, new unit rent shown with the difference beforehand) or
+  Option 2 holds the deposit on a `-R` holding profile with a later
+  Assign Unit action.
+- **Restoration semantics**: the EXISTING deposit payment row is reused —
+  no new payment, no new reference; `origin_*` snapshot written ONCE
+  (immutable original property/unit/code) and `allocation_*` updated to the
+  current unit/date — the money is counted exactly once in every report
+  (asserted: payment count and totals never change).
+- **Refund** → `cancelled_reinstated` (constraint extended, row preserved,
+  never deleted; finalized exit invoices stay Finalized); duplicate
+  restoration refused 409 at API + DB-unique level; disbursed refunds
+  excluded; admin-only endpoints (403 for operators).
+- **Reinstatement receipt** (`DEPOSIT REINSTATEMENT RECEIPT`): confirmation
+  NOT a collection — shows original payment source + current allocation,
+  refund invoice reversed, deposit balance after, linked to the ORIGINAL
+  payment (`documents.payment_id`, doc_type `deposit_reinstatement`),
+  registered + PDF; surfaced from Payment History via the
+  `for-payments` endpoint (row badge "Reinstated" opens it).
+- **Audit**: `deposit_refund_cancelled_reinstated` captures refund no,
+  original reference, restored amount, units, reason, actor.
+- `tests/test_deposit_reinstatement.js` (65 assertions) covers all of it
+  plus preserved exit-preview buttons and the money invariant. Stamps →
+  `?v=84`, SW → `gutenberg-v87-irmanage`.
+
+---
+Suite totals: **934 assertions across 24 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge any fixture residue from crashed runs).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1032,3 +1074,4 @@ Fixture hygiene: after any test session run `node tests/sweep-fixtures.js --appl
 | 30 | Agreements Inbox: per-house drop folders, auto-store to tenant Agreements, no sending | backend |
 | 31 | Service worker: ignoreSearch cache fallback (offline styling loss) | v83+sw |
 | 32 | Agreements Inbox: occupied-status match, process lock, race repair (123 stored, 0 dupes) | backend |
+| 33 | Deposit refund cancellation, deposit restoration, tenancy reinstatement, unit reassignment | v84 |

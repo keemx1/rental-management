@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v83';
+const GEHM_VERSION = 'v84';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -1967,6 +1967,13 @@ async function loadPayments() {
       tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">No payments</td></tr>`;
       return;
     }
+    // Deposit reinstatement links (confirmation of a restored deposit —
+    // attaches to the ORIGINAL payment without creating a new one).
+    let reinByPayment = new Map();
+    try {
+      const rein = await api.reinstatementsForPayments(payments.map((p) => p.id));
+      reinByPayment = new Map((rein.reinstatements || []).map((r) => [r.original_payment_id, r]));
+    } catch (_) {}
     tbody.innerHTML = pendingRows + payments
       .map(
         (p) => `
@@ -1981,7 +1988,7 @@ async function loadPayments() {
           <div class="flex items-center gap-2">
             ${p.status === 'Pending' ? `<button type="button" class="qc-btn qc-btn-primary !py-1 !px-2 text-xs" data-approve-payment="${p.id}">Approve</button>` : ''}
             ${p.status === 'Approved' ? `<button type="button" class="action-btn !py-1 !px-2 text-xs" data-view-receipt="${p.id}">Receipt</button><button type="button" class="action-btn !py-1 !px-2 text-xs" data-download-receipt="${p.id}">PDF</button><button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-reverse-payment="${p.id}">Reverse (false)</button>` : ''}
-            <button type="button" class="action-btn action-btn-danger !py-1 !px-2 text-xs" data-delete-payment="${p.id}">Delete</button>
+            ${reinByPayment.has(p.id) && reinByPayment.get(p.id).receipt_document_id ? `<button type="button" class="action-btn !py-1 !px-2 text-xs" style="border-color:#f59e0b;color:#fbbf45" data-rein-view="${reinByPayment.get(p.id).receipt_document_id}">Reinstated</button>` : ''}
           </div>
         </td>
       </tr>`
@@ -6939,6 +6946,15 @@ document.getElementById('payments-tbody')?.addEventListener('click', async (e) =
       const res = await api.reverseFalsePayment(reverseId, reason.trim());
       showToast(res.already ? 'Payment was already reversed.' : `Payment reversed${res.tenant_repaired ? ' and balances recomputed' : ''}.`, 'success');
       loadPayments();
+    } catch (err) { alert(err.message); }
+    return;
+  }
+
+  const reinDocId = e.target.dataset.reinView;
+  if (reinDocId) {
+    try {
+      const res = await api.document(Number(reinDocId));
+      await openDocumentViewModal(res.document || res);
     } catch (err) { alert(err.message); }
     return;
   }
@@ -12765,6 +12781,7 @@ function getDrStatusBadge(status) {
     refunded: '<span class="status-badge badge-active"><span class="status-dot"></span>Refunded</span>',
     partially_refunded: '<span class="status-badge badge-pending"><span class="status-dot"></span>Partial</span>',
     no_refund_due: '<span class="status-badge badge-vacant"><span class="status-dot"></span>No Refund</span>',
+    cancelled_reinstated: '<span class="status-badge badge-pending"><span class="status-dot"></span>Cancelled / Reinstated</span>',
   };
   return map[status] || status;
 }
@@ -12899,6 +12916,17 @@ async function openDrDetail(id) {
     document.getElementById('btn-dr-record-refund').style.display = canRefund ? '' : 'none';
     document.getElementById('btn-dr-view-exit-invoice').style.display = refund.exit_invoice_id ? '' : 'none';
 
+    // Cancel Refund / Reinstate Deposit — shown ONLY when eligible
+    // (finalized exit + unpaid + not already processed).
+    const cancelBtn = document.getElementById('btn-dr-cancel-reinstate');
+    cancelBtn.classList.add('hidden');
+    api.drEligibility(id).then((el) => {
+      if (el.eligible) {
+        cancelBtn.classList.remove('hidden');
+        cancelBtn.onclick = () => openDrReinstateModal(el);
+      }
+    }).catch(() => {});
+
     modal.classList.remove('hidden');
   } catch (err) {
     console.error('[DepositRefunds] Detail load failed:', err);
@@ -12908,6 +12936,150 @@ async function openDrDetail(id) {
 document.getElementById('btn-dr-detail-close')?.addEventListener('click', () => {
   document.getElementById('dr-detail-modal').classList.add('hidden');
 });
+
+// ─── Cancel Refund / Reinstate Deposit (confirmation + scenarios) ───────────
+let _drElig = null;
+
+function riRow(label, value) {
+  return `<div class="flex justify-between gap-4"><span class="text-slate-400">${escapeHtml(label)}</span><span class="text-white text-right">${escapeHtml(String(value ?? '—'))}</span></div>`;
+}
+
+function openDrReinstateModal(el) {
+  _drElig = el;
+  const modal = document.getElementById('dr-reinstate-modal');
+  modal?.classList.remove('hidden');
+  document.getElementById('ri-reason').value = '';
+  document.getElementById('ri-result').textContent = '';
+
+  const o = el.original || {};
+  const e = el.exit || {};
+  document.getElementById('ri-summary').innerHTML = [
+    riRow('Original tenant', `${o.tenant_name || '—'} (${o.tenant_code || '—'})`),
+    riRow('Original property / unit', `${o.property || '—'} · ${o.unit || '—'}`),
+    riRow('Original deposit amount', formatKes(o.deposit_amount)),
+    riRow('Original deposit paid', formatKes(o.deposit_paid)),
+    riRow('Payment reference', o.payment_reference || '—'),
+    riRow('Original payment date', o.payment_date || '—'),
+    riRow('Payment method', o.payment_method || '—'),
+    riRow('Refund invoice (exit)', e.exit_number || '—'),
+    riRow('Refundable amount', formatKes(e.refundable_amount)),
+    riRow('Current unit occupancy', el.unit_state === 'ORIGINAL_TENANT'
+      ? 'Occupied by the ORIGINAL tenant'
+      : el.unit_state === 'VACANT' ? 'Vacant' : `Occupied by ANOTHER tenant (${el.current_occupancy.current_tenant_name || '—'})`),
+  ].join('');
+
+  const zoneOriginal = document.getElementById('ri-zone-original');
+  const zoneOther = document.getElementById('ri-zone-other');
+  zoneOriginal.classList.add('hidden');
+  zoneOther.classList.add('hidden');
+  if (el.unit_state === 'OCCUPIED_BY_OTHER') {
+    zoneOther.classList.remove('hidden');
+    document.getElementById('ri-zone-other-note').textContent =
+      `The original unit (${o.unit}) is occupied by ${el.current_occupancy.current_tenant_name || 'another tenant'} — their tenancy will NOT be touched. Reassign the original tenant to a vacant unit, or hold the deposit without a unit.`;
+    loadRiHouses();
+    document.getElementById('ri-house').value = '';
+    document.getElementById('ri-unit').innerHTML = '<option value="">Select unit…</option>';
+    document.getElementById('ri-unit-details').classList.add('hidden');
+    document.getElementById('btn-ri-reassign').classList.add('hidden');
+  } else {
+    zoneOriginal.classList.remove('hidden');
+    document.getElementById('ri-zone-original-note').textContent = el.unit_state === 'VACANT'
+      ? 'The original unit is vacant — the original tenant can be reinstated there.'
+      : 'The original tenant still occupies the unit — reinstate keeps their profile, code and unit.';
+  }
+}
+
+async function loadRiHouses() {
+  const sel = document.getElementById('ri-house');
+  try {
+    const { houses } = await api.drHouseOptions();
+    sel.innerHTML = '<option value="">Select property…</option>' + (houses || []).map((h) =>
+      `<option value="${escapeHtml(h.paybill_number)}">${escapeHtml(h.house_name || '')} (${escapeHtml(h.paybill_number)})</option>`).join('');
+  } catch (err) {
+    document.getElementById('ri-result').textContent = err.message;
+  }
+}
+
+async function onRiHouseChange() {
+  const hp = document.getElementById('ri-house').value;
+  const unitSel = document.getElementById('ri-unit');
+  const details = document.getElementById('ri-unit-details');
+  const confirmBtn = document.getElementById('btn-ri-reassign');
+  details.classList.add('hidden');
+  confirmBtn.classList.add('hidden');
+  unitSel.innerHTML = '<option value="">Select unit…</option>';
+  if (!hp) return;
+  try {
+    const { units } = await api.drVacantUnits(hp);
+    if (!units.length) {
+      unitSel.innerHTML = '<option value="">No vacant units in this property</option>';
+      return;
+    }
+    unitSel.innerHTML = '<option value="">Select unit…</option>' + units.map((u) =>
+      `<option value="${escapeHtml(u.unit)}">${escapeHtml(u.unit_label)} — rent ${Number(u.rent_amount).toLocaleString()}</option>`).join('');
+  } catch (err) {
+    document.getElementById('ri-result').textContent = err.message;
+  }
+}
+
+function onRiUnitChange() {
+  const hp = document.getElementById('ri-house').value;
+  const unit = document.getElementById('ri-unit').value;
+  const details = document.getElementById('ri-unit-details');
+  const confirmBtn = document.getElementById('btn-ri-reassign');
+  if (!hp || !unit) { details.classList.add('hidden'); confirmBtn.classList.add('hidden'); return; }
+  api.drVacantUnits(hp).then(({ house, units }) => {
+    const u = units.find((x) => x.unit === unit);
+    if (!u) return;
+    const origRent = Number(_drElig?.original?.original_rent || 0);
+    const diff = Number(u.rent_amount) - origRent;
+    details.classList.remove('hidden');
+    details.innerHTML =
+      `Property: <b class="text-white">${escapeHtml(house?.house_name || hp)}</b> · Unit: <b class="text-white">${escapeHtml(u.unit_label)}</b><br/>` +
+      `Monthly rent: <b class="text-white">${formatKes(u.rent_amount)}</b> · Original unit rent: <b class="text-white">${formatKes(origRent)}</b>` +
+      `<br/>Difference: <b class="${diff > 0 ? 'text-amber-300' : diff < 0 ? 'text-emerald-300' : 'text-slate-300'}">${diff > 0 ? '+' : ''}${formatKes(diff)}</b>`;
+    confirmBtn.classList.remove('hidden');
+  }).catch(() => {});
+}
+
+async function submitRi(mode) {
+  const reason = document.getElementById('ri-reason').value.trim();
+  const resEl = document.getElementById('ri-result');
+  if (!reason) { resEl.textContent = 'A cancellation reason is required.'; resEl.className = 'text-sm font-mono text-rose-400 mt-2'; return; }
+  if (!_drElig) return;
+  const body = { reason, mode };
+  if (mode === 'reassign') {
+    body.new_house_paybill = document.getElementById('ri-house').value;
+    body.new_unit = document.getElementById('ri-unit').value;
+    if (!body.new_house_paybill || !body.new_unit) { resEl.textContent = 'Select a property and a vacant unit.'; return; }
+    if (!confirm(`Reinstate ${_drElig.original.tenant_name} into ${body.new_house_paybill} unit ${body.new_unit}? The current occupant of the original unit is not affected.`)) return;
+  } else {
+    const label = mode === 'hold' ? 'cancel the refund and keep the deposit on account (no unit assigned yet)?' : 'reinstate the tenancy in the original unit?';
+    if (!confirm(`Confirm: ${label}`)) return;
+  }
+  resEl.textContent = 'Processing…';
+  resEl.className = 'text-sm font-mono text-cyan-300 mt-2';
+  try {
+    const res = await api.drCancelReinstate(_drElig ? _drElig.id ?? drDetailId : drDetailId, body);
+    resEl.textContent = `✓ Done — status: Cancelled / Reinstated${res.receipt_document ? ' · receipt generated' : ''}.`;
+    resEl.className = 'text-sm font-mono text-green-400 mt-2';
+    loadDepositRefunds();
+    if (res.receipt_document) {
+      setTimeout(() => { document.getElementById('dr-reinstate-modal')?.classList.add('hidden'); openDocumentViewModal(res.receipt_document); }, 700);
+    }
+    if (drDetailId) openDrDetail(drDetailId);
+  } catch (err) {
+    resEl.textContent = err.message || 'Failed';
+    resEl.className = 'text-sm font-mono text-rose-400 mt-2';
+  }
+}
+
+document.getElementById('btn-ri-close')?.addEventListener('click', () => document.getElementById('dr-reinstate-modal')?.classList.add('hidden'));
+document.getElementById('btn-ri-same')?.addEventListener('click', () => submitRi('same_unit'));
+document.getElementById('btn-ri-hold')?.addEventListener('click', () => submitRi('hold'));
+document.getElementById('btn-ri-reassign')?.addEventListener('click', () => submitRi('reassign'));
+document.getElementById('ri-house')?.addEventListener('change', onRiHouseChange);
+document.getElementById('ri-unit')?.addEventListener('change', onRiUnitChange);
 
 document.getElementById('dr-detail-modal')?.addEventListener('click', (e) => {
   if (e.target === document.getElementById('dr-detail-modal')) {

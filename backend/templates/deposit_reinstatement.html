@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Deposit Reinstatement Receipt</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; font-size: 11px; margin: 0; padding: 26px 30px; background: #fff; }
+    .header { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid #1a4b8c; padding-bottom: 12px; }
+    .header img { height: 58px; width: auto; }
+    .titles h1 { margin: 0; font-size: 18px; letter-spacing: 0.04em; color: #1a4b8c; }
+    .titles .company { font-size: 11px; color: #475569; margin-top: 2px; }
+    .no-bar { display: inline-block; margin-top: 10px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; font-weight: 700; font-size: 12px; padding: 5px 12px; border-radius: 4px; }
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #0f766e; margin: 16px 0 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #0f766e; color: #fff; font-size: 10px; text-align: left; padding: 7px 9px; }
+    td { padding: 7px 9px; border-bottom: 1px solid #e2e8f0; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    td.num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .desc { margin-top: 6px; padding: 9px 12px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; font-weight: 800; color: #065f46; font-size: 12px; text-align: center; }
+    .alloc-box { margin-top: 12px; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; }
+    .alloc-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; font-size: 10.5px; border-bottom: 1px solid #e2e8f0; }
+    .alloc-row:last-child { border-bottom: none; }
+    .alloc-row span { color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 9px; letter-spacing: .05em; }
+    .alloc-row b { color: #0f172a; text-align: right; }
+    .alloc-row.new { background: #eff6ff; }
+    .alloc-row.new b { color: #1d4ed8; }
+    .note { margin-top: 12px; padding: 9px 12px; border: 1px solid #f59e0b; background: #fffbeb; color: #78350f; font-size: 9.5px; border-radius: 6px; line-height: 1.5; }
+    .footer-bar { height: 3px; background: #e31837; width: 100%; margin: 14px 0 6px; }
+    .footer { text-align: center; font-size: 9px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="{{logo_base64}}" alt="Logo" />
+    <div class="titles">
+      <h1>DEPOSIT REINSTATEMENT RECEIPT</h1>
+      <div class="company">GUTENBERG ELITE HOME &amp; PROPERTY MANAGEMENTS</div>
+    </div>
+  </div>
+
+  <span class="no-bar">RECEIPT NO: {{receipt_no}} &nbsp;·&nbsp; {{date}}</span>
+
+  <div class="desc">{{transaction_description}}</div>
+
+  <h2>Tenant &amp; Tenancy</h2>
+  <table>
+    <tr><td>Reinstated tenant</td><td class="num" style="text-align:left">{{tenant_name}}</td></tr>
+    <tr><td>Original tenant code</td><td class="num" style="text-align:left">{{original_tenant_code}}</td></tr>
+    <tr><td>Current tenant code</td><td class="num" style="text-align:left">{{current_tenant_code}}</td></tr>
+    <tr><td>Original property / unit</td><td class="num" style="text-align:left">{{original_property}} · {{original_unit}}</td></tr>
+    <tr><td>Current property / unit</td><td class="num" style="text-align:left">{{current_property}} · {{current_unit}}</td></tr>
+  </table>
+
+  <h2>Original Deposit Payment (restored)</h2>
+  <table>
+    <tr><td>Original deposit amount restored</td><td class="num">{{deposit_amount}}</td></tr>
+    <tr><td>Original payment reference</td><td class="num">{{original_reference}}</td></tr>
+    <tr><td>Original receipt number</td><td class="num">{{original_receipt}}</td></tr>
+    <tr><td>Original payment date</td><td class="num">{{original_payment_date}}</td></tr>
+    <tr><td>Original payment method</td><td class="num">{{original_payment_method}}</td></tr>
+    <tr><td>Date of deposit reinstatement</td><td class="num">{{reinstatement_date}}</td></tr>
+    <tr><td>Refund invoice reversed</td><td class="num">{{refund_invoice_number}}</td></tr>
+    <tr><td>Deposit balance after reinstatement</td><td class="num">{{deposit_balance_after}}</td></tr>
+  </table>
+
+  <div class="alloc-box">
+    {{origin_row}}
+    {{allocation_row}}
+    {{reassign_extra}}
+    {{hold_extra}}
+  </div>
+
+  <div class="note">
+    This receipt confirms that an <b>existing</b> deposit payment has been restored to the tenant's
+    account after cancelling an unpaid deposit refund. It is <b>not a new payment</b>: no new cash was
+    collected, no new payment reference was created, and this document must not be counted in
+    collections. The original payment record — reference, date, method, amount and original
+    property — remains permanently unchanged. Reason: {{reason}} · Recorded by {{actor}}.
+  </div>
+
+  <div style="margin:14px 0;line-height:1.5;">
+    <div>For: GUTENBERG ELITE HOME &amp; PROPERTY MANAGEMENTS</div>
+    <div>{{GEHM_STAMP_LINE}}</div>
+    <div>Date: {{date}}</div>
+  </div>
+
+  <div class="footer-bar"></div>
+  <div class="footer">Find a Home. Leave the Management to Us</div>
+</body>
+</html>

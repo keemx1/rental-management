@@ -9,7 +9,7 @@
  * - Same-origin assets are cached on http AND https (field devices often use
  *   plain http over the local network; the old SW only cached on https).
  */
-const CACHE_NAME = 'gutenberg-v86-irmanage';
+const CACHE_NAME = 'gutenberg-v87-irmanage';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

@@ -1,6 +1,7 @@
 const express = require('express');
-const { requireAuthActive } = require('../middleware/auth');
+const { requireAuthActive, requireAdmin } = require('../middleware/auth');
 const store = require('../storage/store');
+const reinstatement = require('../services/depositReinstatement');
 
 const router = express.Router();
 router.use(requireAuthActive);
@@ -25,6 +26,86 @@ router.get('/summary', async (req, res) => {
     res.json({ summary });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load summary' });
+  }
+});
+
+// ── Cancel Refund / Reinstate Deposit (enhancement §4-§14) ─────────────────
+// Declared BEFORE '/:id' so 'vacant-units' is not captured as an id.
+
+router.get('/vacant-units', async (req, res) => {
+  try {
+    const hp = req.query.house_paybill;
+    if (!hp) return res.status(400).json({ error: 'house_paybill is required' });
+    res.json(await reinstatement.vacantUnits(hp));
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list vacant units: ' + err.message });
+  }
+});
+
+router.get('/houses-options', async (req, res) => {
+  try {
+    res.json({ houses: await reinstatement.listHousesForReassignment() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list properties: ' + err.message });
+  }
+});
+
+router.get('/reinstatements/for-payments', async (req, res) => {
+  try {
+    const ids = String(req.query.ids || '').split(',').map((n) => Number(n)).filter(Boolean);
+    res.json({ reinstatements: await reinstatement.reinstatementsForPayments(ids) });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load reinstatements: ' + err.message });
+  }
+});
+
+router.get('/:id/reinstatement-eligibility', async (req, res) => {
+  try {
+    const result = await reinstatement.eligibility(req.params.id);
+    if (result.error) return res.status(result.code === 'NOT_FOUND' ? 404 : 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Eligibility check failed: ' + err.message });
+  }
+});
+
+router.post('/:id/cancel-reinstate', requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await reinstatement.cancelAndReinstate(req.params.id, {
+      reason: body.reason,
+      mode: body.mode,
+      new_house_paybill: body.new_house_paybill,
+      new_unit: body.new_unit,
+      actor: req.user?.username,
+    });
+    if (result.error) {
+      const status = ['ALREADY_PROCESSED', 'UNIT_OCCUPIED'].includes(result.code) ? 409
+        : result.code === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ error: result.error, code: result.code });
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Cancel/reinstate failed: ' + err.message });
+  }
+});
+
+router.post('/reinstatements/:reinstatementId/assign-unit', requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await reinstatement.assignHeldUnit(req.params.reinstatementId, {
+      new_house_paybill: body.new_house_paybill,
+      new_unit: body.new_unit,
+      actor: req.user?.username,
+    });
+    if (result.error) {
+      const status = ['UNIT_NOT_VACANT', 'NOT_ELIGIBLE'].includes(result.code) ? 409
+        : result.code === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ error: result.error, code: result.code });
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Unit assignment failed: ' + err.message });
   }
 });
 

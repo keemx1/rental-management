@@ -323,6 +323,24 @@ export const api = {
   reverseFalsePayment(paymentId, reason) {
     return request(`/payments/${paymentId}/reverse-false`, { method: 'POST', body: JSON.stringify({ reason }) });
   },
+  drEligibility(id) {
+    return request(`/deposit-refunds/${id}/reinstatement-eligibility`);
+  },
+  drCancelReinstate(id, body) {
+    return request(`/deposit-refunds/${id}/cancel-reinstate`, { method: 'POST', body: JSON.stringify(body) });
+  },
+  drVacantUnits(housePaybill) {
+    return request(`/deposit-refunds/vacant-units?house_paybill=${encodeURIComponent(housePaybill)}`);
+  },
+  drHouseOptions() {
+    return request('/deposit-refunds/houses-options');
+  },
+  drAssignHeldUnit(reinstatementId, body) {
+    return request(`/deposit-refunds/reinstatements/${reinstatementId}/assign-unit`, { method: 'POST', body: JSON.stringify(body) });
+  },
+  reinstatementsForPayments(ids) {
+    return request(`/deposit-refunds/reinstatements/for-payments?ids=${ids.join(',')}`);
+  },
   getNotifications() {
     return request('/notifications');
   },
