@@ -341,6 +341,37 @@ export const api = {
   reinstatementsForPayments(ids) {
     return request(`/deposit-refunds/reinstatements/for-payments?ids=${ids.join(',')}`);
   },
+  finObligations() {
+    return request('/financial/obligations');
+  },
+  finMonthlyReport(month) {
+    return request(`/financial/monthly-report?month=${encodeURIComponent(month)}`);
+  },
+  finMonthlyPdf(month) {
+    return blobRequest('/financial/monthly-report/pdf', { month });
+  },
+  finMonthlyExcel(month) {
+    return blobRequest('/financial/monthly-report/excel', { month });
+  },
+  finRegister(kind, from, to) {
+    return request(`/financial/register/${encodeURIComponent(kind)}?from=${encodeURIComponent(from || '')}&to=${encodeURIComponent(to || '')}`);
+  },
+  finTrialBalance(from, to) {
+    return request(`/financial/trial-balance?from=${encodeURIComponent(from || '')}&to=${encodeURIComponent(to || '')}`);
+  },
+  finArrangements() {
+    return request('/financial/arrangements');
+  },
+  finArrangement(house_paybill, arrangement) {
+    return request('/financial/arrangements', { method: 'PUT', body: JSON.stringify({ house_paybill, arrangement }) });
+  },
+  finOpeningBalances(body) {
+    if (!body) return request('/financial/opening-balances');
+    return request('/financial/opening-balances', { method: 'POST', body: JSON.stringify(body) });
+  },
+  finOtherIncome(body) {
+    return request('/financial/other-income', { method: 'POST', body: JSON.stringify(body) });
+  },
   getNotifications() {
     return request('/notifications');
   },

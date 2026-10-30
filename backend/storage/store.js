@@ -7814,7 +7814,31 @@ async function recordDepositRefund(id, { amount, paymentMethod, transactionRefer
   if (newTotal > refundable) return { error: `Refund amount exceeds outstanding balance. Outstanding: ${refundable - previouslyRefunded}` };
   const remaining = refundable - newTotal;
   const status = remaining <= 0 ? 'refunded' : 'partially_refunded';
-  return updateDepositRefund(id, { refund_status: status, amount_refunded: newTotal, remaining_amount: remaining, payment_method: paymentMethod || null, transaction_reference: transactionReference || null, refund_date: refundDate || new Date().toISOString().slice(0, 10), refund_time: refundTime || new Date().toISOString().slice(11, 19), remarks: remarks || null, refunded_by: actor || null });
+  const updated = await updateDepositRefund(id, { refund_status: status, amount_refunded: newTotal, remaining_amount: remaining, payment_method: paymentMethod || null, transaction_reference: transactionReference || null, refund_date: refundDate || new Date().toISOString().slice(0, 10), refund_time: refundTime || new Date().toISOString().slice(11, 19), remarks: remarks || null, refunded_by: actor || null });
+
+  // Double-entry: refund paid = deposit liability DOWN, cash DOWN — never an
+  // operating expense (proposal §9/§27). Idempotent per cumulative total.
+  try {
+    const increment = Math.round(Number(amount || 0) * 100) / 100;
+    if (increment > 0 && updated && !updated.error) {
+      const rd = String(refundDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
+      await require('../services/journal').postJournal({
+        entry_date: rd,
+        period: rd.slice(0, 7),
+        memo: `Deposit refund paid${transactionReference ? ` (${transactionReference})` : ''} — ${existing.tenant_code}`,
+        source_type: 'deposit_refund_paid',
+        source_id: `${id}:${newTotal}`,
+        lines: [
+          { account_code: '2000', debit: increment, memo: 'Deposit liability settled' },
+          { account_code: require('../services/journal').CASH_BY_METHOD(paymentMethod), credit: increment, memo: 'Refund paid to tenant' },
+        ],
+        actor,
+      });
+    }
+  } catch (jErr) {
+    console.error('[Journal] deposit refund posting failed:', jErr.message);
+  }
+  return updated;
 }
 
 async function getDepositRefundSummary() {

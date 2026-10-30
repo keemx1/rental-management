@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GEHPM Monthly Financial Report</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; font-size: 11px; margin: 0; padding: 26px 30px; background: #fff; }
+    .header { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid #1a4b8c; padding-bottom: 12px; }
+    .header img { height: 58px; width: auto; }
+    .titles h1 { margin: 0; font-size: 18px; letter-spacing: .04em; color: #1a4b8c; }
+    .titles .company { font-size: 11px; color: #475569; margin-top: 2px; }
+    .period-bar { display: inline-block; margin-top: 8px; background: #e9f1fd; border: 1px solid #bfd6f5; color: #1e3a8a; font-weight: 700; font-size: 12px; padding: 5px 12px; border-radius: 4px; }
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #1a4b8c; margin: 16px 0 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #1a4b8c; color: #fff; font-size: 10px; text-align: left; padding: 7px 9px; }
+    td { padding: 6px 9px; border-bottom: 1px solid #e2e8f0; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    td.num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .empty { color: #94a3b8; text-align: center; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; margin-top: 4px; }
+    .kv { display: flex; justify-content: space-between; border-bottom: 1px dotted #cbd5e1; padding: 4px 2px; font-size: 10.5px; }
+    .kv b { font-variant-numeric: tabular-nums; }
+    .warn { background: #fffbeb; border: 1px solid #f59e0b; color: #78350f; padding: 8px 10px; border-radius: 6px; font-size: 10px; margin-top: 8px; }
+    .ok { background: #f0fdf4; border: 1px solid #86efac; color: #166534; padding: 8px 10px; border-radius: 6px; font-size: 10px; margin-top: 8px; }
+    .footer-bar { height: 3px; background: #e31837; width: 100%; margin: 14px 0 6px; }
+    .footer { display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="{{logo_base64}}" alt="Logo" />
+    <div class="titles">
+      <h1>MONTHLY FINANCIAL REPORT</h1>
+      <div class="company">GUTENBERG ELITE HOME &amp; PROPERTY MANAGEMENTS — Financial Management &amp; Reconciliation</div>
+    </div>
+  </div>
+  <span class="period-bar">REPORTING PERIOD: {{period}} &nbsp;·&nbsp; GENERATED {{generated_at}}</span>
+
+  <div class="{{opening_status_class}}">{{opening_status}}</div>
+
+  <div class="grid2">
+    <div>
+      <h2>A. Income</h2>
+      <div class="kv"><span>Commission earned</span><b>KES {{income_commission_earned}}</b></div>
+      <div class="kv"><span>Other income earned</span><b>KES {{income_other_earned}}</b></div>
+      <div class="kv"><span><b>Total earned</b></span><b>KES {{income_total_earned}}</b></div>
+      <div class="kv"><span>Commission received</span><b>KES {{income_commission_received}}</b></div>
+      <div class="kv"><span>Total received</span><b>KES {{income_total_received}}</b></div>
+      <div class="kv"><span>Commission receivable (outstanding)</span><b>KES {{income_receivable}}</b></div>
+      <table style="margin-top:6px"><tbody>{{income_rows}}</tbody></table>
+    </div>
+    <div>
+      <h2>B. Expenditure</h2>
+      <div class="kv"><span>Incurred this period</span><b>KES {{exp_incurred}}</b></div>
+      <div class="kv"><span>Paid this period (cash/bank)</span><b>KES {{exp_paid}}</b></div>
+      <table style="margin-top:6px"><tbody>{{exp_rows}}</tbody></table>
+    </div>
+  </div>
+
+  <h2>C. Cash &amp; Bank Position</h2>
+  <div class="kv"><span>Cash movement this period</span><b>KES {{cash_movement}}</b></div>
+  <div class="kv"><span>Closing position</span><b>{{cash_closing}}</b></div>
+
+  <h2>D. Property &amp; Landlord Reconciliation</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Arrangement</th><th style="text-align:right">Collected</th><th style="text-align:right">Comm. earned</th><th style="text-align:right">Comm. received</th><th style="text-align:right">Comm. outstanding</th></tr></thead>
+    <tbody>{{property_rows}}</tbody>
+  </table>
+  <div class="kv"><span>Landlord remittances paid this period</span><b>KES {{landlord_remitted}}</b></div>
+
+  <h2>E. Tenant &amp; Payment Reconciliation</h2>
+  <div class="grid2">
+    <div>
+      <div class="kv"><span>Tenant arrears</span><b>KES {{tenant_arrears}}</b></div>
+      <div class="kv"><span>Tenant credits &amp; advance rent held</span><b>KES {{tenant_credits}}</b></div>
+      <div class="kv"><span>Deposit liabilities</span><b>KES {{tenant_deposits}}</b></div>
+    </div>
+    <div>
+      <div class="kv"><span>Unallocated / pending payments</span><b>KES {{tenant_unallocated}}</b></div>
+      <div class="kv"><span>Deposit refunds outstanding</span><b>KES {{tenant_refunds}}</b></div>
+    </div>
+  </div>
+
+  <h2>F. Discrepancies &amp; Audit Flags</h2>
+  <table><tbody>{{discrepancy_rows}}</tbody></table>
+  <div class="{{tb_class}}">{{tb_status}}</div>
+
+  <div style="margin-top:14px;line-height:1.5;">
+    <div>Prepared by: {{actor}}</div>
+    <div>{{GEHM_STAMP_LINE}}</div>
+    <div>Date: {{date}}</div>
+  </div>
+
+  <div class="footer-bar"></div>
+  <div class="footer"><span>GEHPM Monthly Financial Report {{period}}</span><span>Find a Home. Leave the Management to Us</span></div>
+</body>
+</html>

@@ -2313,6 +2313,77 @@ async function generateAndStoreDepositReinstatement(inst, tenantNow, exitInv) {
   }
 }
 
+// ─── Monthly Financial Report (Phase 1 P2) ────────────────────────────────
+async function generateMonthlyFinancialReportPdf(report, actor) {
+  try {
+    const fmt = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const row = (label, value) => `<tr><td>${escDocText(label)}</td><td class="num">${value}</td></tr>`;
+    const incomeRows = (report.income.rows || []).map((r) => row(`${r.code} ${r.name}`, `KES ${fmt(r.earned)}`)).join('') || '<tr><td colspan="2" class="empty">No posted income this month.</td></tr>';
+    const expRows = (report.expenditure.rows || []).map((r) => row(`${r.code} ${r.name}`, `KES ${fmt(r.incurred)}`)).join('') || '<tr><td colspan="2" class="empty">No posted expenditure this month.</td></tr>';
+    const propRows = (report.properties || []).map((p) => `<tr>
+      <td>${escDocText(p.house_name || p.house_paybill)} (${escDocText(p.house_paybill)})</td>
+      <td>${p.arrangement === 'A' ? 'A — direct to landlord' : 'B — via GEHPM'}</td>
+      <td class="num">KES ${fmt(p.collected)}</td>
+      <td class="num">KES ${fmt(p.commission_earned)}</td>
+      <td class="num">KES ${fmt(p.commission_received)}</td>
+      <td class="num">KES ${fmt(p.commission_outstanding)}</td>
+    </tr>`).join('') || '<tr><td colspan="6" class="empty">No property collections this month.</td></tr>';
+    const discRows = (report.discrepancies || []).map((d) => `<tr><td>${escDocText(d.type)}</td><td colspan="2">${escDocText(d.message)}</td></tr>`).join('')
+      || '<tr><td colspan="2">No discrepancies flagged.</td></tr>';
+    const html = renderTemplate('monthly_financial_report.html', {
+      period: report.month,
+      generated_at: report.generated_at ? new Date(report.generated_at).toLocaleString() : new Date().toLocaleString(),
+      opening_status_class: report.opening_balances.configured ? 'ok' : 'warn',
+      tb_class: report.trial_balance ? (report.trial_balance.balanced ? 'ok' : 'warn') : 'warn',
+      opening_status: report.opening_balances.configured
+        ? `Cash ${fmt(report.opening_balances.cash)} · M-Pesa ${fmt(report.opening_balances.mpesa)} · Bank ${fmt(report.opening_balances.bank)} (as of ${escDocText(report.opening_balances.as_of)})`
+        : 'NOT CONFIGURED — enter verified opening balances before relying on closing figures.',
+      income_commission_earned: fmt(report.income.commission_earned),
+      income_other_earned: fmt(report.income.other_income_earned),
+      income_total_earned: fmt(report.income.total_earned),
+      income_commission_received: fmt(report.income.commission_received),
+      income_total_received: fmt(report.income.total_received),
+      income_receivable: fmt(report.income.commission_receivable),
+      income_rows: incomeRows,
+      exp_incurred: fmt(report.expenditure.incurred_total),
+      exp_paid: fmt(report.expenditure.paid_total),
+      exp_rows: expRows,
+      cash_movement: fmt(report.cash.movement_total),
+      cash_closing: report.cash.closing
+        ? `Cash ${fmt(report.cash.closing.cash)} · M-Pesa ${fmt(report.cash.closing.mpesa)} · Bank ${fmt(report.cash.closing.bank)}`
+        : (report.cash.note || 'Not available'),
+      property_rows: propRows,
+      landlord_remitted: fmt(report.landlord_remitted),
+      tenant_arrears: fmt(report.tenants.arrears),
+      tenant_credits: fmt(report.tenants.credits),
+      tenant_deposits: fmt(report.tenants.deposit_liabilities),
+      tenant_unallocated: fmt(report.tenants.unallocated_payments),
+      tenant_refunds: fmt(report.tenants.refunds_due),
+      discrepancy_rows: discRows,
+      tb_status: report.trial_balance
+        ? (report.trial_balance.balanced ? `Balanced (Dr ${fmt(report.trial_balance.total_debit)} = Cr ${fmt(report.trial_balance.total_credit)})` : 'NOT BALANCED — investigate')
+        : 'No postings for this period',
+      actor: escDocText(actor || 'management'),
+      GEHM_STAMP_LINE: '{{GEHM_STAMP_LINE}}',
+      date: new Date().toISOString().slice(0, 10),
+    });
+    const filename = `GEHPM-MONTHLY-${report.month}.pdf`;
+    ensureDir();
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename);
+    const doc = await store.createDocument({
+      doc_type: 'monthly_financial_report',
+      doc_number: `MFR-${report.month}`,
+      title: `Monthly Financial Report ${report.month}`,
+      filename, file_path: pdfPath, amount: null, doc_date: `${report.month}-01`,
+      reuse_invoice_doc: true,
+    });
+    return { filename, file_path: pdfPath, document: doc };
+  } catch (err) {
+    console.error('[Documents] Monthly financial report failed:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   DOCUMENTS_DIR,
   renderTemplate,
@@ -2361,6 +2432,7 @@ module.exports = {
   generateAndStoreRemittanceStatement,
   buildDepositReinstatementHtml,
   generateAndStoreDepositReinstatement,
+  generateMonthlyFinancialReportPdf,
   buildWaterBillReportHtml,
   generateWaterBillReportPdf,
   buildLetterHtml,

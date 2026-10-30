@@ -208,6 +208,25 @@ router.post('/:id/approve', async (req, res) => {
       return res.json({ success: true, payment: result.payment, tenant: result.tenant, whatsapp: { status: 'Skipped' }, alreadyApproved: true, sync: result.sync });
     }
 
+    // Double-entry (arrangement-aware): rent paid direct to landlords is
+    // NEVER GEHPM cash/income; only GEHPM-held components post. Failures
+    // never block approval — reconciliation flags missing postings.
+    try {
+      const hp = result.tenant?.house_paybill_number || result.tenant?.house_id || null;
+      let arrangement = 'A';
+      if (hp) {
+        const hrow = (await require('../config/database').query(
+          `SELECT financial_arrangement FROM houses WHERE paybill_number = $1`, [hp]
+        )).rows[0];
+        arrangement = hrow?.financial_arrangement || 'A';
+      }
+      await require('../services/journal').postPaymentApproval({
+        payment: result.payment, allocation: result.allocation, arrangement, house_paybill: hp,
+      });
+    } catch (jErr) {
+      console.error('[Journal] payment approval posting failed:', jErr.message);
+    }
+
     // Receipt PDF permanence: generation starts immediately (from the final
     // approved data) and runs alongside the text acknowledgement.
     const receiptPromise = ensureReceiptPdf(result.tenant, result.payment, result.allocation);

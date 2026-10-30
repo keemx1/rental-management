@@ -99,6 +99,7 @@ app.use('/api/landlords', require('./routes/landlords'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/agreements-inbox', require('./routes/agreementsInbox'));
+app.use('/api/financial', require('./routes/financial'));
 app.use('/api/commissions', require('./routes/commissions'));
 
 app.get('/api/health', healthDetailedAuth, (req, res) => {

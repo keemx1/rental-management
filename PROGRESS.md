@@ -1021,8 +1021,57 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **934 assertions across 24 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge any fixture residue from crashed runs).
+Suite totals: **992 assertions across 25 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge any fixture residue from crashed runs).
 
+### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
+First demo slice of the confirmed financial plan (management decision sheet §6):
+
+- **Arrangement A/B**: `houses.financial_arrangement` — ALL existing
+  properties default to **A** (rent paid directly to landlords, management
+  decision), switchable per property in the Financial view; switching is
+  audited and NEVER rewrites historical transactions (classification is
+  captured at posting time).
+- **Double-entry foundation**: `chart_of_accounts` (29 seeded accounts),
+  `journal_entries` + `journal_lines` with a DEFERRED balance trigger
+  (entries built in one transaction), one-posted-entry-per-source
+  idempotency, reversal-only corrections (originals preserved), and a
+  trial-balance endpoint/view. Auto-posting wired into existing flows
+  (never blocks them; failures surface for reconciliation):
+  commission EARNED (A: receivable↔income, B: withheld from landlord
+  payable), commission RECEIVED (A: cash↔receivable), payment approval
+  (A: only GEHPM-held deposit/utility cash — rent NEVER enters GEHPM
+  cash; B: cash + deposit liability + utility income + landlord payable),
+  deposit refund paid (liability↓/cash↓, never an expense), landlord
+  remittance (B only), false-payment reversal (mirrored reversal entry).
+- **P1 Obligations Tracker** (`GET /api/financial/obligations`): live
+  buckets — owed TO landlords (overdue remittances, landlord advances),
+  owed TO GEHPM (unpaid commission invoices), tenant liabilities (pending
+  refunds, held credits), company expenses (unpaid salaries, expense
+  invoices, employee advances, unpaid utilities, reimbursements) — every
+  row with amount/due/status/source + deep link; admin-only.
+- **P2 Monthly Report**: consolidated A–F sections from journals +
+  registers (income earned vs received, expenditure incurred vs paid,
+  cash position with opening-balance configuration that reports **NOT
+  CONFIGURED** instead of fake zeros, property/landlord reconciliation
+  with arrangement flags, tenant/payment reconciliation, discrepancy
+  flags, embedded trial balance) + branded **PDF** and editable **Excel**
+  exports from the same figures.
+- **P3 Registers**: Collections (arrangement-labelled: "direct to
+  landlord — NOT GEHPM cash" vs "received by GEHPM"), Income (commission
+  earned/received + other-income CRUD), Expenditure (expense invoices,
+  salary payments, outstanding salaries), Cash & Bank movements (from the
+  journal), configurable expense categories (38 seeded + add-your-own).
+- **Access**: the whole module (nav entry "Financial Mgmt", view, all
+  routes) is **admin-only** — operators get 403 (asserted); a management
+  shortcut panel shows on the dashboard for admins.
+- `tests/test_financial_phase1.js` (58 assertions) covers arrangement
+  rules, journal balance/idempotency/reversal, all posting hooks,
+  obligations buckets + links, report sections + PDF/Excel + opening
+  balances, all registers, access control, and history intactness.
+  Stamps → `?v=85`, SW → `gutenberg-v88-irmanage`. Journal cleanup uses
+  orphan-safe predicates so fixture postings can never touch real books.
+
+---
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1075,3 +1124,4 @@ Suite totals: **934 assertions across 24 suites** (run `node tests\sweep-fixture
 | 31 | Service worker: ignoreSearch cache fallback (offline styling loss) | v83+sw |
 | 32 | Agreements Inbox: occupied-status match, process lock, race repair (123 stored, 0 dupes) | backend |
 | 33 | Deposit refund cancellation, deposit restoration, tenancy reinstatement, unit reassignment | v84 |
+| 34 | Financial Mgmt Phase 1: Arrangement A/B, double-entry journals, obligations tracker, monthly report, registers | v85 |

@@ -19,6 +19,10 @@
 const store = require('../storage/store');
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+// pg DATE columns arrive as local Date objects — normalise to YYYY-MM-DD.
+const localDate = (v) => (v instanceof Date && !isNaN(v))
+  ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
+  : String(v || '').slice(0, 10);
 const monthStart = (m) => `${m}-01`;
 const monthEndExclusive = (m) => {
   const [y, mo] = String(m).split('-').map(Number);
@@ -265,6 +269,24 @@ async function reverseFalsePayment(paymentId, { actor, reason, recompute = true 
       },
     })]
   );
+  // Double-entry: reverse the original journal entry if one exists (the
+  // original entry is preserved; a mirrored reversal is recorded).
+  try {
+    const { reverseJournal } = require('./journal');
+    const orig = (await query(
+      `SELECT id FROM journal_entries WHERE source_type = 'payment' AND source_id = $1 AND status = 'Posted'`,
+      [String(paymentId)]
+    )).rows[0];
+    if (orig) {
+      await reverseJournal({
+        entry_id: orig.id,
+        reason: `False payment reversed: ${String(reason).trim()}`,
+        actor,
+      });
+    }
+  } catch (jErr) {
+    console.error('[Journal] reversal posting failed:', jErr.message);
+  }
   let tenantRepaired = false;
   if (recompute && p.tenant_code) {
     try {
@@ -473,6 +495,37 @@ async function generateCommissionInvoice(housePaybill, billingMonth, { actor } =
     )).rows[0];
   }
 
+  // Double-entry: commission EARNED this month (receivable vs income).
+  // Arrangement B withholds it from the landlord payable; A tracks it as a
+  // receivable until the landlord actually pays.
+  try {
+    const { postJournal } = require('./journal');
+    const isB = String(house?.financial_arrangement || 'A') === 'B';
+    // Accrual date: the LAST day of the earning month, so the monthly report
+    // for that period includes the commission it belongs to.
+    const [ey, em] = String(billingMonth).split('-').map(Number);
+    const lastDay = new Date(Date.UTC(ey, em, 0)).getUTCDate();
+    await postJournal({
+      entry_date: `${billingMonth}-${String(lastDay).padStart(2, '0')}`,
+      period: billingMonth,
+      memo: `Management fee earned ${billingMonth} — ${invoice.invoice_number}`,
+      source_type: 'commission_invoice',
+      source_id: String(invoice.id),
+      lines: isB
+        ? [
+            { account_code: '2100', debit: Number(invoice.commission_amount), house_paybill: housePaybill, memo: 'Commission withheld from landlord payable' },
+            { account_code: '4000', credit: Number(invoice.commission_amount), memo: 'Commission income' },
+          ]
+        : [
+            { account_code: '1110', debit: Number(invoice.commission_amount), memo: 'Commission receivable (landlord owes GEHPM)' },
+            { account_code: '4000', credit: Number(invoice.commission_amount), memo: 'Commission income' },
+          ],
+      actor,
+    });
+  } catch (jErr) {
+    console.error('[Journal] commission invoice posting failed:', jErr.message);
+  }
+
   // PDF via the shared document pipeline (searchable + downloadable).
   const { generateAndStoreCommissionInvoice } = require('./documentStore');
   let document = null;
@@ -508,6 +561,27 @@ async function recordCommissionPayment({ house_paybill_number, landlord_id, decl
       method || 'M-Pesa', reference || null, notes || null, actor || null]
   )).rows[0];
   const ledger = await getLedger(house_paybill_number);
+  // Double-entry: commission RECEIVED as cash — Arrangement A only (in B the
+  // commission is withheld from remittances instead of invoiced-for-cash).
+  if (String(house?.financial_arrangement || 'A') === 'A') {
+    try {
+      const { postJournal, CASH_BY_METHOD } = require('./journal');
+      await postJournal({
+        entry_date: localDate(payment_date || new Date()),
+        period: localDate(payment_date || new Date()).slice(0, 7),
+        memo: `Commission received — ${payment.reference || payment.id}`,
+        source_type: 'commission_payment',
+        source_id: String(payment.id),
+        lines: [
+          { account_code: CASH_BY_METHOD(payment.method), debit: Number(payment.amount), house_paybill: house_paybill_number, memo: 'Commission cash received' },
+          { account_code: '1110', credit: Number(payment.amount), memo: 'Commission receivable settled' },
+        ],
+        actor,
+      });
+    } catch (jErr) {
+      console.error('[Journal] commission payment posting failed:', jErr.message);
+    }
+  }
   return { payment, outstanding: ledger.summary.outstanding, ledger_summary: ledger.summary };
 }
 
@@ -754,6 +828,27 @@ async function recordRemittancePayment({ house_paybill_number, landlord_id, decl
       method || 'M-Pesa', reference || null, notes || null, proof_note || null, recipientSnapshot, actor || null]
   )).rows[0];
   const rem = await remittanceLedger(house_paybill_number);
+  // Double-entry: landlord remittance = landlord payable DOWN, cash OUT —
+  // only meaningful for Arrangement B (GEHPM actually holds the rent).
+  if (String(house?.financial_arrangement || 'A') === 'B') {
+    try {
+      const { postJournal, CASH_BY_METHOD } = require('./journal');
+      await postJournal({
+        entry_date: localDate(payment.payment_date || new Date()),
+        period: billing_month,
+        memo: `Landlord remittance — ${payment.reference || payment.id}`,
+        source_type: 'landlord_remittance',
+        source_id: String(payment.id),
+        lines: [
+          { account_code: '2100', debit: Number(payment.amount), house_paybill: house_paybill_number, memo: 'Landlord payable settled' },
+          { account_code: CASH_BY_METHOD(payment.method), credit: Number(payment.amount), memo: 'Remittance paid to landlord' },
+        ],
+        actor,
+      });
+    } catch (jErr) {
+      console.error('[Journal] remittance posting failed:', jErr.message);
+    }
+  }
   return { payment, outstanding: rem.summary.outstanding, ledger_summary: rem.summary };
 }
 

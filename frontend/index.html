@@ -222,6 +222,10 @@
             <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
             <span class="sidebar-label">Archive</span>
           </a>
+          <a href="#" data-nav="financial-management" class="sidebar-link hidden" id="nav-financial" title="Financial Management & Reconciliation (Management only)">
+            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/><path d="M14 15h4"/></svg>
+            <span class="sidebar-label">Financial Mgmt</span>
+          </a>
           <a href="#" data-nav="pending-overpayments" class="sidebar-link" title="Pending Overpayments">
             <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span class="sidebar-label">Pending Ov.</span>
@@ -308,6 +312,7 @@
           <a href="#" data-nav="deposit-refunds" class="nav-link block py-3 px-4 rounded">Deposit Refunds</a>
           <a href="#" data-nav="preexit-inspection" class="nav-link block py-3 px-4 rounded">Pre-Exit Inspection</a>
           <a href="#" data-nav="landlords" class="nav-link block py-3 px-4 rounded">Landlords</a>
+          <a href="#" data-nav="financial-management" class="nav-link hidden block py-3 px-4 rounded" id="nav-financial-drawer">Financial Mgmt</a>
           <a href="#" data-nav="commissions" class="nav-link block py-3 px-4 rounded">Commissions</a>
         <a href="#" data-nav="archive" class="nav-link block py-3 px-4 rounded">Archive</a>
         <a href="#" data-nav="pending-overpayments" class="nav-link block py-3 px-4 rounded">Pending Overpayments</a>
@@ -362,6 +367,14 @@
           </button>
           <div id="global-search-results"
             class="hidden absolute left-0 right-0 top-full mt-1 z-40 max-h-[70vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900/95 shadow-2xl"></div>
+        </div>
+        <!-- Financial Management shortcut (management only) -->
+        <div class="glass-panel p-4 hidden flex flex-wrap items-center justify-between gap-3" id="fin-shortcut">
+          <div>
+            <span class="sys-tag">[FINANCIAL MANAGEMENT &amp; RECONCILIATION]</span>
+            <div class="text-sm font-mono text-slate-300 mt-1" id="fin-shortcut-note">Obligations: checking…</div>
+          </div>
+          <button type="button" class="qc-btn qc-btn-primary text-xs" onclick="showView('financial-management')">Open Financial Management →</button>
         </div>
         <header class="section-head flex items-center justify-between gap-4">
           <div>
@@ -4524,6 +4537,119 @@
     </div>
   </section>
 
+  <!-- FINANCIAL MANAGEMENT & RECONCILIATION (management only) -->
+  <section data-view="financial-management" class="hidden space-y-6">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <span class="sys-tag">[FINANCIAL_MGMT]</span>
+        <h2 class="section-title mt-1">Financial Management &amp; <span class="accent">Reconciliation</span></h2>
+        <p class="section-desc">Obligations, monthly reports, registers and the double-entry trial balance — all from the same underlying records.</p>
+      </div>
+    </div>
+
+    <!-- Obligations Tracker -->
+    <div class="glass-panel p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-orbitron text-lg text-white">Outstanding Financial Obligations</h3>
+        <button type="button" id="btn-fin-refresh-ob" class="qc-btn text-xs">Refresh</button>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 text-center" id="fin-ob-totals"></div>
+      <div class="overflow-x-auto">
+        <table class="cyber-table text-xs">
+          <thead><tr><th>Bucket</th><th>Obligation</th><th>Party</th><th>Amount</th><th>Due / Status</th><th></th></tr></thead>
+          <tbody id="fin-ob-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Monthly Report -->
+    <div class="glass-panel p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <h3 class="font-orbitron text-lg text-white">Consolidated Monthly Report</h3>
+        <div class="flex items-center gap-2">
+          <input type="month" id="fin-month" class="cyber-input !py-1 text-sm" />
+          <button type="button" id="btn-fin-generate" class="qc-btn qc-btn-primary text-xs">Generate</button>
+          <button type="button" id="btn-fin-pdf" class="qc-btn text-xs hidden">Download PDF</button>
+          <button type="button" id="btn-fin-excel" class="qc-btn text-xs hidden">Download Excel</button>
+        </div>
+      </div>
+      <div id="fin-report-box" class="hidden">
+        <div id="fin-open-bal" class="text-xs font-mono mb-2 p-2 rounded border border-slate-700"></div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm font-mono" id="fin-report-summary"></div>
+        <div id="fin-report-disc" class="text-xs font-mono text-amber-300 mt-2 space-y-1"></div>
+        <div class="mt-3 flex flex-wrap gap-3 items-end">
+          <div><label class="form-label">Configure opening balances (once)</label>
+            <div class="flex gap-2">
+              <input type="number" id="fin-ob-cash" class="cyber-input !py-1 w-28" placeholder="Cash" />
+              <input type="number" id="fin-ob-mpesa" class="cyber-input !py-1 w-28" placeholder="M-Pesa" />
+              <input type="number" id="fin-ob-bank" class="cyber-input !py-1 w-28" placeholder="Bank" />
+              <input type="date" id="fin-ob-asof" class="cyber-input !py-1" />
+              <button type="button" id="btn-fin-open-save" class="qc-btn text-xs">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Registers -->
+    <div class="glass-panel p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <h3 class="font-orbitron text-lg text-white">Financial Registers</h3>
+        <div class="flex flex-wrap items-center gap-2">
+          <select id="fin-register-kind" class="cyber-input !py-1 text-sm">
+            <option value="collections">Collections</option>
+            <option value="income">Income</option>
+            <option value="expenditure">Expenditure</option>
+            <option value="cash">Cash &amp; Bank Movements</option>
+          </select>
+          <input type="date" id="fin-reg-from" class="cyber-input !py-1 text-sm" />
+          <input type="date" id="fin-reg-to" class="cyber-input !py-1 text-sm" />
+          <button type="button" id="btn-fin-register" class="qc-btn text-xs">Load</button>
+          <button type="button" id="btn-fin-other-income" class="qc-btn text-xs">+ Record Other Income</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto"><table class="cyber-table text-xs"><thead id="fin-reg-thead"></thead><tbody id="fin-reg-tbody"></tbody></table></div>
+    </div>
+
+    <!-- Trial Balance + Arrangements -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="glass-panel p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-orbitron text-lg text-white">Trial Balance</h3>
+          <div class="flex gap-2">
+            <button type="button" id="btn-fin-tb" class="qc-btn text-xs">Compute</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto"><table class="cyber-table text-xs"><thead><tr><th>Code</th><th>Account</th><th>Dr</th><th>Cr</th></tr></thead><tbody id="fin-tb-tbody"></tbody><tfoot><tr><td colspan="2" class="font-bold">Totals</td><td id="fin-tb-dr" class="font-bold"></td><td id="fin-tb-cr" class="font-bold"></td></tr></tfoot></table></div>
+        <div id="fin-tb-status" class="text-xs font-mono mt-2"></div>
+      </div>
+      <div class="glass-panel p-4">
+        <h3 class="font-orbitron text-lg text-white mb-3">Property Arrangements</h3>
+        <p class="text-[11px] text-slate-400 font-mono mb-2">A = rent paid directly to landlord (never GEHPM cash/income) · B = GEHPM receives rent and remits to landlord. Changing never rewrites history.</p>
+        <div class="overflow-x-auto"><table class="cyber-table text-xs"><thead><tr><th>Property</th><th>Landlord</th><th>Arrangement</th></tr></thead><tbody id="fin-arr-tbody"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Other income inline form -->
+    <div id="fin-income-form" class="glass-panel p-4 hidden">
+      <h3 class="font-orbitron text-lg text-white mb-3">Record Other Legitimate Income</h3>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div><label class="form-label">Date</label><input type="date" id="fi-date" class="cyber-input" /></div>
+        <div><label class="form-label">Category</label><select id="fi-category" class="cyber-input"><option>Administrative fee</option><option>Agreement / documentation fee</option><option>Service charge</option><option>Commission top-up</option><option>Other legitimate income</option></select></div>
+        <div><label class="form-label">Amount</label><input type="number" id="fi-amount" min="0.01" step="0.01" class="cyber-input" /></div>
+        <div><label class="form-label">Received?</label><select id="fi-received" class="cyber-input"><option value="true">Yes — cash received</option><option value="false">No — receivable</option></select></div>
+        <div><label class="form-label">Source / client</label><input id="fi-source" class="cyber-input" /></div>
+        <div><label class="form-label">Reference</label><input id="fi-ref" class="cyber-input" /></div>
+        <div class="md:col-span-2"><label class="form-label">Description</label><input id="fi-desc" class="cyber-input" /></div>
+      </div>
+      <div class="flex gap-2 mt-3">
+        <button type="button" id="btn-fi-save" class="qc-btn qc-btn-primary text-xs">Save Income</button>
+        <button type="button" id="btn-fi-cancel" class="qc-btn text-xs">Cancel</button>
+        <span id="fi-result" class="text-sm font-mono self-center"></span>
+      </div>
+    </div>
+  </section>
+
   <!-- LANDLORDS & COMMISSIONS LEDGER -->
   <section data-view="landlords" class="hidden space-y-6">
         <div class="flex items-center justify-between mb-6">
@@ -5993,10 +6119,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=84"></script>
+  <script type="module" src="/js/app.js?v=85"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=86').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=87').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

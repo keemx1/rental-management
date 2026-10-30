@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v84';
+const GEHM_VERSION = 'v85';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -604,6 +604,7 @@ function showView(name) {
   if (name === 'archive') loadArchive();
   if (name === 'preexit-inspection') preexitResetView();
   if (name === 'landlords') loadLandlords();
+  if (name === 'financial-management') loadFinancialView();
   if (name === 'pending-overpayments') loadPendingOverpayments();
   if (name === 'deposit-refunds') loadDepositRefunds();
   if (name === 'future-tenancies') loadFutureTenancies();
@@ -1704,6 +1705,13 @@ async function loadDashboard() {
     document.getElementById('metric-pending').textContent = r.pending_count ?? 0;
     document.getElementById('metric-revenue').textContent = `KES ${Number(r.revenue_mtd || 0).toLocaleString()}`;
     document.getElementById('metric-arrears').textContent = `KES ${Number(r.total_arrears || 0).toLocaleString()}`;
+    // Landlord accounts strip (management data, admin-only endpoint)
+    if (typeof isAdmin === 'function' && isAdmin()) {
+      api.finObligations().then((ob) => {
+        const el = document.getElementById('fin-shortcut-note');
+        if (el) el.textContent = `${ob.total} obligation(s) · ${ob.overdue_count} overdue · ${llFmt((ob.summary || {}).owed_to_landlords || 0)} owed to landlords · ${llFmt((ob.summary || {}).owed_to_gehpm || 0)} owed to GEHPM`;
+      }).catch(() => {});
+    }
     // Landlord accounts strip — the two obligations kept separate + overdue + reviews
     const la = data.landlord_accounts;
     const laFmt = (v) => `KES ${Number(v || 0).toLocaleString()}`;
@@ -4837,6 +4845,272 @@ document.getElementById('ne-tbody')?.addEventListener('click', (e) => {
   handleNotificationGo(links[Number(tr.dataset.neGo)]);
 });
 
+// ─── Financial Management & Reconciliation (management only) ───────────────
+const FIN_BUCKET_LABELS = {
+  owed_to_landlords: 'Owed TO Landlords',
+  owed_to_gehpm: 'Owed TO GEHPM',
+  tenant_liabilities: 'Tenant Liabilities',
+  company_expenses: 'Company Expenses',
+};
+
+async function loadFinancialView() {
+  if (!isAdmin()) { showToast('Management access required.', 'error'); showView('dashboard'); return; }
+  const monthEl = document.getElementById('fin-month');
+  if (monthEl && !monthEl.value) monthEl.value = new Date().toISOString().slice(0, 7);
+  const from = document.getElementById('fin-reg-from');
+  const to = document.getElementById('fin-reg-to');
+  if (from && !from.value) from.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`;
+  if (to && !to.value) to.value = new Date().toISOString().slice(0, 10);
+  loadObligations();
+  loadArrangements();
+}
+
+async function loadObligations() {
+  const tbody = document.getElementById('fin-ob-tbody');
+  const totals = document.getElementById('fin-ob-totals');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-500">Loading…</td></tr>';
+  try {
+    const data = await api.finObligations();
+    const s = data.summary || {};
+    const c = data.counts || {};
+    if (totals) {
+      totals.innerHTML = Object.keys(FIN_BUCKET_LABELS).map((k) => `
+        <div class="bg-slate-800/50 rounded p-2">
+          <div class="text-[10px] uppercase text-slate-400">${FIN_BUCKET_LABELS[k]}</div>
+          <div class="font-mono font-bold text-cyan-300">${llFmt(s[k] || 0)}</div>
+          <div class="text-[10px] text-slate-500">${c[k] || 0} item(s)</div>
+        </div>`).join('');
+    }
+    if (!data.obligations?.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5 text-slate-500">No outstanding obligations.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.obligations.map((o, i) => `
+      <tr class="border-b border-slate-800 hover:bg-slate-800/30 cursor-pointer" data-ob-go="${i}">
+        <td class="text-[10px] uppercase font-bold ${o.due ? 'text-rose-400' : 'text-slate-400'}">${FIN_BUCKET_LABELS[o.bucket] || o.bucket}</td>
+        <td class="text-white text-xs">${escapeHtml(o.title)}<div class="text-[10px] text-slate-500 font-mono">${escapeHtml(o.source || '')}</div></td>
+        <td class="text-xs font-mono text-slate-300">${escapeHtml(o.party || '—')}${o.property ? `<div class="text-[10px] text-slate-500">${escapeHtml(o.property)}</div>` : ''}</td>
+        <td class="font-mono font-bold ${o.due ? 'text-rose-400' : 'text-amber-300'}">${llFmt(o.amount)}</td>
+        <td class="text-xs">${escapeHtml(o.status || '—')}${o.due_date ? `<div class="text-[10px] text-slate-500">Due ${escapeHtml(String(o.due_date).slice(0, 10))}</div>` : ''}</td>
+        <td class="text-xs text-cyan-400">Open →</td>
+      </tr>`).join('');
+    tbody._ob = data.obligations;
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-5 text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function loadFinancialReport() {
+  const month = document.getElementById('fin-month')?.value;
+  if (!month) { showToast('Select a month', 'error'); return; }
+  const box = document.getElementById('fin-report-box');
+  const btn = document.getElementById('btn-fin-generate');
+  btn.disabled = true;
+  try {
+    const { report } = await api.finMonthlyReport(month);
+    box.classList.remove('hidden');
+    const openEl = document.getElementById('fin-open-bal');
+    openEl.textContent = report.opening_balances.configured
+      ? `Opening balances (${report.opening_balances.as_of}): Cash ${llFmt(report.opening_balances.cash)} · M-Pesa ${llFmt(report.opening_balances.mpesa)} · Bank ${llFmt(report.opening_balances.bank)}`
+      : '⚠ Opening balances NOT CONFIGURED — closing figures cannot be verified until management enters them.';
+    openEl.className = `text-xs font-mono mb-2 p-2 rounded border ${report.opening_balances.configured ? 'border-emerald-700 text-emerald-300' : 'border-amber-600 text-amber-300'}`;
+    const sum = document.getElementById('fin-report-summary');
+    sum.innerHTML = `
+      <div class="bg-slate-800/50 rounded p-3"><div class="text-[10px] uppercase text-slate-400">Income earned / received</div>
+        <div class="text-cyan-300 font-bold">${llFmt(report.income.total_earned)} / ${llFmt(report.income.total_received)}</div>
+        <div class="text-[10px] text-slate-500">Commission receivable ${llFmt(report.income.commission_receivable)}</div></div>
+      <div class="bg-slate-800/50 rounded p-3"><div class="text-[10px] uppercase text-slate-400">Expenditure incurred / paid</div>
+        <div class="text-amber-300 font-bold">${llFmt(report.expenditure.incurred_total)} / ${llFmt(report.expenditure.paid_total)}</div>
+        <div class="text-[10px] text-slate-500">Trial balance: ${report.trial_balance ? (report.trial_balance.balanced ? 'balanced' : 'NOT BALANCED') : 'n/a'}</div></div>
+      <div class="bg-slate-800/50 rounded p-3"><div class="text-[10px] uppercase text-slate-400">Tenants / Landlords</div>
+        <div>Arrears <b>${llFmt(report.tenants.arrears)}</b> · Credits <b>${llFmt(report.tenants.credits)}</b></div>
+        <div>Remitted <b>${llFmt(report.landlord_remitted)}</b> · Unallocated <b>${llFmt(report.tenants.unallocated_payments)}</b></div></div>`;
+    const disc = document.getElementById('fin-report-disc');
+    disc.innerHTML = (report.discrepancies || []).map((d) => `<div>⚠ ${escapeHtml(d.message)}</div>`).join('')
+      || '<div class="text-emerald-400">No discrepancies flagged for this period.</div>';
+    document.getElementById('btn-fin-pdf').classList.remove('hidden');
+    document.getElementById('btn-fin-excel').classList.remove('hidden');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function downloadFinancial(kind) {
+  const month = document.getElementById('fin-month')?.value;
+  if (!month) return;
+  try {
+    const result = kind === 'pdf' ? await api.finMonthlyPdf(month) : await api.finMonthlyExcel(month);
+    if (result?.blob) {
+      const url = URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename || `GEHPM-Monthly-${month}.${kind === 'pdf' ? 'pdf' : 'xlsx'}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      showToast(`${kind.toUpperCase()} downloaded.`, 'success');
+    }
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function loadFinRegister() {
+  const kind = document.getElementById('fin-register-kind')?.value || 'collections';
+  const from = document.getElementById('fin-reg-from')?.value || '';
+  const to = document.getElementById('fin-reg-to')?.value || '';
+  const thead = document.getElementById('fin-reg-thead');
+  const tbody = document.getElementById('fin-reg-tbody');
+  tbody.innerHTML = '<tr><td class="text-center py-4 text-slate-500">Loading…</td></tr>';
+  try {
+    const data = await api.finRegister(kind, from, to);
+    if (kind === 'collections') {
+      thead.innerHTML = '<tr><th>Date</th><th>Tenant</th><th>Property</th><th>Arrangement</th><th>Amount</th><th>Reference</th><th>Status</th></tr>';
+      tbody.innerHTML = (data.rows || []).map((r) => `<tr class="border-b border-slate-800">
+        <td class="font-mono text-xs">${escapeHtml(String(r.payment_date || '').slice(0, 10))}</td>
+        <td class="text-white text-xs">${escapeHtml(r.tenant_name || r.tenant_code || '')}<div class="text-[10px] text-slate-500">${escapeHtml(r.tenant_code || '')}</div></td>
+        <td class="text-xs">${escapeHtml(r.house_name || r.house_paybill_number || '')}</td>
+        <td class="text-[10px] ${r.arrangement === 'A' ? 'text-amber-300' : 'text-emerald-300'}">${escapeHtml(r.treatment || '')}</td>
+        <td class="font-mono">${llFmt(r.amount)}</td>
+        <td class="text-[10px] font-mono text-slate-400">${escapeHtml([r.mpesa_reference, r.receipt_number].filter(Boolean).join(' · '))}</td>
+        <td class="text-xs">${escapeHtml(r.status)}${r.overpayment > 0 ? ` <span class="text-amber-300">(+${llFmt(r.overpayment)} over)</span>` : ''}</td>
+      </tr>`).join('') || emptyRow(7);
+    } else if (kind === 'income') {
+      thead.innerHTML = '<tr><th>Type</th><th>Reference</th><th>Party / Property</th><th>Period / Date</th><th>Earned/Amount</th><th>Outstanding</th><th>Status</th></tr>';
+      tbody.innerHTML = [
+        ...(data.earned || []).map((r) => `<tr class="border-b border-slate-800"><td class="text-xs text-cyan-300">Commission earned</td><td class="font-mono text-xs">${escapeHtml(r.invoice_number || '')}</td><td class="text-xs">${escapeHtml(r.landlord_name || '')} · ${escapeHtml(r.house_name || '')}</td><td class="text-xs">${escapeHtml(r.billing_month || '')}${r.due_date ? ` · due ${escapeHtml(String(r.due_date).slice(0, 10))}` : ''}</td><td class="font-mono">${llFmt(r.amount)}</td><td class="font-mono">${llFmt(r.outstanding)}</td><td class="text-xs">${escapeHtml(r.status || '')}</td></tr>`),
+        ...(data.received || []).map((r) => `<tr class="border-b border-slate-800"><td class="text-xs text-emerald-300">Commission received</td><td class="font-mono text-xs">${escapeHtml(r.reference || '')}</td><td class="text-xs">${escapeHtml(r.landlord_name || '')} · ${escapeHtml(r.house_name || '')}</td><td class="text-xs">${escapeHtml(String(r.payment_date || '').slice(0, 10))}</td><td class="font-mono text-emerald-400">${llFmt(r.amount)}</td><td>—</td><td class="text-xs text-emerald-400">Received (${escapeHtml(r.method || '')})</td></tr>`),
+        ...(data.other || []).map((r) => `<tr class="border-b border-slate-800"><td class="text-xs text-purple-300">Other — ${escapeHtml(r.category || '')}</td><td class="font-mono text-xs">${escapeHtml(r.reference || '')}</td><td class="text-xs">${escapeHtml(r.source_client || '')}</td><td class="text-xs">${escapeHtml(String(r.income_date || '').slice(0, 10))}</td><td class="font-mono">${llFmt(r.amount)}</td><td>${r.received ? '—' : llFmt(r.amount)}</td><td class="text-xs">${r.received ? 'Received' : 'Receivable'}</td></tr>`),
+      ].join('') || emptyRow(7);
+    } else if (kind === 'expenditure') {
+      thead.innerHTML = '<tr><th>Type</th><th>Reference</th><th>Party / Property</th><th>Date / Period</th><th>Incurred</th><th>Paid</th><th>Outstanding / Status</th></tr>';
+      tbody.innerHTML = [
+        ...(data.invoices || []).map((r) => `<tr class="border-b border-slate-800"><td class="text-xs text-amber-300">Expense invoice</td><td class="font-mono text-xs">${escapeHtml(r.mnt_number || '')}</td><td class="text-xs">${escapeHtml(r.property_name || '')}${r.category ? ` · ${escapeHtml(r.category)}` : ''}</td><td class="text-xs">${escapeHtml(String(r.created_at || '').slice(0, 10))}</td><td class="font-mono">${llFmt(r.amount)}</td><td class="font-mono text-emerald-400">${llFmt(r.paid)}</td><td class="text-xs">${llFmt(r.outstanding)} · ${escapeHtml(r.status || '')}</td></tr>`),
+        ...(data.salaries || []).map((r) => `<tr class="border-b border-slate-800"><td class="text-xs text-amber-300">Salary payment</td><td class="font-mono text-xs">${escapeHtml(r.reference || '')}</td><td class="text-xs">${escapeHtml(r.employee_name || '')}</td><td class="text-xs">${escapeHtml(String(r.payment_date || '').slice(0, 10))} (${escapeHtml(r.salary_month || '')})</td><td class="font-mono">${llFmt(r.amount)}</td><td class="font-mono text-emerald-400">${llFmt(r.amount)}</td><td class="text-xs text-emerald-400">Paid (${escapeHtml(r.payment_method || '')})</td></tr>`),
+        ...(data.pending || []).map((r) => `<tr class="border-b border-slate-800"><td class="text-xs text-rose-300">Salary outstanding</td><td>—</td><td class="text-xs">${escapeHtml(r.employee_name || '')}</td><td class="text-xs">${escapeHtml(r.salary_month || '')}</td><td class="font-mono">${llFmt(r.amount)}</td><td>—</td><td class="text-xs text-rose-300">${escapeHtml(r.status || 'Outstanding')}</td></tr>`),
+      ].join('') || emptyRow(7);
+    } else if (kind === 'cash') {
+      thead.innerHTML = '<tr><th>Date</th><th>Entry</th><th>Account</th><th>Memo</th><th>Debit</th><th>Credit</th><th>Source</th></tr>';
+      tbody.innerHTML = (data.rows || []).map((r) => `<tr class="border-b border-slate-800">
+        <td class="font-mono text-xs">${escapeHtml(String(r.entry_date || '').slice(0, 10))}</td>
+        <td class="font-mono text-xs text-cyan-300">${escapeHtml(r.entry_number || '')}</td>
+        <td class="text-xs">${escapeHtml(r.account_code)} ${escapeHtml(r.account_name || '')}</td>
+        <td class="text-xs">${escapeHtml(r.memo || '')}</td>
+        <td class="font-mono">${Number(r.debit) ? llFmt(r.debit) : '—'}</td>
+        <td class="font-mono text-emerald-400">${Number(r.credit) ? llFmt(r.credit) : '—'}</td>
+        <td class="text-[10px] font-mono text-slate-500">${escapeHtml(r.source_type || '')} ${escapeHtml(r.source_id || '')}</td>
+      </tr>`).join('') || emptyRow(7);
+    }
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-5 text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+  }
+
+  function emptyRow(cols) {
+    return `<tr><td colspan="${cols}" class="text-center py-5 text-slate-500">No records.</td></tr>`;
+  }
+}
+
+async function loadFinTrialBalance() {
+  const tbody = document.getElementById('fin-tb-tbody');
+  try {
+    const tb = await api.finTrialBalance();
+    tbody.innerHTML = (tb.rows || []).map((r) => `<tr class="border-b border-slate-800">
+      <td class="font-mono text-xs">${escapeHtml(r.code)}</td><td class="text-xs">${escapeHtml(r.name)}</td>
+      <td class="font-mono">${Number(r.debit) ? llFmt(r.debit) : '—'}</td>
+      <td class="font-mono text-emerald-400">${Number(r.credit) ? llFmt(r.credit) : '—'}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="text-center py-4 text-slate-500">No postings yet.</td></tr>';
+    document.getElementById('fin-tb-dr').textContent = llFmt(tb.total_debit);
+    document.getElementById('fin-tb-cr').textContent = llFmt(tb.total_credit);
+    document.getElementById('fin-tb-status').textContent = tb.balanced ? '✓ Balanced' : '⚠ NOT BALANCED — investigate';
+    document.getElementById('fin-tb-status').className = `text-xs font-mono mt-2 ${tb.balanced ? 'text-emerald-400' : 'text-rose-400'}`;
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function loadArrangements() {
+  const tbody = document.getElementById('fin-arr-tbody');
+  if (!tbody) return;
+  try {
+    const { properties } = await api.finArrangements();
+    tbody.innerHTML = (properties || []).map((p) => `<tr class="border-b border-slate-800">
+      <td class="text-white text-xs">${escapeHtml(p.house_name || '')}<div class="text-[10px] text-slate-500">${escapeHtml(p.paybill_number)}</div></td>
+      <td class="text-xs">${escapeHtml(p.landlord_name || '—')}</td>
+      <td>
+        <select class="cyber-input !py-1 text-xs" data-arr-house="${escapeHtml(p.paybill_number)}">
+          <option value="A" ${p.financial_arrangement === 'A' ? 'selected' : ''}>A — rent direct to landlord</option>
+          <option value="B" ${p.financial_arrangement === 'B' ? 'selected' : ''}>B — GEHPM receives rent</option>
+        </select>
+      </td>
+    </tr>`).join('');
+  } catch (err) { tbody.innerHTML = `<tr><td colspan="3" class="text-rose-400">${escapeHtml(err.message)}</td></tr>`; }
+}
+
+async function saveOpeningBalances() {
+  try {
+    await api.finOpeningBalances({
+      cash: Number(document.getElementById('fin-ob-cash')?.value || 0),
+      mpesa: Number(document.getElementById('fin-ob-mpesa')?.value || 0),
+      bank: Number(document.getElementById('fin-ob-bank')?.value || 0),
+      as_of: document.getElementById('fin-ob-asof')?.value,
+    });
+    showToast('Opening balances saved.', 'success');
+    loadFinancialReport();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function saveOtherIncome() {
+  try {
+    await api.finOtherIncome({
+      income_date: document.getElementById('fi-date')?.value,
+      category: document.getElementById('fi-category')?.value,
+      amount: Number(document.getElementById('fi-amount')?.value || 0),
+      received: document.getElementById('fi-received')?.value === 'true',
+      source_client: document.getElementById('fi-source')?.value || null,
+      reference: document.getElementById('fi-ref')?.value || null,
+      description: document.getElementById('fi-desc')?.value || null,
+    });
+    document.getElementById('fin-income-form')?.classList.add('hidden');
+    showToast('Income recorded.', 'success');
+    loadFinRegister();
+  } catch (err) { document.getElementById('fi-result').textContent = err.message; }
+}
+
+// Wiring
+document.getElementById('btn-fin-refresh-ob')?.addEventListener('click', loadObligations);
+document.getElementById('btn-fin-generate')?.addEventListener('click', loadFinancialReport);
+document.getElementById('btn-fin-pdf')?.addEventListener('click', () => downloadFinancial('pdf'));
+document.getElementById('btn-fin-excel')?.addEventListener('click', () => downloadFinancial('excel'));
+document.getElementById('btn-fin-open-save')?.addEventListener('click', saveOpeningBalances);
+document.getElementById('btn-fin-register')?.addEventListener('click', loadFinRegister);
+document.getElementById('btn-fin-tb')?.addEventListener('click', loadFinTrialBalance);
+document.getElementById('btn-fin-other-income')?.addEventListener('click', () => {
+  const f = document.getElementById('fin-income-form');
+  f.classList.toggle('hidden');
+  const d = document.getElementById('fi-date');
+  if (d && !d.value) d.value = new Date().toISOString().slice(0, 10);
+  const r = document.getElementById('fi-result'); if (r) r.textContent = '';
+});
+document.getElementById('btn-fi-save')?.addEventListener('click', saveOtherIncome);
+document.getElementById('btn-fi-cancel')?.addEventListener('click', () => document.getElementById('fin-income-form')?.classList.add('hidden'));
+document.getElementById('fin-ob-tbody')?.addEventListener('click', (e) => {
+  const tr = e.target.closest('[data-ob-go]');
+  if (!tr) return;
+  const rows = document.getElementById('fin-ob-tbody')._ob || [];
+  const ob = rows[Number(tr.dataset.obGo)];
+  if (ob?.link) handleNotificationGo(ob.link);
+});
+document.getElementById('fin-arr-tbody')?.addEventListener('change', async (e) => {
+  const sel = e.target.closest('[data-arr-house]');
+  if (!sel) return;
+  const house = sel.dataset.arrHouse;
+  const val = sel.value;
+  if (!confirm(`Set ${house} to Arrangement ${val}? Historical transactions are never rewritten.`)) return;
+  try {
+    await api.finArrangement(house, val);
+    showToast(`${house} → Arrangement ${val} (audited).`, 'success');
+    loadArrangements();
+  } catch (err) { showToast(err.message, 'error'); loadArrangements(); }
+});
+
 function togglePaymentFields() {
   const method = document.getElementById('house-edit-payment-method').value;
   const isTill = method === 'till';
@@ -5050,6 +5324,8 @@ async function initSession() {
     if (document.getElementById('nav-role-mobile')) document.getElementById('nav-role-mobile').textContent = (user.role || 'operator').toUpperCase();
     document.getElementById('nav-users-link')?.classList.toggle('hidden', !isAdmin());
     document.getElementById('nav-settings-link')?.classList.toggle('hidden', !isAdmin());
+  document.getElementById('nav-financial')?.classList.toggle('hidden', !isAdmin());
+  document.getElementById('fin-shortcut')?.classList.toggle('hidden', !isAdmin());
     document.getElementById('nav-conflicts-link')?.classList.toggle('hidden', !isAdmin());
     const routed = applyRoute();
     if (!routed) showView('dashboard');
@@ -5074,6 +5350,8 @@ async function initSession() {
         if (document.getElementById('nav-role-mobile')) document.getElementById('nav-role-mobile').textContent = ((user && user.role) || 'operator').toUpperCase();
         document.getElementById('nav-users-link')?.classList.toggle('hidden', !isAdmin());
     document.getElementById('nav-settings-link')?.classList.toggle('hidden', !isAdmin());
+  document.getElementById('nav-financial')?.classList.toggle('hidden', !isAdmin());
+  document.getElementById('fin-shortcut')?.classList.toggle('hidden', !isAdmin());
         document.getElementById('nav-conflicts-link')?.classList.toggle('hidden', !isAdmin());
       } catch (_) {}
       showToast(`Offline mode — session valid for ${offlineSessionDaysLeft()} more day(s). Showing last synced data.`, 'error');
@@ -5105,6 +5383,8 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
     if (document.getElementById('nav-role-mobile')) document.getElementById('nav-role-mobile').textContent = (result.user.role || 'operator').toUpperCase();
     document.getElementById('nav-users-link')?.classList.toggle('hidden', !isAdmin());
     document.getElementById('nav-settings-link')?.classList.toggle('hidden', !isAdmin());
+  document.getElementById('nav-financial')?.classList.toggle('hidden', !isAdmin());
+  document.getElementById('fin-shortcut')?.classList.toggle('hidden', !isAdmin());
     document.getElementById('nav-conflicts-link')?.classList.toggle('hidden', !isAdmin());
     const routed = applyRoute();
     if (!routed) showView('dashboard');
