@@ -108,6 +108,15 @@ async function main() {
   // (unit label AND tenant code) are exercised, as in production data.
   await query(`UPDATE tenants SET unit_label = 'AG1' WHERE tenant_code = 'ZZAG-01'`);
   await query(`UPDATE tenants SET unit_label = 'AG9' WHERE tenant_code = 'ZZAG-02'`);
+  // Occupied-but-not-'Active' tenant (production units are usually Paid /
+  // Overdue / Partially Paid) — the inbox must match any non-Vacant status.
+  await store.createTenant({
+    tenant_code: 'ZZAG-04', name: 'ZZAG Paid Tenant', phone_number: '+254700001904',
+    property_name: HOUSE_A_NAME, house_id: HOUSE_A, unit_label: 'OV1',
+    rent_amount: 9000, deposit_amount: 4000, move_in_date: '2026-09-01',
+    rent_due_date: '2026-12-05', status: 'Paid',
+  });
+  await query(`UPDATE tenants SET unit_label = 'OV1' WHERE tenant_code = 'ZZAG-04'`);
 
   // Folder layout (the contract we will document)
   writePdf(`${HOUSE_A_NAME}/AG1.pdf`, { age: 'fresh' });     // fresh -> skipped this run
@@ -115,17 +124,19 @@ async function main() {
   writePdf(`${HOUSE_A_NAME}/H2A.pdf`);                        // unit of ANOTHER house -> unmatched
   writePdf(`${HOUSE_A}/ZZAG-01.pdf`);                         // paybill folder + tenant-code name -> matched
   writePdf(`NoSuchHouse/Z9.pdf`);                             // unknown folder -> unmatched
+  writePdf(`${HOUSE_A}/OV1.pdf`);                             // unit of a Paid tenant -> matched
 
   try {
     // ── Run 1 ──────────────────────────────────────────────────────────────
     let s = await inbox.processInbox({ actor: 'tester' });
     const s1 = s;
-    check(s.scanned === 5, `1. five files scanned (${s.scanned})`);
+    check(s.scanned === 6, `1. six files scanned (${s.scanned})`);
     check(s.skipped_recent.some((f) => f.includes('AG1.pdf')),
       '6. fresh (mid-copy) file skipped this run', s.skipped_recent);
-    check(s.processed.length === 1 && s.processed[0].tenant === 'ZZAG-01'
-      && s.processed[0].file === `${HOUSE_A}/ZZAG-01.pdf`,
-      '1b. PAYBILL folder matched + stored to the ACTIVE tenant', s.processed);
+    check(s.processed.length === 2
+      && s.processed.some((p) => p.file === `${HOUSE_A}/ZZAG-01.pdf` && p.tenant === 'ZZAG-01')
+      && s.processed.some((p) => p.file === `${HOUSE_A}/OV1.pdf` && p.tenant === 'ZZAG-04'),
+      '1b. paybill+code match AND non-ACTIVE (Paid) tenant matched', s.processed);
     check(s.errors.length === 0, `1c. no processing errors (${s.errors.length})`, s.errors);
     // Unmatched outcomes (run 1 did the bulk of them)
     check(s.unmatched.length === 3, `5. unmatched sorted (${s.unmatched.length}/3)`, s.unmatched.map((u) => u.file));
@@ -145,8 +156,11 @@ async function main() {
     check(s.processed.length === 1 && s.processed[0].tenant === 'ZZAG-01'
       && s.processed[0].file === `${HOUSE_A_NAME}/AG1.pdf`,
       '2. processed next run; house-NAME folder matched too', s.processed);
-    check(uploads.length === 2 && uploads.every((u) => u.tenantCode === 'ZZAG-01' && u.head === '%PDF-'),
-      `3. stored into tenant's Agreements (uploads: ${uploads.map((u) => u.originalName).join(', ')})`);
+    check(uploads.length === 3
+      && new Set(uploads.map((u) => u.tenantCode)).has('ZZAG-01')
+      && new Set(uploads.map((u) => u.tenantCode)).has('ZZAG-04')
+      && uploads.every((u) => u.head === '%PDF-'),
+      `3. stored into tenants' Agreements (uploads: ${uploads.map((u) => u.originalName).join(', ')})`);
     const rows = (await query(
       `SELECT filename, uploaded_by FROM tenancy_agreements WHERE tenant_code = 'ZZAG-01' ORDER BY id`
     )).rows;
@@ -172,6 +186,25 @@ async function main() {
     check(fs.existsSync(path.join(ROOT_DIR, '_processed', HOUSE_A_NAME))
       && fs.readdirSync(path.join(ROOT_DIR, '_processed', HOUSE_A_NAME)).some((f) => f.startsWith('AG1') && f !== 'AG1.pdf'),
       '8c. colliding duplicate renamed safely in _processed');
+
+    // ── Concurrency lock: a manual run + the 60s watcher can never overlap
+    // (the pre-lock race double-stored files in production).
+    writePdf(`${HOUSE_A}/ZZAG-04.pdf`); // code-name match for the Paid tenant
+    const uploadsBefore = uploads.length;
+    const [ra, rb] = await Promise.all([
+      inbox.processInbox({ actor: 'tester' }),
+      inbox.processInbox({ actor: 'tester' }),
+    ]);
+    check(ra === rb, '8d. concurrent calls share ONE scan (same summary object)');
+    check(ra.processed.length === 1 && ra.processed[0].file === `${HOUSE_A}/ZZAG-04.pdf`,
+      '8e. file processed exactly once under concurrency', ra.processed);
+    check(uploads.length === uploadsBefore + 1,
+      `8f. exactly ONE store happened (${uploads.length - uploadsBefore})`);
+    const dupCheck = (await query(
+      `SELECT COUNT(*)::int AS n FROM (SELECT 1 FROM tenancy_agreements WHERE tenant_code LIKE 'ZZAG-%'
+        GROUP BY tenant_code, filename HAVING COUNT(*) > 1) x`
+    )).rows[0].n;
+    check(dupCheck === 0, `8g. no duplicate rows ever (${dupCheck})`);
 
     // ── 4. NO sends, ever ──────────────────────────────────────────────────
     check(forbidden.length === 0, `4. WhatsApp NEVER invoked (calls: ${forbidden.length})`);

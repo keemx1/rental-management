@@ -48,9 +48,11 @@ async function findHouse(name) {
 
 async function findActiveTenant(housePaybill, token) {
   const { query } = require('../config/database');
+  // Occupied = anything that is not Vacant (Active, Paid, Overdue,
+  // Partially Paid …) — matching how the dashboard treats occupancy.
   const r = (await query(
     `SELECT tenant_code, name, unit_label FROM tenants
-      WHERE house_paybill_number = $1 AND status = 'Active'
+      WHERE house_paybill_number = $1 AND COALESCE(status, '') <> 'Vacant'
         AND (UPPER(tenant_code) = UPPER($2) OR UPPER(COALESCE(unit_label, '')) = UPPER($2))
       LIMIT 1`,
     [housePaybill, token]
@@ -115,7 +117,7 @@ async function auditUnmatched(file, folder, reason, actor) {
   } catch (_) {}
 }
 
-async function processInbox({ actor } = {}) {
+async function runInboxOnce({ actor } = {}) {
   const root = ROOT();
   ensureDir(root);
   const summary = {
@@ -160,7 +162,9 @@ async function processInbox({ actor } = {}) {
           await auditUnmatched(`${ent.name}/${f}`, ent.name, reason, actor);
           continue;
         }
-        const tenant = await findActiveTenant(house.paybill_number, base);
+        // Exact match first, then space-insensitive ("MB 9.pdf" -> MB9).
+        const tenant = (await findActiveTenant(house.paybill_number, base))
+          || (await findActiveTenant(house.paybill_number, base.replace(/\s+/g, '')));
         if (!tenant) {
           const reason = `No ACTIVE tenant in ${house.house_name} with unit/code "${base}".`;
           const dest = moveFile(full, path.join(root, UNMATCHED, ent.name));
@@ -193,6 +197,15 @@ async function processInbox({ actor } = {}) {
 
   _lastRun = summary;
   return summary;
+}
+
+// Serialised: the 60s watcher and a manual POST /process can NEVER run the
+// scan concurrently (a racing pair double-stored files before the lock).
+let _inflight = null;
+async function processInbox(opts = {}) {
+  if (_inflight) return _inflight;
+  _inflight = runInboxOnce(opts).finally(() => { _inflight = null; });
+  return _inflight;
 }
 
 function startWatcher(intervalMs = 60000) {

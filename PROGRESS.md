@@ -954,6 +954,33 @@ recovers automatically without DevTools. Cache bumped again
 (`gutenberg-v86`, `sw.js?v=85`); heal-script presence asserted.
 
 ---
+### 32. Agreements Inbox: real-world ingestion fixes (occupied-status, lock, dedupe)
+First real batch (4 house folders) surfaced three defects, all fixed:
+
+- **Matcher accepted only status `Active`** — real tenants are `Paid` /
+  `Overdue` / `Partially Paid`, so every file reported "No ACTIVE tenant".
+  Now ANY non-Vacant tenant matches (same occupancy rule as the dashboard),
+  exact match first, then space-insensitive (`MB 9.pdf` -> MB9).
+- **Manual /process could race the 60s watcher** — the concurrent pair
+  double-stored files (96 duplicate rows). `processInbox` is now serialised
+  (in-flight promise reuse): watcher + endpoint always share ONE scan.
+  One-off repair `backend/scripts/fix_agreements_inbox_race.js` removed all
+  duplicate rows (+ their Supabase blobs, audited) and cleared suffix-noise
+  files created by the race.
+- Result on the live batch: **123 agreements stored across 123 tenants,
+  0 duplicates, all source folders emptied** — BLUE 39 · MARIANA 41 ·
+  SUNVIEW 26 · CREAM 16 · EXECUTIVE 1.
+- 5 files remain in `_unmatched` by design (no matching occupied unit):
+  `BLUE HOUSE/28.pdf` (no unit 28), `CREAM HOUSE/102.pdf` (tenant code is
+  `102/104`), `SUNVIEW APARTMENTS/B2.pdf` + `B3.pdf` (no such units),
+  `SUNVIEW APARTMENTS/C9 ..pdf` (stray-dots duplicate of C9).
+- `tests/test_agreements_inbox.js` hardened (27 assertions): non-ACTIVE
+  status regression + concurrency-lock single-store proof.
+
+---
+
+Fixture hygiene: after any test session run `node tests/sweep-fixtures.js --apply` — idempotent purge of every test marker (999979-999999 / ZZ* houses, tenants, landlords, users, audit) with a CLEAN/DIRTY residue check; dry-run mode is read-only.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1004,3 +1031,4 @@ recovers automatically without DevTools. Cache bumped again
 | 29 | Future Tenancy activation: continuous receipt numbering + automatic PDF receipts | v83 |
 | 30 | Agreements Inbox: per-house drop folders, auto-store to tenant Agreements, no sending | backend |
 | 31 | Service worker: ignoreSearch cache fallback (offline styling loss) | v83+sw |
+| 32 | Agreements Inbox: occupied-status match, process lock, race repair (123 stored, 0 dupes) | backend |
