@@ -38,3 +38,7 @@ backend/whatsapp/sessions/
 backend/whatsapp/sessions-*/
 backend/check_tenant.js
 tests/report_samples/
+
+# Agreements inbox drop folders (uploaded PDFs live outside git)
+agreements_inbox/
+agreements_inbox_test/

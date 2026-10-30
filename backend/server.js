@@ -98,6 +98,7 @@ app.use('/api/preexit', require('./routes/preexitInspection'));
 app.use('/api/landlords', require('./routes/landlords'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/agreements-inbox', require('./routes/agreementsInbox'));
 app.use('/api/commissions', require('./routes/commissions'));
 
 app.get('/api/health', healthDetailedAuth, (req, res) => {
@@ -172,6 +173,15 @@ async function bootstrap() {
     });
   }
   tryListen(PORT);
+
+  // Agreements Inbox: watch agreements_inbox/<house>/<unit>.pdf and store
+  // matched files into the tenant's Agreements section (STORE-ONLY — this
+  // watcher never sends anything on WhatsApp).
+  try {
+    require('./services/agreementsInbox').startWatcher();
+  } catch (e) {
+    console.error('[AgreementsInbox] watcher not started:', e.message);
+  }
 
   async function gracefulShutdown(signal) {
     console.log(`\n[Server] ${signal} received — shutting down…`);

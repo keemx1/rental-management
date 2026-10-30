@@ -892,6 +892,42 @@ approval and registration workflows unchanged.
   paths. WhatsApp stubbed. Stamps → `?v=83`, SW → `gutenberg-v84-irmanage`.
 
 ---
+### 30. Agreements Inbox: drop-folder automation, store-only (backend)
+Answers the "automate uploading tenancy agreement PDFs" question with the
+chosen design: **Option 1 (folder watcher) with NO auto-send and per-house
+folders.**
+
+**Folder contract** (the only thing to remember):
+```
+agreements_inbox/
+    <House Name OR Paybill>/        ← e.g. Sunrise Apartments/  or  999979/
+        B2.pdf                      ← filename = unit number or tenant code
+    _processed/<house>/             ← stored files kept here (never re-run)
+    _unmatched/<house>/             ← could not be matched, with audit reason
+```
+- Folder matched case-insensitively against the house NAME or PAYBILL;
+  filename (minus extension) matched to the **ACTIVE** tenant of that house
+  by unit label OR tenant code — strictly house-scoped (a unit from another
+  house lands in `_unmatched`, no cross-house confusion).
+- Matched → stored via the existing per-tenant Agreements pipeline
+  (`uploadAgreement` → private Supabase prefix + `tenancy_agreements` row,
+  `uploaded_by` recorded) — then MOVED to `_processed`. Duplicate filenames
+  are skipped (collision-safe renames). Vacant units / unknown folders /
+  wrong-house files → `_unmatched` with a clear reason + audit entry.
+- **Zero sending**: the service never touches WhatsApp (session manager /
+  document send stubbed-and-asserted absent; zero message_logs). Sharing
+  stays manual from the tenant's Agreements section, exactly as today.
+- Safety: files younger than 3s are skipped (mid-copy), every outcome
+  audited (`agreement_inbox_stored` / `agreement_inbox_unmatched`), watcher
+  polls every 60s (runs once 15s after boot), plus `GET
+  /api/agreements-inbox/status` and admin-triggered `POST
+  /api/agreements-inbox/process`.
+- `agreements_inbox/` gitignored. `tests/test_agreements_inbox.js`
+  (23 assertions) covers both folder-name styles, both filename match
+  routes, house isolation, no-send guarantee, duplicates, moves, audit,
+  mid-copy skip and the endpoints (uploader stubbed — no network).
+
+---
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -940,3 +976,4 @@ approval and registration workflows unchanged.
 | 27 | Overpayment transparency: consolidated credit summary in acknowledgement + tenant dashboard | v82 |
 | 28 | PDF receipts: accumulated overpayment summary section (display only) | backend |
 | 29 | Future Tenancy activation: continuous receipt numbering + automatic PDF receipts | v83 |
+| 30 | Agreements Inbox: per-house drop folders, auto-store to tenant Agreements, no sending | backend |
