@@ -832,6 +832,33 @@ workflow untouched — verified: no approve/receipt/allocation code changed).
   Stamps → `?v=82`, SW → `gutenberg-v83-irmanage`.
 
 ---
+### 28. PDF receipts: ACCUMULATED OVERPAYMENT SUMMARY (no version bump)
+Display-only final correction (receipt numbering, transaction details,
+approval, allocation and advance-rent logic untouched).
+
+- `buildReceiptHtml` gains an optional `creditSummary` (from the existing
+  `getOverpaymentConsolidation`) and renders a clearly labelled section on
+  the PDF receipt — only when the tenant has credit activity:
+  - Previous accumulated overpayment = combined − this receipt's overpayment
+  - Current transaction overpayment = this payment's own overpayment
+  - Total combined overpayment = Σ across the tenant's receipts
+  - Amount already allocated = combined − remaining (TRUE consumed — an
+    allocated credit is never offered again)
+  - Remaining available overpayment = `tenant.credit_balance`
+  - Advance rent coverage line with the paid-up-to date, when set
+- `generateAndStoreReceipt` (fresh receipts, fetched AFTER approval so the
+  figure is the updated cumulative position) and `generateResolutionReceipt`
+  (regenerated receipts) both supply the summary; failures degrade to no
+  section — a receipt can never break.
+- Verified with the BH46 presentation example (1,500 + 7,500 = 9,000;
+  7,500 allocated to advance; 1,500 remaining; paid up to 24 November 2026)
+  and READ-ONLY against real accounts: BH46 (combined 9,000 + advance
+  7,500) and EX001 – Ian Kamau (combined 45,400). `tests/
+  test_receipt_overpayment_summary.js` (18 assertions) covers section
+  presence/absence, spec figures, no double counting, receipt integrity,
+  PDF end-to-end and the real-unit reads.
+
+---
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -878,3 +905,4 @@ workflow untouched — verified: no approve/receipt/allocation code changed).
 | 25 | Central Notification Bar: live alert detection, emergency pulse, deep links, auto-updates, history | v79 |
 | 26 | Minimal dashboard header: bare search input + notification bell with count badge | v80 |
 | 27 | Overpayment transparency: consolidated credit summary in acknowledgement + tenant dashboard | v82 |
+| 28 | PDF receipts: accumulated overpayment summary section (display only) | backend |

@@ -243,7 +243,7 @@ function nextRentDue(tenant, allocation) {
   return `${now.getDate()} ${now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}`;
 }
 
-function buildReceiptHtml(tenant, payment, allocation) {
+function buildReceiptHtml(tenant, payment, allocation, creditSummary = null) {
   const amount = Number(payment?.amount || 0);
   const propertyName = tenant?.linked_house_name || tenant?.property_name || '';
   const housePaybill = tenant?.house_id || tenant?.house_paybill_number || '';
@@ -274,7 +274,47 @@ function buildReceiptHtml(tenant, payment, allocation) {
     remaining_balance: KES(allocation?.remainingBalance ?? 0),
     overpayment: KES(allocation?.overpayment ?? 0),
     next_due: nextRentDue(tenant, allocation),
+    overpayment_summary_html: buildAccumulatedOverpaymentHtml(payment, allocation, creditSummary),
   });
+}
+
+// ACCUMULATED OVERPAYMENT SUMMARY (PDF receipt) — display only, straight
+// from the tenant's actual receipts + allocations:
+//   current overpayment  = this payment's own overpayment (its receipt)
+//   previous accumulated = combined − current
+//   combined             = Σ overpayments across the tenant's receipts
+//   already allocated    = combined − remaining (true consumed amount, so
+//                          allocated credits are never double-counted)
+//   remaining available  = tenant.credit_balance (net of allocations)
+//   advance coverage     = advance_rent_balance + until-date, when set
+function buildAccumulatedOverpaymentHtml(payment, allocation, creditSummary) {
+  try {
+    if (!creditSummary || !creditSummary.has_activity) return '';
+    const combined = Number(creditSummary.total_overpaid || 0);
+    const current = Number(allocation?.overpayment ?? payment?.overpayment_amount ?? 0);
+    if (!(combined > 0) && !(current > 0) && !(Number(creditSummary.advance_rent_balance) > 0)) return '';
+    const remaining = Number(creditSummary.remaining_credit || 0);
+    const previous = Math.max(0, Math.round((combined - current) * 100) / 100);
+    const allocated = Math.max(0, Math.round((combined - remaining) * 100) / 100);
+    const fmt = (v) => KES(v);
+    const advanceLine = Number(creditSummary.advance_rent_balance) > 0
+      ? `<tr><td>Advance rent coverage</td><td class="amt">${fmt(creditSummary.advance_rent_balance)}${creditSummary.advance_rent_until ? ` <span class="cov">paid up to ${escDocText(formatDate(creditSummary.advance_rent_until, { monthFull: true }))}</span>` : ''}</td></tr>`
+      : '';
+    return `
+      <div class="op-summary">
+        <div class="op-title">ACCUMULATED OVERPAYMENT SUMMARY</div>
+        <table class="op-table">
+          <tr><td>Previous accumulated overpayment</td><td class="amt">${fmt(previous)}</td></tr>
+          <tr><td>Current transaction overpayment</td><td class="amt">${fmt(current)}</td></tr>
+          <tr class="tot"><td>Total combined overpayment</td><td class="amt">${fmt(combined)}</td></tr>
+          <tr><td>Amount already allocated</td><td class="amt">${fmt(allocated)}</td></tr>
+          <tr class="tot"><td>Remaining available overpayment</td><td class="amt">${fmt(remaining)}</td></tr>
+          ${advanceLine}
+        </table>
+      </div>`;
+  } catch (_) {
+    return '';
+  }
 }
 
 /**
@@ -283,7 +323,12 @@ function buildReceiptHtml(tenant, payment, allocation) {
  */
 async function generateAndStoreReceipt(tenant, payment, allocation) {
   try {
-    const html = buildReceiptHtml(tenant, payment, allocation);
+    // Cumulative position AFTER this payment's approval/settlement (the
+    // caller persists the payment + credits before requesting the receipt).
+    const creditSummary = await store.getOverpaymentConsolidation(
+      tenant?.tenant_code || tenant?.id
+    ).catch(() => null);
+    const html = buildReceiptHtml(tenant, payment, allocation, creditSummary);
     const filename = receiptDocumentName({
       receiptNo: payment?.receipt_number,
       tenantName: tenant?.name,
@@ -355,7 +400,10 @@ async function generateResolutionReceipt(tenant, payment, resolution) {
   try {
     if (!payment || !tenant) return null;
     const allocation = buildResolutionAllocation(payment, resolution);
-    const html = buildReceiptHtml(tenant, payment, allocation);
+    const creditSummary = await store.getOverpaymentConsolidation(
+      tenant?.tenant_code || tenant?.id
+    ).catch(() => null);
+    const html = buildReceiptHtml(tenant, payment, allocation, creditSummary);
     const filename = receiptDocumentName({
       receiptNo: payment?.receipt_number,
       tenantName: tenant?.name,
