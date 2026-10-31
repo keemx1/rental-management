@@ -18,6 +18,24 @@ router.get('/', async (req, res) => {
   }
 });
 
+router.get('/find-tenant/:housePaybill/:unitLabel', async (req, res) => {
+  try {
+    const tenant = await store.findTenantByPropertyAndUnit(req.params.housePaybill, req.params.unitLabel);
+    if (!tenant) return res.status(404).json({ error: 'No active tenant found for this property and unit' });
+    const full = await store.getTenantInvoiceData(tenant.tenant_code);
+    const integrity = await require('../services/tenantUnitIntegrity')
+      .validateTenantForBilling(tenant.tenant_code, {
+        unit_label: req.params.unitLabel, house_paybill: req.params.housePaybill,
+      });
+    res.json({
+      tenant: { ...tenant, ...full },
+      integrity: { ok: integrity.ok, error: integrity.error || null, warnings: integrity.warnings || [] },
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to find tenant' });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const invoice = await store.getWaterInvoice(req.params.id);
@@ -40,6 +58,36 @@ router.post('/', async (req, res) => {
     if (client_txn_id) {
       const replay = await store.findRecordByClientTxnId('water_invoices', client_txn_id);
       if (replay) return res.json({ water_invoice: replay, already_synced: true });
+    }
+
+    // Tenant–unit integrity validation (diagnostic): refuse structural
+    // mismatches BEFORE generating; warnings are surfaced + audited; an
+    // explicit override (management-approved) proceeds with an audit trail.
+    const validation = await require('../services/tenantUnitIntegrity')
+      .validateTenantForBilling(tenant_code, {
+        unit_label: req.body?.unit_label || req.body?.unit || null,
+        house_paybill: req.body?.house_paybill_number || req.body?.house_paybill || null,
+      });
+    if (!validation.ok && req.body?.override !== true) {
+      return res.status(409).json({
+        error: validation.error.message, code: validation.error.code,
+        integrity: { error: validation.error, warnings: validation.warnings },
+        hint: 'Management may resubmit with override: true after reviewing (audited).',
+      });
+    }
+    if (validation.error && req.body?.override === true) {
+      await store.logAudit({
+        actor: req.user?.username, action: 'water_invoice_integrity_override',
+        entityType: 'tenant', entityId: tenant_code,
+        details: { code: validation.error.code, message: validation.error.message, billing_month },
+      }).catch(() => {});
+    }
+    if (validation.warnings && validation.warnings.length) {
+      await store.logAudit({
+        actor: req.user?.username, action: 'water_invoice_integrity_warning',
+        entityType: 'tenant', entityId: tenant_code,
+        details: { billing_month, warnings: validation.warnings },
+      }).catch(() => {});
     }
 
     const tenant = await store.getTenant(tenant_code);
@@ -120,7 +168,11 @@ router.post('/', async (req, res) => {
       details: { tenant_code, billing_month, total_amount: invoice.total_amount },
     });
 
-    res.status(201).json({ water_invoice: invoice, anomaly: anomaly.level === 'warn' ? anomaly : null });
+    res.status(201).json({
+      water_invoice: invoice,
+      anomaly: anomaly.level === 'warn' ? anomaly : null,
+      integrity: { warnings: validation.warnings || [], overridden: validation.error ? true : false },
+    });
   } catch (err) {
     console.error('[Water Invoice] Create error:', err.message);
     if (err && err.code === '23505' && req.body?.client_txn_id) {
@@ -316,17 +368,6 @@ router.get('/latest-reading/:tenantCode', async (req, res) => {
     res.json({ current_reading: reading });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get latest reading' });
-  }
-});
-
-router.get('/find-tenant/:housePaybill/:unitLabel', async (req, res) => {
-  try {
-    const tenant = await store.findTenantByPropertyAndUnit(req.params.housePaybill, req.params.unitLabel);
-    if (!tenant) return res.status(404).json({ error: 'No active tenant found for this property and unit' });
-    const full = await store.getTenantInvoiceData(tenant.tenant_code);
-    res.json({ tenant: { ...tenant, ...full } });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to find tenant' });
   }
 });
 

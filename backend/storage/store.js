@@ -8996,13 +8996,16 @@ async function buildWaterBillReport({ house_paybill, billing_month, unit = null 
 }
 
 async function findTenantByPropertyAndUnit(housePaybill, unitLabel) {
+  // Occupied = anything not Vacant (Active, Paid, Overdue, Partially Paid…).
+  // The old 'Active, Paid' filter hid occupied tenants (e.g. BH18 was
+  // Partially Paid) from water billing — diagnostic fix only, no records change.
   const res = await query(
     `SELECT t.tenant_code AS id, t.tenant_code, t.name, t.phone_number, t.house_paybill_number AS house_id,
             t.property_name, t.unit_label, t.rent_amount, t.status
      FROM tenants t
      WHERE t.house_paybill_number = $1
        AND (t.unit_label = $2 OR t.tenant_code ILIKE $2)
-       AND t.status IN ('Active', 'Paid')
+       AND COALESCE(t.status, '') <> 'Vacant' AND COALESCE(t.status, '') <> ''
      ORDER BY CASE WHEN t.unit_label = $2 THEN 0 ELSE 1 END
      LIMIT 1`,
     [housePaybill, unitLabel]

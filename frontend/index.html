@@ -4630,6 +4630,24 @@
       </div>
     </div>
 
+    <!-- Unit Integrity Audit (diagnostic, read-only) -->
+    <div class="glass-panel p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <h3 class="font-orbitron text-lg text-white">Unit–Tenant Integrity Audit</h3>
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] font-mono text-slate-500">Read-only diagnostic — nothing is modified</span>
+          <button type="button" id="btn-fin-integrity" class="qc-btn text-xs">Run Audit</button>
+        </div>
+      </div>
+      <div id="fin-integrity-summary" class="hidden grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 text-center text-sm font-mono"></div>
+      <div class="overflow-x-auto">
+        <table class="cyber-table text-xs">
+          <thead><tr><th>Severity</th><th>Property</th><th>Unit</th><th>Occupancy</th><th>Tenant</th><th>Record status</th><th>Reason</th></tr></thead>
+          <tbody id="fin-integrity-tbody"><tr><td colspan="7" class="text-center py-4 text-slate-500">Not run yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Other income inline form -->
     <div id="fin-income-form" class="glass-panel p-4 hidden">
       <h3 class="font-orbitron text-lg text-white mb-3">Record Other Legitimate Income</h3>
@@ -6119,10 +6137,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=85"></script>
+  <script type="module" src="/js/app.js?v=86"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=87').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=88').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

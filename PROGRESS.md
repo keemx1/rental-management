@@ -1021,7 +1021,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **992 assertions across 25 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge any fixture residue from crashed runs).
+Suite totals: **1012 assertions across 26 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge any fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -1070,6 +1070,41 @@ First demo slice of the confirmed financial plan (management decision sheet §6)
   balances, all registers, access control, and history intactness.
   Stamps → `?v=85`, SW → `gutenberg-v88-irmanage`. Journal cleanup uses
   orphan-safe predicates so fixture postings can never touch real books.
+
+---
+### 35. Tenant–Unit integrity audit + water-invoice validation (v86)
+System-wide diagnostic following the BH18 water-billing issue — **read-only,
+management-only, nothing modified**.
+
+- **Root cause of BH18 found**: `findTenantByPropertyAndUnit` only accepted
+  `status IN ('Active','Paid')` — BH18 is **Partially Paid**, so the water
+  flow could not retrieve its tenant and generated no invoices (house 200's
+  other 23 invoices were all Active/Paid units). Fixed to *occupied =
+  anything not Vacant* (includes Overdue / Partially Paid). BH18 lookup now
+  returns HARIET KEMONTU ✓.
+- **System-wide audit** (`GET /api/financial/unit-integrity`, admin-only;
+  `backend/scripts/audit-tenant-unit-integrity.js`; panel in the Financial
+  view): exception list with property, unit, occupancy, tenant name,
+  record status and reason for every mismatch class — occupied-without-
+  identity, missing unit records vs `total_units`, vacant-with-live-money,
+  orphan payments (defense), water invoices at missing/vacant tenants,
+  duplicate unit labels, missing phones, reserved-vs-occupied collisions,
+  and **lookup_failed** (the BH18 class — every occupied named tenant is
+  verified retrievable by the billing lookup). **LIVE RESULT: 10
+  properties, 334 tenants, 0 exceptions — BH18 was the only broken path and
+  it is now fixed; no other unit has the hidden inconsistency.**
+- **Pre-generation validation** (`validateTenantForBilling`): structural
+  problems → 409 with code (TENANT_MISSING / PROPERTY_MISMATCH /
+  UNIT_MISMATCH) + explicit `override: true` path that is **audited**;
+  vacant/anonymous identity → warnings returned + audited; find-tenant
+  response now carries the same integrity flags; healthy units bill
+  unchanged (asserted).
+- `tests/test_unit_integrity.js` (20 assertions): each detection class,
+  read-only proof (record counts identical), BH18-class retrievability,
+  409/override/warning paths, admin-only, healthy flow untouched. Note:
+  the DB's own triggers make orphan/ghost fixtures impossible — those
+  assertions auto-skip (production-safe guards). Stamps → `?v=86`,
+  SW → `gutenberg-v89-irmanage`.
 
 ---
 ## Open items / next
@@ -1125,3 +1160,4 @@ First demo slice of the confirmed financial plan (management decision sheet §6)
 | 32 | Agreements Inbox: occupied-status match, process lock, race repair (123 stored, 0 dupes) | backend |
 | 33 | Deposit refund cancellation, deposit restoration, tenancy reinstatement, unit reassignment | v84 |
 | 34 | Financial Mgmt Phase 1: Arrangement A/B, double-entry journals, obligations tracker, monthly report, registers | v85 |
+| 35 | Tenant–Unit integrity audit + water-invoice validation (BH18 root cause fixed) | v86 |

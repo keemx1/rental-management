@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v85';
+const GEHM_VERSION = 'v86';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -5074,8 +5074,40 @@ async function saveOtherIncome() {
   } catch (err) { document.getElementById('fi-result').textContent = err.message; }
 }
 
+async function loadUnitIntegrity() {
+  const tbody = document.getElementById('fin-integrity-tbody');
+  const sum = document.getElementById('fin-integrity-summary');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-slate-500">Running audit…</td></tr>';
+  try {
+    const audit = await api.finUnitIntegrity();
+    sum.classList.remove('hidden');
+    sum.innerHTML = `
+      <div class="bg-slate-800/50 rounded p-2"><div class="text-[10px] uppercase text-slate-400">Properties</div><div class="font-bold">${audit.summary.properties_checked}</div></div>
+      <div class="bg-slate-800/50 rounded p-2"><div class="text-[10px] uppercase text-slate-400">Tenants</div><div class="font-bold">${audit.summary.tenants_checked}</div></div>
+      <div class="bg-slate-800/50 rounded p-2"><div class="text-[10px] uppercase text-slate-400">Errors</div><div class="font-bold text-rose-400">${audit.summary.errors}</div></div>
+      <div class="bg-slate-800/50 rounded p-2"><div class="text-[10px] uppercase text-slate-400">Warnings</div><div class="font-bold text-amber-300">${audit.summary.warnings}</div></div>`;
+    if (!audit.exceptions.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center py-5 text-emerald-400 font-mono">✓ All units consistent — no exceptions found.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = audit.exceptions.map((e) => `<tr class="border-b border-slate-800 ${e.severity === 'error' ? 'bg-rose-950/20' : ''}">
+      <td class="text-[10px] uppercase font-bold ${e.severity === 'error' ? 'text-rose-400' : 'text-amber-300'}">${escapeHtml(e.severity)}</td>
+      <td class="text-xs">${escapeHtml(e.property || '—')}</td>
+      <td class="font-mono text-xs">${escapeHtml(String(e.unit))}</td>
+      <td class="text-xs">${escapeHtml(e.occupancy || '—')}</td>
+      <td class="text-xs">${escapeHtml(e.tenant_name || '(none)')}</td>
+      <td class="text-xs">${escapeHtml(e.tenancy_status || '—')}</td>
+      <td class="text-[11px] text-slate-300">${escapeHtml(e.reason)}</td>
+    </tr>`).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-5 text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
 // Wiring
 document.getElementById('btn-fin-refresh-ob')?.addEventListener('click', loadObligations);
+document.getElementById('btn-fin-integrity')?.addEventListener('click', loadUnitIntegrity);
 document.getElementById('btn-fin-generate')?.addEventListener('click', loadFinancialReport);
 document.getElementById('btn-fin-pdf')?.addEventListener('click', () => downloadFinancial('pdf'));
 document.getElementById('btn-fin-excel')?.addEventListener('click', () => downloadFinancial('excel'));

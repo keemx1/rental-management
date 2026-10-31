@@ -372,6 +372,9 @@ export const api = {
   finOtherIncome(body) {
     return request('/financial/other-income', { method: 'POST', body: JSON.stringify(body) });
   },
+  finUnitIntegrity() {
+    return request('/financial/unit-integrity');
+  },
   getNotifications() {
     return request('/notifications');
   },

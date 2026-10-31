@@ -346,4 +346,14 @@ router.put('/arrangements', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── System-wide tenant–unit integrity audit (diagnostic, read-only) ───────
+router.get('/unit-integrity', async (req, res) => {
+  try {
+    const audit = await require('../services/tenantUnitIntegrity').unitIntegrityAudit();
+    res.json(audit);
+  } catch (err) {
+    res.status(500).json({ error: 'Integrity audit failed: ' + err.message });
+  }
+});
+
 module.exports = router;
