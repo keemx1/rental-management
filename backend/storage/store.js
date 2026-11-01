@@ -5942,7 +5942,12 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
       balance, status, payment_mode: paymentMode,
     });
 
-    statusCounts[status] = (statusCounts[status] || 0) + 1;
+    // Status-count key normalisation: the unit row displays 'PARTIALLY PAID'
+    // (space) but the counters are keyed PARTIALLY_PAID (underscore) — before
+    // this mapping, partially-paid units were never counted in occupied_units
+    // (the "44 total / 40 occupied" Executive Summary bug).
+    const statusKey = status === 'PARTIALLY PAID' ? 'PARTIALLY_PAID' : status;
+    statusCounts[statusKey] = (statusCounts[statusKey] || 0) + 1;
     totalRentDue += rentDue;
     totalRentPaid += totalPaid;
     totalDepositCollected += depositPaid;
@@ -6004,8 +6009,16 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
   const totalPenaltiesPending = penRes.rows.filter(p => p.status === 'Pending').reduce((s, p) => s + Number(p.amount || 0), 0);
   const totalPenaltiesPaid = penRes.rows.filter(p => p.status === 'Paid').reduce((s, p) => s + Number(p.amount || 0), 0);
 
+  let configuredUnits = null;
+  if (housePaybill) {
+    try {
+      const hh = (await query(`SELECT total_units FROM houses WHERE paybill_number = $1`, [housePaybill])).rows[0];
+      configuredUnits = hh ? Number(hh.total_units || 0) : null;
+    } catch (_) {}
+  }
   const summary = {
     total_units: totalUnits, occupied_units: statusCounts.CLEARED + statusCounts.PARTIALLY_PAID + statusCounts.UNPAID + statusCounts.OVERPAYMENT,
+    configured_units: configuredUnits,
     vacant_units: statusCounts.VACANT, booked_units: statusCounts.BOOKED,
     paid_units: statusCounts.CLEARED, partially_paid_units: statusCounts.PARTIALLY_PAID,
     unpaid_units: statusCounts.UNPAID, overpayment_units: statusCounts.OVERPAYMENT,

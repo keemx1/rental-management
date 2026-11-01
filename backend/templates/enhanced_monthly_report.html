@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+    body { font-family: 'Roboto', sans-serif; margin: 0; padding: 18px; color: #333; background: #fff; font-size: 11px; }
+    .header { display: flex; align-items: center; margin-bottom: 8px; }
+    .header img { width: 86px; max-width: 86px; object-fit: contain; }
+    .header-content { flex: 1; text-align: center; padding-left: 14px; }
+    .company-title { font-size: 16px; font-weight: 700; color: #1a4b8c; margin: 0 0 2px 0; }
+    .company-slogan { font-size: 9px; font-style: italic; color: #666; margin: 0 0 2px 0; }
+    .company-details { font-size: 9px; color: #555; }
+    .separator-bar { height: 3px; background: #e31837; width: 100%; margin: 8px 0; position: relative; }
+    .separator-bar::after { content: ''; position: absolute; top: 3px; left: 30%; right: 0; height: 3px; background: #111; }
+    .doc-title { font-size: 14px; font-weight: 700; color: #1a4b8c; text-align: center; margin: 4px 0 2px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .doc-sub { font-size: 10px; text-align: center; color: #555; margin-bottom: 8px; }
+    .meta-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .meta-box { flex: 1; min-width: 110px; border: 1px solid #d7dee8; border-radius: 5px; padding: 5px 8px; }
+    .meta-box .label { font-size: 8px; font-weight: 700; color: #1a4b8c; letter-spacing: 0.4px; text-transform: uppercase; }
+    .meta-box .value { font-size: 12px; font-weight: 700; color: #111; }
+    .meta-box.warn .value { color: #cc0000; font-size: 10px; }
+    .integrity-note { border: 1px solid #fca5a5; background: #fef2f2; color: #991b1b; border-radius: 5px; padding: 6px 8px; font-size: 9px; font-weight: 700; margin-bottom: 8px; }
+    .sec-title { font-size: 11px; font-weight: 700; color: #1a4b8c; margin: 10px 0 4px 0; text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 2px solid #1a4b8c; padding-bottom: 2px; }
+    table.report { width: 100%; border-collapse: collapse; font-size: 8px; }
+    table.report th { background: #1a4b8c; color: #fff; padding: 4px 3px; text-align: left; font-size: 7.5px; letter-spacing: 0.2px; white-space: nowrap; }
+    table.report th.num, table.report td.num { text-align: right; }
+    table.report td { padding: 3px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    table.report tr.vacant td { background: #f8fafc; color: #64748b; font-style: italic; }
+    table.report tr.booked td { background: #eef2ff; color: #6366f1; font-style: italic; }
+    table.report tr.totals td { font-weight: 700; background: #f1f5f9; border-top: 2px solid #1a4b8c; font-size: 8.5px; }
+    .st { font-weight: 700; }
+    .st-cleared { color: #16a34a; }
+    .st-partial { color: #d97706; }
+    .st-unpaid { color: #dc2626; }
+    .st-over { color: #2563eb; }
+    .footer-bar { height: 3px; background: #e31837; width: 100%; margin: 12px 0 5px 0; position: relative; }
+    .footer-bar::after { content: ''; position: absolute; top: 3px; left: 30%; right: 0; height: 3px; background: #111; }
+    .footer-note { font-size: 8px; color: #777; text-align: center; }
+    .empty-note { text-align: center; color: #94a3b8; font-style: italic; padding: 8px; }
+    @media print { body { padding: 10px; } .report { page-break-inside: auto; } tr { page-break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="{{logo_base64}}" alt="GEHPM">
+    <div class="header-content">
+      <div class="company-title">GEHPM PROPERTY MANAGEMENT</div>
+      <div class="company-slogan">Professional property management &mdash; transparency you can trust</div>
+      <div class="company-details">Paybill 247247 &bull; support@gehpm.co.ke &bull; Nairobi, Kenya</div>
+    </div>
+  </div>
+  <div class="separator-bar"></div>
+
+  <div class="doc-title">Enhanced Monthly Report</div>
+  <div class="doc-sub">{{month_label}}{{property_label}}</div>
+
+  <div class="meta-row">
+    <div class="meta-box"><div class="label">Total units (records)</div><div class="value">{{total_units}}</div></div>
+    <div class="meta-box"><div class="label">Occupied</div><div class="value">{{occupied_units}}</div></div>
+    <div class="meta-box"><div class="label">Vacant</div><div class="value">{{vacant_units}}</div></div>
+    <div class="meta-box"><div class="label">Booked / Reserved</div><div class="value">{{booked_units}}</div></div>
+    <div class="meta-box"><div class="label">Occupancy %</div><div class="value">{{occupancy_pct}}</div></div>
+    <div class="meta-box"><div class="label">Generated</div><div class="value">{{generated_date}}</div></div>
+  </div>
+
+  {{integrity_note}}
+
+  <div class="sec-title">Executive Summary</div>
+  <div class="meta-row">
+    <div class="meta-box"><div class="label">Rent expected</div><div class="value">KES {{rent_expected}}</div></div>
+    <div class="meta-box"><div class="label">Rent collected</div><div class="value">KES {{rent_collected}}</div></div>
+    <div class="meta-box"><div class="label">Rent outstanding</div><div class="value">KES {{rent_outstanding}}</div></div>
+    <div class="meta-box"><div class="label">Rent collection %</div><div class="value">{{rent_collection_pct}}</div></div>
+  </div>
+  <div class="meta-row">
+    <div class="meta-box"><div class="label">Water billed</div><div class="value">KES {{water_billed}}</div></div>
+    <div class="meta-box"><div class="label">Water collected</div><div class="value">KES {{water_collected}}</div></div>
+    <div class="meta-box"><div class="label">Gross collected</div><div class="value">KES {{gross_collected}}</div></div>
+    <div class="meta-box"><div class="label">Commission</div><div class="value">KES {{commission_total}}</div></div>
+    <div class="meta-box"><div class="label">Work expenses</div><div class="value">KES {{work_expenses}}</div></div>
+    <div class="meta-box"><div class="label">Net income</div><div class="value">KES {{net_income}}</div></div>
+  </div>
+
+  <div class="sec-title">Unit-by-Unit Detail</div>
+  <table class="report">
+    <thead>
+      <tr>
+        <th>Unit</th><th>Tenant</th><th>Tel</th>
+        <th class="num">Deposit</th><th class="num">Water</th><th class="num">Penalty</th>
+        <th class="num">Monthly Rent</th><th class="num">Bal B/F</th>
+        <th class="num">Rent Due</th><th class="num">Rent Paid</th>
+        <th>Receipt No</th><th>Transaction Ref</th><th>Pay Date</th>
+        <th class="num">Balance</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>{{units_rows_html}}</tbody>
+    <tfoot>{{units_totals_html}}</tfoot>
+  </table>
+
+  <div class="sec-title">Work &amp; Maintenance Summary</div>
+  <table class="report">
+    <thead>
+      <tr><th>WO No</th><th>Unit</th><th>Tenant</th><th>Problem</th><th>Work Done</th><th class="num">Material</th><th class="num">Labour</th><th class="num">Total Cost</th><th>Responsible</th><th class="num">Recovered</th><th>Status</th></tr>
+    </thead>
+    <tbody>{{work_rows_html}}</tbody>
+    <tfoot>{{work_totals_html}}</tfoot>
+  </table>
+
+  <div class="footer-bar"></div>
+  <div class="footer-note">Generated by {{generated_by}} &bull; {{generated_time}} &bull; Figures match the Enhanced Monthly Report Excel workbook for the same period.</div>
+</body>
+</html>

@@ -3,7 +3,7 @@
 Living record of every update applied to this repository
 (`origin → https://github.com/keemx1/rental-management`, branch `main`).
 
-**Last updated:** 2026-10-25 · app version `v70` · SW cache `gutenberg-v71-irmanage`
+**Last updated:** 2026-11-01 - app version `v87` - SW cache `gutenberg-v90-irmanage`
 
 ---
 
@@ -41,6 +41,7 @@ Run from the repo root (server must be up on port `3003`):
 | Landlord ledger dashboard | `node tests/test_landlord_ledger.js` | 33 assertions — spec example exact (100k−5k−2k=93k, pay 80k→13k month row, second partial→8k), carry-forward 55.5k, two balances never offset, per-property isolation, agreed day + next due, both statements PDFs, invoice share via WhatsApp pipeline, guards, overview remittance totals |
 | Landlord accounts enhancement | `node tests/test_landlord_accounts.js` | 35 assertions — all 10 acceptance points: rollover-first, MFI invoice + agreed due date, net calc 93k, Pending≠paid (verified-only balances, 403 for non-admin verify), carry-forward once, reconciliation mismatch flagged + finalize gate + reopen, false-payment reversal + restricted audit, statement versions v1/v2, transfer proof/recipient snapshots, dashboard separate totals + overdue + reviews |
 | Central notification bar | `node tests/test_notifications.js` | 28 assertions — emergency activation for critical/overdue, per-priority counts, deep links to exact records, viewing never resolves, dedupe (one Open row), partial payment updates amount only, auto-resolve on clearance, unrelated alerts survive, history with resolution, reopen, critical→review downgrade, read-only vs ledger, operator read access, bar/modal/pulse CSS/polling served |
+| Enhanced monthly report | `node tests/test_enhanced_monthly_report.js` | 65 assertions - Executive Summary occupancy accuracy (occupied = all non-Vacant records; Total = Occupied + Vacant + Booked; configured-vs-records mismatch surfaced, never forced), live Excel formulas (Rent Due =SUM(Dn:Hn), Balance =In-Jn, totals =SUM over the DYNAMIC per-property range), deposit/water totals from unit records, auto-fit layout pass (widths, wrap, A4 landscape), PDF twin endpoint (same data source, landscape, attachment), PDF button + API wiring, Blue House 44/44/0 verified live |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -1021,7 +1022,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1012 assertions across 26 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge any fixture residue from crashed runs).
+Suite totals: **1077 assertions across 27 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -1114,6 +1115,62 @@ management-only, nothing modified**.
   elevated `taskkill` via UAC (`Start-Process -Verb RunAs`; the operator
   approves the prompt once). Manual equivalent: `restart-server.bat` as
   administrator.
+
+---
+
+### 36. Enhanced Monthly Report: occupancy accuracy, live formulas, PDF twin (v87)
+Same request (sent three times) completed in full:
+
+- **Executive Summary occupancy accuracy (the "44 total / 40 occupied / 0
+  vacant" Blue House bug - root-caused)**: unit statuses are displayed as
+  'PARTIALLY PAID' (space) but the status counters were keyed
+  `PARTIALLY_PAID` (underscore) - every partially-paid unit was silently
+  excluded from `occupied_units`. Fixed at the source in
+  `buildEnhancedMonthlyReport` (key normalisation); occupied = ALL non-Vacant
+  records, vacant = Vacant records, Booked = RESERVED future tenancies,
+  Total = Occupied + Vacant + Booked (internal consistency validated).
+  **Live verification: BLUE HOUSE 44 total / 44 occupied / 0 vacant** (28
+  CLEARED + 4 PARTIALLY PAID + 7 UNPAID + 5 OVERPAYMENT).
+- **Configured-vs-records mismatch surfaced, never forced**: summary now
+  carries `configured_units`; when a property's configured `total_units`
+  differs from actual unit records, the Executive Summary shows a warning
+  row (configured vs records - investigate, see Unit Integrity Audit)
+  instead of silently forcing figures. Booked/reserved units get their own
+  KPI row.
+- **Live Excel formulas (per-property, dynamic)**: Rent Due `=SUM(Dn:Hn)`,
+  Balance `=In-Jn` on every unit row; totals row = `=SUM(colFirst:colLast)`
+  over the actual data range (differs per property; falls back to plain
+  numbers when a property has no rows). Deposit and water totals come from
+  the unit records via those SUM formulas (e.g. deposit total 5,000, water
+  total 1,500 in fixtures). Cached results preserved (ExcelJS drops zero
+  results on round-trip - handled).
+- **Auto-formatting on every sheet (all properties)**: the Enhanced sheet
+  now runs the `finishSheet` layout pass (auto-fit widths, wrap, auto row
+  heights, money number formats, A4 landscape, fit-to-page) AFTER all
+  sections are written; repeating title rows 1:3 preserved; fixed columns
+  no longer squeeze long names/refs.
+- **PDF twin endpoint + button**: `POST /api/monthly-reports/:month/enhanced/pdf`
+  renders the same `buildEnhancedMonthlyReport` + `deriveFigures` data via
+  puppeteer (A4 landscape, 15-column unit table, exec summary tiles, work
+  summary, integrity note) - figures always match the Excel workbook for
+  the same period/property. `Download PDF` button beside Download Excel
+  (index.html + app.js + api.js `downloadEnhancedMonthlyReportPdf`).
+- **Dead styling fixed**: the PARTIALLY-PAID amber styling compared
+  'PARTIALLY_PAID' (underscore) in both the Excel generator and the FE
+  enhanced table - never matched the emitted 'PARTIALLY PAID'. Fixed in
+  both.
+- `tests/test_enhanced_monthly_report.js` (65 assertions): mixed-status
+  multi-property fixtures (occupied/vacant/booked math, configured-mismatch
+  warning, formula strings + dynamic ranges per property, deposit/water
+  totals from records, auto-fit/wrap/landscape, PDF magic + landscape,
+  exec-sheet figures, FE wiring).
+- Suites made calendar-robust (pre-existing day-1 boundary bugs, not
+  regressions): agreed-day-of-month overdue cannot fire on the 1st of a
+  month by design - `test_financial_phase1` (8g), `test_landlord_accounts`
+  (9d, fixture day now dynamic 'yesterday'), `test_notifications` (overdue
+  lifecycle sections skip honestly on day 1).
+- **All 27 suites green (1,077 assertions)**. Stamps -> `?v=87`, SW ->
+  `gutenberg-v90-irmanage`.
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on

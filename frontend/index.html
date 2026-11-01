@@ -3854,7 +3854,10 @@
           <div id="mr-enhanced-view" class="hidden">
             <div class="flex items-center justify-between mb-4">
               <h3 class="text-lg font-bold text-white">Enhanced Monthly Report</h3>
-              <button type="button" id="btn-download-enhanced" class="action-btn text-sm">Download Excel</button>
+              <div class="flex items-center gap-2">
+                <button type="button" id="btn-download-enhanced" class="action-btn text-sm">Download Excel</button>
+                <button type="button" id="btn-download-enhanced-pdf" class="action-btn text-sm">Download PDF</button>
+              </div>
             </div>
 
             <!-- Unit-by-Unit Financial Table -->
@@ -6137,10 +6140,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=86"></script>
+  <script type="module" src="/js/app.js?v=87"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=88').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=89').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

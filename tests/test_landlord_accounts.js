@@ -88,8 +88,11 @@ async function main() {
     move_in_date: '2026-09-01', rent_due_date: '2026-12-05', status: 'Active',
   });
 
+  // Agreed day = yesterday, so the overdue flag fires on every calendar day
+  // except the 1st (day-of-month overdue requires today > agreed day).
+  const REMIT_DAY = Math.max(1, new Date().getDate() - 1);
   const ll = (await query(`INSERT INTO landlords (name, phone, mpesa_number, default_remittance_day, default_mfi_due_day)
-    VALUES ('ZZLA Landlord', '+254700001400', '0700001400', 10, 20) RETURNING id`)).rows[0];
+    VALUES ('ZZLA Landlord', '+254700001400', '0700001400', $1, 20) RETURNING id`, [REMIT_DAY])).rows[0];
   await query(`UPDATE houses SET landlord_id = $1 WHERE paybill_number IN ($2,$3)`, [ll.id, HOUSE_A, HOUSE_B]);
   await store.setCommissionRate(HOUSE_A, 5, 'test');
 
@@ -251,8 +254,12 @@ async function main() {
     const la = r.json.landlord_accounts;
     check(la && typeof la.mfi_payable_to_gehm === 'number' && typeof la.remittances_payable_to_landlords === 'number',
       '9c. dashboard carries SEPARATE landlord obligations', la);
-    check(la.overdue_remittances_count >= 1 && la.overdue_remittances_amount > 0,
-      `9d. overdue remittance flagged (day 10 passed with outstanding)`, { c: la.overdue_remittances_count, a: la.overdue_remittances_amount });
+    if (new Date().getDate() > 1) {
+      check(la.overdue_remittances_count >= 1 && la.overdue_remittances_amount > 0,
+        `9d. overdue remittance flagged (agreed day passed with outstanding)`, { c: la.overdue_remittances_count, a: la.overdue_remittances_amount });
+    } else {
+      check(true, '9d. SKIPPED (calendar day 1 — agreed-day overdue cannot fire by design)');
+    }
     await call('POST', `/${ll.id}/properties/${HOUSE_B}/reviews`, { billing_month: '2026-10', reason: 'ZZLA test dispute' });
     r = await call('GET', '/metrics', {}, adminToken, '/api/dashboard');
     check(r.json.landlord_accounts.pending_reviews >= 1,

@@ -1192,6 +1192,9 @@ export const api = {
   downloadEnhancedMonthlyReport(month, housePaybill) {
     return blobRequest(`/monthly-reports/${encodeURIComponent(month)}/enhanced/excel`, { house_paybill: housePaybill || null });
   },
+  downloadEnhancedMonthlyReportPdf(month, housePaybill) {
+    return blobRequest(`/monthly-reports/${encodeURIComponent(month)}/enhanced/pdf`, { house_paybill: housePaybill || null });
+  },
   getWaterBillReport({ house_paybill, billing_month, unit } = {}) {
     const qs = new URLSearchParams({ ...(house_paybill ? { house_paybill } : {}), ...(billing_month ? { billing_month } : {}), ...(unit ? { unit } : {}) }).toString();
     return request(`/monthly-reports/water/report${qs ? `?${qs}` : ''}`);

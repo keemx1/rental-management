@@ -1109,6 +1109,139 @@ async function generateWaterBillReportPdf(report, actor) {
   }
 }
 
+// ─── Enhanced Monthly Report PDF (twin of the Excel workbook) ────────────────
+// Same data source (buildEnhancedMonthlyReport + deriveFigures), so figures
+// always match the Excel download for the same period/property.
+
+function buildEnhancedMonthlyReportHtml(data, f, meta = {}) {
+  const fmt = (n) => KESNum(n);
+  const pctLabel = (x) => (Number(x || 0) * 100).toFixed(1) + '%';
+
+  const statusCell = (status) => {
+    const cls = status === 'CLEARED' ? 'st-cleared'
+      : status === 'PARTIALLY PAID' ? 'st-partial'
+      : status === 'UNPAID' ? 'st-unpaid'
+      : status === 'OVERPAYMENT' ? 'st-over' : '';
+    return `<span class="st ${cls}">${esc(status || '')}</span>`;
+  };
+
+  const unitsRows = (data.units || []).map((u) => {
+    const rowCls = u.status === 'VACANT' ? 'vacant' : u.status === 'BOOKED' ? 'booked' : '';
+    const tenantName = u.status === 'VACANT' ? '<em>&mdash; VACANT &mdash;</em>' : esc(u.tenant_name || '');
+    return `<tr class="${rowCls}">`
+      + `<td><strong>${esc(u.unit_number || '')}</strong></td>`
+      + `<td>${tenantName}</td>`
+      + `<td>${esc(u.telephone || '')}</td>`
+      + `<td class="num">${fmt(u.deposit)}</td>`
+      + `<td class="num">${fmt(u.water)}</td>`
+      + `<td class="num">${fmt(u.penalty)}</td>`
+      + `<td class="num">${fmt(u.monthly_rent)}</td>`
+      + `<td class="num">${fmt(u.balance_bf)}</td>`
+      + `<td class="num">${fmt(u.rent_due)}</td>`
+      + `<td class="num">${fmt(u.rent_paid)}</td>`
+      + `<td>${esc(u.receipt_no || '')}</td>`
+      + `<td>${esc(u.transaction_ref || '')}</td>`
+      + `<td>${esc(u.payment_date || '')}</td>`
+      + `<td class="num">${fmt(u.balance)}</td>`
+      + `<td>${statusCell(u.status)}</td>`
+      + `</tr>`;
+  }).join('') || '<tr><td colspan="15" class="empty-note">No unit records for this period.</td></tr>';
+
+  const sum = (key) => (data.units || []).reduce((s, u) => s + Number(u[key] || 0), 0);
+  const unitsTotals = `<tr class="totals">`
+    + `<td colspan="3">TOTALS (${(data.units || []).length} units)</td>`
+    + `<td class="num">${fmt(sum('deposit'))}</td>`
+    + `<td class="num">${fmt(sum('water'))}</td>`
+    + `<td class="num">${fmt(sum('penalty'))}</td>`
+    + `<td class="num">${fmt(sum('monthly_rent'))}</td>`
+    + `<td class="num">${fmt(sum('balance_bf'))}</td>`
+    + `<td class="num">${fmt(sum('rent_due'))}</td>`
+    + `<td class="num">${fmt(sum('rent_paid'))}</td>`
+    + `<td colspan="3"></td>`
+    + `<td class="num">${fmt(sum('balance'))}</td>`
+    + `<td></td>`
+    + `</tr>`;
+
+  const workRows = (data.work_summary || []).map((w) => `
+    <tr>
+      <td>${esc(w.wo_number || '')}</td>
+      <td>${esc(w.unit || '')}</td>
+      <td>${esc(w.tenant || '')}</td>
+      <td>${esc(w.problem || '')}</td>
+      <td>${esc(w.work_done || '')}</td>
+      <td class="num">${fmt(w.material_cost)}</td>
+      <td class="num">${fmt(w.labour_cost)}</td>
+      <td class="num">${fmt(w.total_cost)}</td>
+      <td>${esc(w.responsible_party || '')}</td>
+      <td class="num">${fmt(w.amount_recovered)}</td>
+      <td>${esc(w.status || '')}</td>
+    </tr>`).join('') || '<tr><td colspan="11" class="empty-note">No work orders for this period.</td></tr>';
+  const workList = data.work_summary || [];
+  const workTotals = workList.length ? `<tr class="totals">`
+    + `<td colspan="5">TOTAL</td>`
+    + `<td class="num">${fmt(workList.reduce((s, w) => s + Number(w.material_cost || 0), 0))}</td>`
+    + `<td class="num">${fmt(workList.reduce((s, w) => s + Number(w.labour_cost || 0), 0))}</td>`
+    + `<td class="num">${fmt(workList.reduce((s, w) => s + Number(w.total_cost || 0), 0))}</td>`
+    + `<td colspan="2"></td>`
+    + `<td class="num">${fmt(workList.reduce((s, w) => s + Number(w.amount_recovered || 0), 0))}</td>`
+    + `<td></td>`
+    + `</tr>` : '';
+
+  // Unit-record vs configured-units mismatch (single-property runs only) —
+  // surfaces instead of silently showing inconsistent occupancy.
+  const s = data.summary || {};
+  let integrityNote = '';
+  if (s.configured_units != null && Number(s.configured_units) !== Number(s.total_units || 0)) {
+    integrityNote = `<div class="integrity-note">&#9888; Unit records vs configured: ${Number(s.total_units || 0)} records vs ${Number(s.configured_units)} configured units &mdash; investigate (see Unit Integrity Audit).</div>`;
+  }
+
+  const generated = new Date(data.generated_at || Date.now());
+  const generatedDate = `${String(generated.getDate()).padStart(2, '0')} ${generated.toLocaleString('en-US', { month: 'long' })} ${generated.getFullYear()}`;
+
+  return renderTemplate('enhanced_monthly_report.html', {
+    month_label: meta.monthLabel || data.period || '',
+    property_label: meta.propertyLabel || '',
+    total_units: s.total_units ?? 0,
+    occupied_units: s.occupied_units ?? 0,
+    vacant_units: s.vacant_units ?? 0,
+    booked_units: s.booked_units ?? 0,
+    occupancy_pct: pctLabel(f.occupancy),
+    integrity_note: integrityNote,
+    rent_expected: fmt(f.rentExpected),
+    rent_collected: fmt(f.rentCollected),
+    rent_outstanding: fmt(f.outstanding),
+    rent_collection_pct: pctLabel(f.rentCollection),
+    water_billed: fmt(f.waterBilled),
+    water_collected: fmt(f.waterCollected),
+    gross_collected: fmt(f.gross),
+    commission_total: fmt(f.commissionTotal),
+    work_expenses: fmt(f.woExpenses),
+    net_income: fmt(f.net),
+    units_rows_html: unitsRows,
+    units_totals_html: unitsTotals,
+    work_rows_html: workRows,
+    work_totals_html: workTotals,
+    generated_date: generatedDate,
+    generated_by: esc(meta.actor || 'system'),
+    generated_time: generated.toLocaleString('en-KE'),
+  });
+}
+
+async function generateEnhancedMonthlyReportPdf(data, f, meta = {}) {
+  try {
+    const safe = (s) => String(s || 'All_Properties').replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 40);
+    const filename = `ENHANCED-MONTHLY-REPORT-${data.period || ''}-${safe(data.property_name)}.pdf`;
+    ensureDir();
+    const html = buildEnhancedMonthlyReportHtml(data, f, meta);
+    // 15-column unit table: landscape keeps every column readable.
+    const pdfPath = await generatePdfToFile(html, DOCUMENTS_DIR, filename, { landscape: true });
+    return { file_path: pdfPath, filename };
+  } catch (err) {
+    console.error('[Documents] Enhanced monthly report PDF generation failed:', err.message);
+    return null;
+  }
+}
+
 function parseItems(value) {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -2435,6 +2568,7 @@ module.exports = {
   generateMonthlyFinancialReportPdf,
   buildWaterBillReportHtml,
   generateWaterBillReportPdf,
+  generateEnhancedMonthlyReportPdf,
   buildLetterHtml,
   generateLetterPdfFile,
   applyWatermark,

@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
-const GEHM_VERSION = 'v86';
+const GEHM_VERSION = 'v87';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -12576,6 +12576,16 @@ document.getElementById('btn-download-enhanced')?.addEventListener('click', asyn
   } catch (err) { alert(err.message); }
 });
 
+document.getElementById('btn-download-enhanced-pdf')?.addEventListener('click', async () => {
+  const month = document.getElementById('mr-month-select')?.value;
+  const housePaybill = document.getElementById('mr-property-select')?.value || '';
+  if (!month) return;
+  try {
+    const result = await api.downloadEnhancedMonthlyReportPdf(month, housePaybill || undefined);
+    if (result.blob) triggerFileDownload(result);
+  } catch (err) { alert(err.message); }
+});
+
 async function loadEnhancedReport(month) {
   const standardView = document.getElementById('mr-report-view');
   const enhancedView = document.getElementById('mr-enhanced-view');
@@ -12595,7 +12605,7 @@ async function loadEnhancedReport(month) {
     const unitTfoot = document.getElementById('er-unit-tfoot');
     const units = report.units || [];
     unitTbody.innerHTML = units.length ? units.map(u => {
-      const statusClass = u.status === 'CLEARED' ? 'text-green-400' : u.status === 'PARTIALLY_PAID' ? 'text-amber-400' : u.status === 'UNPAID' ? 'text-red-400' : u.status === 'OVERPAYMENT' ? 'text-blue-400' : 'text-slate-500';
+      const statusClass = u.status === 'CLEARED' ? 'text-green-400' : u.status === 'PARTIALLY PAID' ? 'text-amber-400' : u.status === 'UNPAID' ? 'text-red-400' : u.status === 'OVERPAYMENT' ? 'text-blue-400' : 'text-slate-500';
       const rowBg = u.status === 'VACANT' || u.status === 'BOOKED' ? 'opacity-50' : '';
       return `<tr class="${rowBg}">
         <td class="font-mono">${escapeHtml(u.unit_number || '')}</td>

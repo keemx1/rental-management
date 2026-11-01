@@ -187,6 +187,11 @@ router.post('/:month/enhanced/excel', async (req, res) => {
     hdr.height = 20;
     hdr.eachCell(c => { c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
 
+    // Data rows with LIVE Excel formulas: Monthly Rent Due = SUM(rent
+    // components), Balance = Rent Due − Rent Paid. Ranges are dynamic per
+    // property (first data row 7 → last populated row).
+    const firstDataRow = 7;
+    let lastDataRow = firstDataRow - 1;
     for (const u of data.units) {
       const r = ws.addRow([
         u.unit_number, u.tenant_name, u.telephone,
@@ -195,27 +200,40 @@ router.post('/:month/enhanced/excel', async (req, res) => {
         u.rent_paid || null, u.receipt_no, u.transaction_ref,
         u.payment_date || '', u.balance || null, u.status,
       ]);
+      lastDataRow = r.number;
+      const n = r.number;
+      r.getCell(9).value = { formula: `SUM(D${n}:H${n})`, result: Number(u.rent_due || 0) };
+      r.getCell(9).numFmt = '#,##0.##';
+      r.getCell(14).value = { formula: `I${n}-J${n}`, result: Number(u.balance || 0) };
+      r.getCell(14).numFmt = '#,##0.##';
       r.eachCell(c => { c.font = { size: 9 }; c.alignment = { vertical: 'middle' }; });
       const sc = r.getCell(15);
       if (u.status === 'CLEARED') sc.font = { bold: true, color: { argb: 'FF16A34A' }, size: 9 };
-      else if (u.status === 'PARTIALLY_PAID') sc.font = { bold: true, color: { argb: 'FFF59E0B' }, size: 9 };
+      else if (u.status === 'PARTIALLY PAID') sc.font = { bold: true, color: { argb: 'FFF59E0B' }, size: 9 };
       else if (u.status === 'UNPAID') sc.font = { bold: true, color: { argb: 'FFDC2626' }, size: 9 };
       else if (u.status === 'VACANT') r.eachCell(c => { c.font = { size: 9, italic: true, color: { argb: 'FF94A3B8' } }; });
       else if (u.status === 'BOOKED') r.eachCell(c => { c.font = { size: 9, italic: true, color: { argb: 'FF6366F1' } }; });
       else if (u.status === 'OVERPAYMENT') sc.font = { bold: true, color: { argb: 'FF2563EB' }, size: 9 };
     }
 
+    // Totals row — SUM formulas over the actual data range (dynamic per
+    // property; formula columns summed from their computed results, so
+    // nothing is double-counted). Falls back to plain numbers when the
+    // property has no unit rows (avoiding an invalid empty SUM range).
+    const hasRows = lastDataRow >= firstDataRow;
+    const sumCol = (colLetter, key) => hasRows
+      ? {
+          formula: `SUM(${colLetter}${firstDataRow}:${colLetter}${lastDataRow})`,
+          result: data.units.reduce((s, u) => s + Number(u[key] || 0), 0),
+        }
+      : data.units.reduce((s, u) => s + Number(u[key] || 0), 0);
     const totalsRow = ws.addRow([
       '', 'TOTALS', '',
-      data.units.reduce((s, u) => s + (u.deposit || 0), 0),
-      data.units.reduce((s, u) => s + (u.water || 0), 0),
-      data.units.reduce((s, u) => s + (u.penalty || 0), 0),
-      data.units.reduce((s, u) => s + (u.monthly_rent || 0), 0),
-      data.units.reduce((s, u) => s + (u.balance_bf || 0), 0),
-      data.units.reduce((s, u) => s + (u.rent_due || 0), 0),
-      data.units.reduce((s, u) => s + (u.rent_paid || 0), 0),
+      sumCol('D', 'deposit'), sumCol('E', 'water'), sumCol('F', 'penalty'),
+      sumCol('G', 'monthly_rent'), sumCol('H', 'balance_bf'), sumCol('I', 'rent_due'),
+      sumCol('J', 'rent_paid'),
       '', '', '',
-      data.units.reduce((s, u) => s + (u.balance || 0), 0),
+      sumCol('N', 'balance'),
       '',
     ]);
     totalsRow.font = { bold: true, size: 9 };
@@ -323,9 +341,10 @@ router.post('/:month/enhanced/excel', async (req, res) => {
     // page titles repeat logo + report name + period on every printed page.
     finishSheet(ws, {
       headerRowNum: 6,
-      dataStartRow: 6,
+      dataStartRow: firstDataRow,
       landscape: true,
       repeatHeaders: false,
+      maxColWidth: 36,
       moneyCols: [4, 5, 6, 7, 8, 9, 10, 11, 14],
     });
 
@@ -351,6 +370,34 @@ router.post('/:month/enhanced/excel', async (req, res) => {
   } catch (err) {
     console.error('[Enhanced Report Excel]', err);
     if (!res.headersSent) res.status(500).json({ error: 'Failed to generate enhanced report Excel' });
+  }
+});
+
+// Download enhanced monthly report as PDF (twin of the Excel workbook —
+// same data source + deriveFigures, so figures always match).
+router.post('/:month/enhanced/pdf', async (req, res) => {
+  try {
+    const { month } = req.params;
+    const housePaybill = req.body?.house_paybill || null;
+    const data = await store.buildEnhancedMonthlyReport(month, housePaybill);
+    const pack = await store.buildLandlordPack(month, housePaybill);
+    const { deriveFigures } = require('../services/landlordSheets');
+    const f = deriveFigures(data, pack);
+    const { generateEnhancedMonthlyReportPdf } = require('../services/documentStore');
+    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const [yr, mo] = month.split('-');
+    const monthLabel = `${monthNames[parseInt(mo, 10) - 1]} ${yr}`;
+    const propertyLabel = data.property_name ? ` - ${data.property_name}` : ' - All Properties';
+    const pdf = await generateEnhancedMonthlyReportPdf(data, f, {
+      monthLabel, propertyLabel, actor: req.user?.username || 'system',
+    });
+    if (!pdf) return res.status(500).json({ error: 'Failed to generate enhanced report PDF' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${pdf.filename}"`);
+    return res.sendFile(pdf.file_path);
+  } catch (err) {
+    console.error('[Enhanced Report PDF]', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to generate enhanced report PDF: ' + err.message });
   }
 });
 

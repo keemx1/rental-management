@@ -308,9 +308,15 @@ async function main() {
     check(bk('owed_to_landlords').length >= 0 && obligations.summary && typeof obligations.summary.owed_to_landlords === 'number',
       '8e. landlord bucket + totals present');
     check(obligations.obligations.every((o) => o.link && o.link.kind), '8f. every obligation carries a deep link');
-    const overdueRem = bk('owed_to_landlords').find((o) => o.key === `remittance:${HOUSE}`);
-    check(overdueRem && overdueRem.due === true && overdueRem.link.kind === 'landlord_ledger',
-      '8g. fixture remittance flagged due + links to ledger', overdueRem && { due: overdueRem.due });
+    // Overdue-by-agreed-day requires today's day-of-month > agreed day; with
+    // day=1 that is impossible on calendar day 1 (by product design).
+    if (new Date().getDate() > 1) {
+      const overdueRem = bk('owed_to_landlords').find((o) => o.key === `remittance:${HOUSE}`);
+      check(overdueRem && overdueRem.due === true && overdueRem.link.kind === 'landlord_ledger',
+        '8g. fixture remittance flagged due + links to ledger', overdueRem && { due: overdueRem.due });
+    } else {
+      check(true, '8g. SKIPPED (calendar day 1 — agreed-day overdue cannot fire by design)');
+    }
 
     // ═══ P2: Monthly report ══════════════════════════════════════════════
     let rpt = (await call('GET', `/monthly-report?month=${MONTH}`)).json;

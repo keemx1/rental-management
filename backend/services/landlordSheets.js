@@ -140,6 +140,8 @@ function deriveFigures(data, pack) {
     commissionRows,
     occupiedCount: s.occupied_units || 0,
     vacantCount: s.vacant_units || 0,
+    bookedCount: s.booked_units || 0,
+    configuredUnits: s.configured_units != null ? Number(s.configured_units) : null,
     totalUnits: s.total_units || 0,
   };
 }
@@ -157,11 +159,15 @@ function buildExecutiveSummarySheet(workbook, data, pack, monthLabel, propLabel)
   kpiRow(ws, 'Reporting month', monthLabel);
   ws.addRow([]);
   sectionTitle(ws, lastCol, 'OCCUPANCY', DARK_BLUE);
-  kpiRow(ws, 'Total units', f.totalUnits, { numFmt: '#,##0' });
+  kpiRow(ws, 'Total units (records)', f.totalUnits, { numFmt: '#,##0', bold: true });
   kpiRow(ws, 'Occupied units', f.occupiedCount, { numFmt: '#,##0' });
   kpiRow(ws, 'Vacant units', f.vacantCount, { numFmt: '#,##0' });
-  kpiRow(ws, 'Occupancy %', f.occupancy, { numFmt: '0.0%', bold: true });
+  kpiRow(ws, 'Booked / reserved units', f.bookedCount || 0, { numFmt: '#,##0' });
+  kpiRow(ws, 'Occupancy % (occupied ÷ total records)', f.occupancy, { numFmt: '0.0%', bold: true });
   kpiRow(ws, 'Vacancy %', f.vacancy, { numFmt: '0.0%' });
+  if (f.configuredUnits != null && f.configuredUnits !== f.totalUnits) {
+    kpiRow(ws, '⚠ Configured units vs records', `${f.configuredUnits} configured vs ${f.totalUnits} unit records — investigate (see Unit Integrity Audit)`, { bold: true });
+  }
   ws.addRow([]);
   sectionTitle(ws, lastCol, 'RENT PERFORMANCE', DARK_BLUE);
   kpiRow(ws, 'Total rent expected', f.rentExpected, { numFmt: '#,##0' });
