@@ -354,7 +354,7 @@ router.post('/:month/enhanced/excel', async (req, res) => {
       dataStartRow: firstDataRow,
       landscape: true,
       repeatHeaders: false,
-      maxColWidth: 36,
+      maxColWidth: 40,
       moneyCols: [4, 5, 6, 7, 8, 9, 10, 11, 14],
     });
 
@@ -419,7 +419,7 @@ router.post('/:month/enhanced/excel', async (req, res) => {
       dataStartRow: phFirstDataRow,
       landscape: true,
       repeatHeaders: true,
-      maxColWidth: 30,
+      maxColWidth: 40,
       moneyCols: [6, 7, 8, 9, 10, 11, 12, 13],
     });
 
