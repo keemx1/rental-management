@@ -1278,6 +1278,36 @@ Response to consolidated system command: audit first, no unauthorised changes.
   only via the authorised workflow (preserve original, reason, approval, audit
   trail). All 27 suites green. Backend-only — stamps unchanged.
 
+
+---
+
+### 40. Enhanced Report: correct overpayment / arrears / cleared status (B19/B21/B36/B16)
+Fixed spurious OVERPAYMENT when a payment settled arrears/penalties to clear
+rent, and surfaced genuine overpayments as credit. Root causes + fixes:
+
+- **False OVERPAYMENT (B19)**: Rent Due only counted *Pending* penalties, so a
+  PAID penalty was removed from Rent Due while its payment stayed in Rent Paid
+  (paid > due → OVERPAYMENT). Fix: Rent Due now includes **all** penalties billed
+  the period (paid + pending) → paid == due → CLEARED. Verified: B19 CLEARED.
+- **Paid arrears still shown (B21)**: opening arrears were not reduced by the
+  arrears settled this period. Fix: net arrears = opening − arrearsSettled, used
+  in Balance. Verified: B21 CLEARED (was 6,500 phantom outstanding).
+- **Rent billed vs rate (B36/B16)**: report used the tenant's current rent_amount
+  (6,000/7,000) but the allocation billed 4,000 (prorated / prior-paid per
+  rentPaidBefore) → overstated owed, hiding the advance. Fix: Rent Due uses the
+  allocation's billed rent when available.
+- **Genuine overpayment shown as credit (B36/B16/B14/B30)**: advance/credit
+  (advance_rent_balance + credit_balance) now offsets Balance → negative balance
+  = available credit with OVERPAYMENT status. Verified: B36 −2,500, B16 −3,000,
+  B14 −500, B30 −1,000 OVERPAYMENT.
+- **Date-comparison bug**: earliest-payment selection used String(payment_date),
+  and pg Date toString() starts with the weekday ("Thu…" vs "Sun…") → wrong
+  "earliest" (alpha sort). Fixed to timestamp comparison; payment_date stored as
+  ISO string so PDF/Excel show real dates, not "Thu Oct 07".
+- Verified live on the real Enhanced report (B2/B19/B21 CLEARED; B36/B16/B14/B30
+  OVERPAYMENT with correct credits). `test_enhanced_monthly_report.js` grown to
+  **82 assertions** (paid-penalty → CLEARED, no false overpayment). All 27 suites
+  green. Backend-only — stamps unchanged.
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on

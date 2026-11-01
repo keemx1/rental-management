@@ -159,6 +159,9 @@ async function main() {
   // Multi-payment tenant: 12 genuine payments in the period (complete-history
   // requirement — every receipt/ref/date must be accessible, none hidden).
   await mk('ZZEXB-3', HOUSE_B, 'ZZEX B Many Payments', 12000, 'Active', 0, 0, 'B3');
+  // Paid-penalty tenant (B19 class): rent 5000 + a 300 penalty that is PAID by
+  // the payment — must NOT produce a false OVERPAYMENT.
+  await mk('ZZEXA-5', HOUSE_A, 'ZZEX Paid Penalty', 5000, 'Active', 0, 0, 'A5');
 
   // Payments (payment_date must fall inside the report month — the enhanced
   // report selects payments by payment_date, not billing_period).
@@ -183,17 +186,22 @@ async function main() {
     await pay('ZZEXB-3', 1000, 'rent', `ZZM${i}`, `2026-10-${day}`);
   }
   await store.createPenalty({ tenant_code: 'ZZEXA-2', description: 'ZZEX late fee', amount: 500, invoice_date: '2026-10-10' });
+  // ZZEXA-5: 300 penalty, then a 5,300 payment (rent 5,000 + penalty 300) that
+  // PAYS the penalty. Rent Due must still include the penalty so paid-vs-due
+  // reconciles (no false OVERPAYMENT — the B19 bug).
+  await store.createPenalty({ tenant_code: 'ZZEXA-5', description: 'ZZEX water', amount: 300, invoice_date: '2026-10-12' });
+  await pay('ZZEXA-5', 5300, 'rent', 'ZZE5', '2026-10-15');
   // The report selects penalties by created_at — backdate into the month.
   await query(`UPDATE penalties SET created_at = '2026-10-10 10:00:00' WHERE tenant_code LIKE 'ZZEX%'`);
 
   // ── 1. Occupancy accuracy at the source (never forced) ────────────────────
   const repA = await store.buildEnhancedMonthlyReport(PERIOD, HOUSE_A);
-  check(repA.summary.occupied_units === 3,
-    `1.1 house A occupied = all non-Vacant records (3) got ${repA.summary.occupied_units}`);
+  check(repA.summary.occupied_units === 4,
+    `1.1 house A occupied = all non-Vacant records (4) got ${repA.summary.occupied_units}`);
   check(repA.summary.vacant_units === 1,
     `1.2 house A vacant = Vacant records (1) got ${repA.summary.vacant_units}`);
-  check(repA.summary.total_units === 4,
-    `1.3 house A total = unit records (4), NOT configured count got ${repA.summary.total_units}`);
+  check(repA.summary.total_units === 5,
+    `1.3 house A total = unit records (5), NOT configured count got ${repA.summary.total_units}`);
   check(Number(repA.summary.configured_units) === 6,
     `1.4 house A configured_units exposed for the mismatch warning (6) got ${repA.summary.configured_units}`);
   check(repA.summary.occupied_units + repA.summary.vacant_units + repA.summary.booked_units === repA.summary.total_units,
@@ -237,6 +245,15 @@ async function main() {
   check(b3dates.size === 12,
     `1.16 B3 payments span 12 distinct original dates (not report date) got ${b3dates.size}`);
 
+  // Paid-penalty must NOT produce a false OVERPAYMENT (B19 class): A5 paid a
+  // 300 penalty via a 5,300 payment (rent 5,000 + penalty 300). Rent Due must
+  // still include the penalty so paid == due -> CLEARED, not OVERPAYMENT.
+  const unitA5 = (repA.units || []).find((u) => u.unit_number === 'A5');
+  check(!!unitA5 && unitA5.status === 'CLEARED' && Number(unitA5.balance) === 0,
+    `1.17 paid penalty -> CLEARED, no false overpayment got ${unitA5 && JSON.stringify({ s: unitA5.status, due: unitA5.rent_due, paid: unitA5.rent_paid, bal: unitA5.balance })}`);
+  check(!!unitA5 && Number(unitA5.rent_due) === 5300 && Number(unitA5.rent_paid) === 5300,
+    `1.18 A5 rent due 5300 (rent 5000 + paid penalty 300) == paid got ${unitA5 && JSON.stringify({ due: unitA5.rent_due, paid: unitA5.rent_paid })}`);
+
   // ── 2. Excel: Executive Summary occupancy + formulas + totals ─────────────
   const token = await makeToken();
 
@@ -251,19 +268,19 @@ async function main() {
   check(wbA.worksheets.length >= 10, `2.3 all landlord detail sheets present (${wbA.worksheets.length})`);
 
   if (execA) {
-    check(Number(kpiValue(execA, 'Total units (records)')) === 4,
-      `2.4 exec Total units (records) = 4 got ${kpiValue(execA, 'Total units (records)')}`);
-    check(Number(kpiValue(execA, 'Occupied units')) === 3,
-      `2.5 exec Occupied units = 3 (all non-Vacant) got ${kpiValue(execA, 'Occupied units')}`);
+    check(Number(kpiValue(execA, 'Total units (records)')) === 5,
+      `2.4 exec Total units (records) = 5 got ${kpiValue(execA, 'Total units (records)')}`);
+    check(Number(kpiValue(execA, 'Occupied units')) === 4,
+      `2.5 exec Occupied units = 4 (all non-Vacant) got ${kpiValue(execA, 'Occupied units')}`);
     check(Number(kpiValue(execA, 'Vacant units')) === 1,
       `2.6 exec Vacant units = 1 got ${kpiValue(execA, 'Vacant units')}`);
     check(Number(kpiValue(execA, 'Booked / reserved units')) === 0,
       `2.7 exec Booked / reserved units = 0 got ${kpiValue(execA, 'Booked / reserved units')}`);
-    check(Math.abs(Number(kpiValue(execA, 'Occupancy % (occupied ÷ total records)')) - 0.75) < 0.001,
-      `2.8 exec Occupancy % = 3/4 = 75% got ${kpiValue(execA, 'Occupancy % (occupied ÷ total records)')}`);
+    check(Math.abs(Number(kpiValue(execA, 'Occupancy % (occupied ÷ total records)')) - 0.8) < 0.001,
+      `2.8 exec Occupancy % = 4/5 = 80% got ${kpiValue(execA, 'Occupancy % (occupied ÷ total records)')}`);
     const note = kpiValue(execA, '⚠ Configured units vs records');
-    check(typeof note === 'string' && note.includes('6 configured') && note.includes('4 unit records'),
-      `2.9 exec surfaces configured-vs-records mismatch (6 vs 4) got ${note}`);
+    check(typeof note === 'string' && note.includes('6 configured') && note.includes('5 unit records'),
+      `2.9 exec surfaces configured-vs-records mismatch (6 vs 5) got ${note}`);
   }
 
   if (mainA) {
@@ -308,10 +325,10 @@ async function main() {
         `2.23 house A deposit total 0 (no deposit rows) got ${resultOf(mainA.getRow(tA).getCell(4))}`);
       check(formulaOf(mainA.getRow(tA).getCell(9)) === `SUM(I7:I${lastRow})`,
         `2.24 rent due totals =SUM(I7:I${lastRow}) got ${formulaOf(mainA.getRow(tA).getCell(9))}`);
-      check(Math.abs(resultOf(mainA.getRow(tA).getCell(9)) - 27000) < 0.01,
-        `2.25 rent due total 27,000 (10000+8500+8500+0) got ${resultOf(mainA.getRow(tA).getCell(9))}`);
-      check(Math.abs(resultOf(mainA.getRow(tA).getCell(10)) - 14000) < 0.01,
-        `2.26 rent paid total 14,000 got ${resultOf(mainA.getRow(tA).getCell(10))}`);
+      check(Math.abs(resultOf(mainA.getRow(tA).getCell(9)) - 32300) < 0.01,
+        `2.25 rent due total 32,300 (10000+8500+8500+0+5300) got ${resultOf(mainA.getRow(tA).getCell(9))}`);
+      check(Math.abs(resultOf(mainA.getRow(tA).getCell(10)) - 19300) < 0.01,
+        `2.26 rent paid total 19,300 got ${resultOf(mainA.getRow(tA).getCell(10))}`);
       check(Math.abs(resultOf(mainA.getRow(tA).getCell(14)) - 13000) < 0.01,
         `2.27 balance total 13,000 got ${resultOf(mainA.getRow(tA).getCell(14))}`);
     }

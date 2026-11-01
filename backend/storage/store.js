@@ -5880,9 +5880,13 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     const waterCharge = Number(t.water_charge_amount || 0);
     const garbageCharge = Number(t.garbage_fee_amount || 0);
     const arrears = Number(t.arrears || 0);
+    const advanceCredit = Number(t.advance_rent_balance || 0) + Number(t.credit_balance || 0);
 
-    // Penalties this month for this tenant — only count Pending (unpaid) penalties
-    const penaltyTotal = tenantPenalties.filter(p => p.status === 'Pending').reduce((s, p) => s + Number(p.amount || 0), 0);
+    // Penalties billed THIS period (paid + pending). Rent Due must include every
+    // charge raised this period so the paid-vs-due comparison is consistent —
+    // otherwise a tenant who PAID a penalty sees it removed from Rent Due while
+    // the payment stays in Rent Paid, producing a false OVERPAYMENT (B19).
+    const penaltyTotal = tenantPenalties.reduce((s, p) => s + Number(p.amount || 0), 0);
 
     // One-time water charge: bill it in the month its money landed (from each
     // payment's allocation snapshot) plus whatever is still unpaid today.
@@ -5896,9 +5900,6 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     }
     const waterStillOwed = Math.max(0, waterCharge - Number(t.water_charge_paid || 0));
     const waterDue = Math.min(waterCharge, waterSettledThisMonth + waterStillOwed);
-
-    // Rent Due = rent + water + garbage + penalties
-    const rentDue = rentAmount + waterDue + garbageCharge + penaltyTotal;
 
     // ── Per-payment detail (complete, traceable history) ──────────────────
     // Every genuine payment for this tenant in the period is retained with its
@@ -5920,7 +5921,7 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
       const chargeAllocated = allocRent + allocGarbage + allocWater + allocPenalty;
       return {
         payment_id: p.id,
-        payment_date: p.payment_date || '',
+        payment_date: p.payment_date ? new Date(p.payment_date).toISOString() : '',
         receipt_number: p.receipt_number || '',
         transaction_ref: p.mpesa_reference || p.cheque_number || p.sender_account || '',
         payment_mode: p.payment_mode || '',
@@ -5936,6 +5937,10 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
         alloc_deposit: isDepositType ? Number(p.amount || 0) : allocDeposit,
         alloc_arrears: allocArrears,
         charge_allocated: chargeAllocated,
+        // Rent actually billed for the period per the allocation engine (may be
+        // prorated / net of prior payments — differs from the tenant's current
+        // rent_amount when rent changed or part was paid earlier: B36/B16).
+        billed_rent: n(bd && bd.rentDue),
         // Arrears value captured at the moment this payment landed — the
         // earliest one in the period is the TRUE opening balance brought
         // forward (the tenant.arrears field can be stale / reflect a later
@@ -5967,30 +5972,46 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     // trust the recorded allocation history. Falls back to the field only
     // when the tenant has no payments this period (best available figure).
     let openingArrears = arrears;
+    let billedRent = rentAmount;
+    let arrearsSettled = 0;
     if (paymentDetail.length > 0) {
+      // Compare by timestamp, NOT String(payment_date) — pg returns Date objects
+      // whose toString() starts with the weekday ("Thu Oct 07" vs "Sun Oct 26"),
+      // which alpha-sorts to the wrong "earliest" payment.
       const earliest = paymentDetail.reduce((a, b) =>
-        (String(a.payment_date || '') <= String(b.payment_date || '') ? a : b));
+        (new Date(a.payment_date).getTime() <= new Date(b.payment_date).getTime() ? a : b));
       openingArrears = Number(earliest.arrears_before || 0);
+      // Rent actually billed this period per the allocation engine (prorated /
+      // net of prior payments). Trust it over the current rent_amount so the
+      // report matches the allocation truth (B36/B16 billed 4,000 not 6,000).
+      if (Number(earliest.billed_rent || 0) > 0) billedRent = Number(earliest.billed_rent);
+      arrearsSettled = paymentDetail.reduce((s, d) => s + Number(d.alloc_arrears || 0), 0);
     }
+    // Net arrears remaining after this period's arrears settlements (B21: the
+    // arrears was paid, so it must not still show as outstanding).
+    const netArrears = Math.max(0, openingArrears - arrearsSettled);
+
+    // Rent Due = billed rent + water + garbage + penalties billed this period.
+    const rentDue = billedRent + waterDue + garbageCharge + penaltyTotal;
 
     // Latest payment for the glance columns (full history is in paymentDetail).
     const latestPayment = tenantPayments.length > 0
       ? tenantPayments.reduce((latest, p) => (!latest || p.payment_date > latest.payment_date) ? p : latest, null)
       : null;
 
-    // Balance = opening arrears + (rent_due - charge-paid).
+    // Balance = net arrears + rent due − charge-paid − advance/credit.
+    // Advance/credit (genuine overpayments) offsets the balance so a tenant who
+    // overpaid shows a NEGATIVE balance = available credit (OVERPAYMENT), not a
+    // phantom amount owed (B36/B16).
     const totalPaid = chargePaidTotal;
-    const balance = openingArrears + rentDue - totalPaid;
+    const balance = netArrears + rentDue - totalPaid - advanceCredit;
 
-    // Status
+    // Status: negative = genuine overpayment/credit; ~0 = cleared; positive = owing.
     let status;
-    if (balance <= 0 && totalPaid >= rentDue + openingArrears) {
-      status = balance < 0 ? 'OVERPAYMENT' : 'CLEARED';
-    } else if (totalPaid > 0) {
-      status = 'PARTIALLY PAID';
-    } else {
-      status = 'UNPAID';
-    }
+    if (balance < -0.005) status = 'OVERPAYMENT';
+    else if (balance <= 0.005) status = 'CLEARED';
+    else if (totalPaid > 0) status = 'PARTIALLY PAID';
+    else status = 'UNPAID';
 
     // Payment mode from latest payment
     const paymentMode = latestPayment?.payment_mode || '';
@@ -6008,7 +6029,7 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     units.push({
       unit_number: t.unit_label || t.tenant_code, tenant_name: t.name,
       telephone: t.phone_number || '', deposit: depositPaid, water: waterDue,
-      penalty: penaltyTotal, monthly_rent: rentAmount, balance_bf: openingArrears,
+      penalty: penaltyTotal, monthly_rent: rentAmount, balance_bf: netArrears,
       rent_due: rentDue, rent_paid: totalPaid, receipt_no: receiptNo,
       transaction_ref: transactionRef, payment_date: paymentDate,
       balance, status, payment_mode: paymentMode,
