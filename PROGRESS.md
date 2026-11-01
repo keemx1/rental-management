@@ -1245,6 +1245,39 @@ butting against / cut off by the next column on the generated Excel reports.
   (ExcelJS writeFile quirk); the conservative estimate + higher cap is safe.
 - All 27 suites green (1,092 assertions). Backend-only — stamps unchanged.
 
+
+---
+
+### 39. Excel row-height fix + system-wide financial reconciliation audit (review mode)
+Response to consolidated system command: audit first, no unauthorised changes.
+
+- **PART A row heights**: `autoRowHeightFn` base `13 -> 16` and per-line
+  `13 -> 15`pt (font-9 text is ~12pt; 13pt squeezed multi-line cells).
+  Verified live: Enhanced data rows now 30pt (2-line), Occupied 16pt (was 13).
+  Wrapping + auto-height ensure long descriptions/multi-line cells fully visible.
+- **System-wide reconciliation audit** (`backend/scripts/audit-financial-reconciliation.js`,
+  `--month YYYY-MM [--json] [--house PAYBILL]`, READ-ONLY): cross-checks every
+  tenant's dashboard (status/arrears/credit/advance) against Payment History
+  allocations. Classes: UNALLOCATED_NOT_CREDITED (money received but no tenant
+  credit), STALE_ARREARS (arrears field vs allocation opening), STATUS_LAG
+  (status vs allocation truth), MISSING_RECEIPT/REF/DATE, DUPLICATE_REF,
+  VACANT_WITH_MONEY. billing_period != payment month is informational only
+  (normal for advance rent) — not a discrepancy.
+- **LIVE 2026-10 RESULT**: 412 payments / 302 tenants / 10 properties ->
+  **233 reconciled, 69 need correction**: 45 UNALLOCATED_NOT_CREDITED,
+  20 STALE_ARREARS, 7 STATUS_LAG, 1 MISSING_RECEIPT. Per-property: Sunrise 17,
+  Luxury 14, Executive 10, Blue 7, Bluegum 7, Sunview 6, Mariana 3, Cream 2,
+  Matangi 2, Mugutha 1.
+- **Blue House cases verified** (all traceable to Payment History, no changes
+  made): B2/B23 stale arrears; B14/B30 status-lag (fully applied but flagged
+  owing); B21 KES41,000 -> only 8,500 allocated to charges (19,500 uncredited
+  advance); B29/B5/B36 advance credits present; B26/B33/B40 reconciled at the
+  allocation level (B33/B40 nuance flagged for management). Full per-tenant
+  detail in `scratch/audit_report.txt` + `.json`.
+- **No financial records modified** — review mode; corrections to be applied
+  only via the authorised workflow (preserve original, reason, approval, audit
+  trail). All 27 suites green. Backend-only — stamps unchanged.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on

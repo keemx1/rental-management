@@ -192,8 +192,11 @@ function autoRowHeightFn(row, ws) {
     const lines = Math.ceil(cellText.length / charsPerLine);
     maxLines = Math.max(maxLines, lines);
   });
-  const minHeight = 13;
-  const calculatedHeight = Math.max(minHeight, maxLines * 13);
+  // Readable row height: ~15pt per wrapped line (font-9 text is ~12pt tall;
+  // 13pt left no breathing room and squeezed multi-line cells). Never clip.
+  const minHeight = 16;
+  const lineHeight = 15;
+  const calculatedHeight = Math.max(minHeight, maxLines * lineHeight);
   if (!row.height || row.height < calculatedHeight) {
     row.height = calculatedHeight;
   }
