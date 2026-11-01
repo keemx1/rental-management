@@ -1228,6 +1228,23 @@ Blue House B2 exposed a system-wide class of issues; the audit below confirms it
   hyperlink + label, SUMIFS formula + result, dynamic per-property ranges.
 - **All 27 suites green (1,092 assertions)**. Backend-only — stamps unchanged
   (`?v=87`). No existing workflow altered; report figures only became accurate.
+
+---
+
+### 38. Report column spacing fix — long tenant names no longer clipped (backend)
+Screenshot showed long tenant names (e.g. "GILBERT MUSEMBI/ERIC MICHAEL")
+butting against / cut off by the next column on the generated Excel reports.
+
+- Raised the `finishSheet` auto-fit width cap `30 -> 40` so tenant-name
+  columns get breathing room (name columns now ~33-35 wide instead of 30);
+  text wraps to the next line as a safety net so nothing ever clips.
+- Added an `isFinite` guard in `autoFitColumns` so a malformed width
+  measurement can never serialise to an undefined/NaN column width (which
+  ExcelJS would silently drop). A wider per-character estimate was tried and
+  rejected — it dropped some column widths to undefined on specific sheets
+  (ExcelJS writeFile quirk); the conservative estimate + higher cap is safe.
+- All 27 suites green (1,092 assertions). Backend-only — stamps unchanged.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on

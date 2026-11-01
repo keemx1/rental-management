@@ -147,12 +147,17 @@ function autoFitColumns(ws, opts = {}) {
       const cellText = typeof cell.value === 'number'
         ? cell.value.toLocaleString('en-US', { maximumFractionDigits: 2 })
         : String(cell.value);
-      // Estimate width: average character width ~1.2 units
+      // Estimate width (avg char ~1.1 units + 2 padding). Kept conservative so
+      // the full workbook serialises cleanly through ExcelJS writeFile (wider
+      // estimates dropped some column widths to undefined on specific sheets).
+      // Headroom for long tenant names comes from the higher maxColWidth cap
+      // (finishSheet) plus wrap-to-next-line, so names never clip.
       const estimatedWidth = Math.min(maxColWidth, Math.max(minColWidth, cellText.length * 1.1 + 2));
-      maxWidth = Math.max(maxWidth, estimatedWidth);
+      if (isFinite(estimatedWidth)) maxWidth = Math.max(maxWidth, estimatedWidth);
     }
 
-    col.width = Math.min(maxColWidth, Math.max(minColWidth, maxWidth));
+    const finalW = Math.min(maxColWidth, Math.max(minColWidth, maxWidth));
+    col.width = isFinite(finalW) ? finalW : minColWidth;
   });
 }
 
@@ -298,7 +303,7 @@ function finishSheet(ws, opts = {}) {
     dataStartRow = null,
     landscape = true,
     repeatHeaders = true,
-    maxColWidth = 30,
+    maxColWidth = 40,
     moneyCols = null,
   } = opts;
   formatWorksheet(ws, {
