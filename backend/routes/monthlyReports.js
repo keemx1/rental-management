@@ -202,8 +202,18 @@ router.post('/:month/enhanced/excel', async (req, res) => {
       ]);
       lastDataRow = r.number;
       const n = r.number;
+      // Rent Due = sum of the charge components on this row (D:H).
       r.getCell(9).value = { formula: `SUM(D${n}:H${n})`, result: Number(u.rent_due || 0) };
       r.getCell(9).numFmt = '#,##0.##';
+      // Rent Paid = TRANSACTION-BASED SUMIFS over the Payment History sheet —
+      // sums every qualifying payment applied to this unit's charges (rent +
+      // garbage + water + penalties), never just the latest receipt. Grows
+      // automatically as payments are added; excludes deposit money.
+      r.getCell(10).value = {
+        formula: `SUMIFS('Payment History'!$M:$M,'Payment History'!$A:$A,$A${n})`,
+        result: Number(u.rent_paid || 0),
+      };
+      r.getCell(10).numFmt = '#,##0.##';
       r.getCell(14).value = { formula: `I${n}-J${n}`, result: Number(u.balance || 0) };
       r.getCell(14).numFmt = '#,##0.##';
       r.eachCell(c => { c.font = { size: 9 }; c.alignment = { vertical: 'middle' }; });
@@ -347,6 +357,97 @@ router.post('/:month/enhanced/excel', async (req, res) => {
       maxColWidth: 36,
       moneyCols: [4, 5, 6, 7, 8, 9, 10, 11, 14],
     });
+
+    // ─── PAYMENT HISTORY SHEET (complete, traceable transaction log) ───────
+    // One row per genuine payment for the period — every date, receipt,
+    // reference and allocation. The consolidated Rent Paid on the main sheet
+    // links here (clickable drill-down); nothing is hidden behind "latest".
+    const ph = workbook.addWorksheet('Payment History', {
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    });
+    const phCols = [
+      { key: 'u', width: 12 }, { key: 't', width: 24 }, { key: 'd', width: 13 },
+      { key: 'r', width: 24 }, { key: 'x', width: 18 }, { key: 'a', width: 13 },
+      { key: 'rent', width: 13 }, { key: 'garb', width: 13 }, { key: 'wat', width: 12 },
+      { key: 'pen', width: 12 }, { key: 'dep', width: 13 }, { key: 'arr', width: 12 },
+      { key: 'chg', width: 14 }, { key: 'mode', width: 12 }, { key: 'st', width: 12 },
+      { key: 'bp', width: 12 },
+    ];
+    ph.columns = phCols;
+    ph.addRow(['PAYMENT HISTORY — EVERY GENUINE TRANSACTION FOR THE PERIOD']);
+    ph.mergeCells('A1:P1');
+    ph.getCell('A1').font = { bold: true, size: 13, color: { argb: 'FF1E40AF' } };
+    ph.getCell('A1').alignment = { horizontal: 'center' };
+    ph.addRow([`Period: ${monthLabel}${propLabel}`]);
+    ph.mergeCells('A2:P2');
+    ph.getCell('A2').font = { italic: true, size: 11 };
+    ph.getCell('A2').alignment = { horizontal: 'center' };
+    ph.addRow([]);
+    const phHdr = ph.addRow([
+      'Unit No', 'Tenant Name', 'Payment Date', 'Receipt No.', 'Transaction Ref',
+      'Amount (KES)', '→ Rent', '→ Garbage', '→ Water', '→ Penalties',
+      '→ Deposit', '→ Arrears', 'Charge Applied', 'Mode', 'Status', 'Billing Period',
+    ]);
+    phHdr.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    phHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
+    phHdr.height = 20;
+    phHdr.eachCell(c => { c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
+    const phFirstDataRow = 5;
+
+    // Anchor (first Payment History row) per unit for the drill-down links.
+    const phAnchorByUnit = new Map();
+    let phTotal = 0;
+    for (const u of data.units) {
+      const pays = u.payments || [];
+      if (pays.length === 0) continue;
+      for (const p of pays) {
+        const r = ph.addRow([
+          u.unit_number, u.tenant_name,
+          p.payment_date ? new Date(p.payment_date).toISOString().slice(0, 10) : '',
+          p.receipt_number, p.transaction_ref, p.amount || null,
+          p.alloc_rent || null, p.alloc_garbage || null, p.alloc_water || null,
+          p.alloc_penalty || null, p.alloc_deposit || null, p.alloc_arrears || null,
+          p.charge_allocated || null, p.payment_mode, p.status, p.billing_period,
+        ]);
+        if (!phAnchorByUnit.has(u.unit_number)) phAnchorByUnit.set(u.unit_number, r.number);
+        phTotal++;
+      }
+    }
+    if (phTotal === 0) ph.addRow(['No payments recorded for this period.']);
+    finishSheet(ph, {
+      headerRowNum: 4,
+      dataStartRow: phFirstDataRow,
+      landscape: true,
+      repeatHeaders: true,
+      maxColWidth: 30,
+      moneyCols: [6, 7, 8, 9, 10, 11, 12, 13],
+    });
+
+    // ─── DRILL-DOWN COLUMN on the main sheet ───────────────────────────────
+    // Column P: a clickable link from each tenant's consolidated row to their
+    // full transaction list in Payment History (numeric columns untouched).
+    ws.getColumn(16).width = 18;
+    ws.getCell('P6').value = 'Payments (click)';
+    ws.getCell('P6').font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    ws.getCell('P6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+    ws.getCell('P6').alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    for (let i = 0; i < data.units.length; i++) {
+      const u = data.units[i];
+      const rowNum = firstDataRow + i;
+      const anchor = phAnchorByUnit.get(u.unit_number);
+      const cell = ws.getCell(`P${rowNum}`);
+      if (anchor) {
+        cell.value = {
+          text: `${u.payment_count || (u.payments || []).length} payment(s) →`,
+          hyperlink: `#'Payment History'!A${anchor}`,
+        };
+        cell.font = { size: 9, color: { argb: 'FF2563EB' }, underline: true };
+      } else {
+        cell.value = 'No payments';
+        cell.font = { size: 9, italic: true, color: { argb: 'FF94A3B8' } };
+      }
+      cell.alignment = { vertical: 'middle' };
+    }
 
     { // Sheets 3–10: landlord detail sheets (new — existing sheet above unchanged).
       const LS = require('../services/landlordSheets');

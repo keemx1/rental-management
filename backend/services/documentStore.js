@@ -1187,6 +1187,45 @@ function buildEnhancedMonthlyReportHtml(data, f, meta = {}) {
     + `<td></td>`
     + `</tr>` : '';
 
+  // ── Payment history (complete transaction log, static for PDF) ───────────
+  // Every genuine payment behind the consolidated figures — actual date,
+  // receipt, reference, amount and allocation. Mirrors the Excel Payment
+  // History sheet so PDF and workbook always agree.
+  const allPays = [];
+  for (const u of (data.units || [])) {
+    for (const p of (u.payments || [])) allPays.push({ u, p });
+  }
+  const paymentRows = allPays.map(({ u, p }) => `
+    <tr>
+      <td><strong>${esc(u.unit_number || '')}</strong></td>
+      <td>${esc(u.tenant_name || '')}</td>
+      <td>${esc(p.payment_date ? String(p.payment_date).slice(0, 10) : '')}</td>
+      <td>${esc(p.receipt_number || '')}</td>
+      <td>${esc(p.transaction_ref || '')}</td>
+      <td class="num">${fmt(p.amount)}</td>
+      <td class="num">${fmt(p.alloc_rent)}</td>
+      <td class="num">${fmt(p.alloc_garbage)}</td>
+      <td class="num">${fmt(p.alloc_water)}</td>
+      <td class="num">${fmt(p.alloc_penalty)}</td>
+      <td class="num">${fmt(p.alloc_deposit)}</td>
+      <td class="num">${fmt(p.alloc_arrears)}</td>
+      <td class="num">${fmt(p.charge_allocated)}</td>
+      <td>${esc(p.payment_mode || '')}</td>
+      <td>${esc(p.status || '')}</td>
+    </tr>`).join('') || '<tr><td colspan="15" class="empty-note">No payments recorded for this period.</td></tr>';
+  const paymentTotals = allPays.length ? `<tr class="totals">`
+    + `<td colspan="5">TOTAL (${allPays.length} payments)</td>`
+    + `<td class="num">${fmt(allPays.reduce((s, { p }) => s + Number(p.amount || 0), 0))}</td>`
+    + `<td class="num">${fmt(allPays.reduce((s, { p }) => s + Number(p.alloc_rent || 0), 0))}</td>`
+    + `<td class="num">${fmt(allPays.reduce((s, { p }) => s + Number(p.alloc_garbage || 0), 0))}</td>`
+    + `<td class="num">${fmt(allPays.reduce((s, { p }) => s + Number(p.alloc_water || 0), 0))}</td>`
+    + `<td class="num">${fmt(allPays.reduce((s, { p }) => s + Number(p.alloc_penalty || 0), 0))}</td>`
+    + `<td class="num">${fmt(allPays.reduce((s, { p }) => s + Number(p.alloc_deposit || 0), 0))}</td>`
+    + `<td class="num">${fmt(allPays.reduce((s, { p }) => s + Number(p.alloc_arrears || 0), 0))}</td>`
+    + `<td class="num">${fmt(allPays.reduce((s, { p }) => s + Number(p.charge_allocated || 0), 0))}</td>`
+    + `<td colspan="2"></td>`
+    + `</tr>` : '';
+
   // Unit-record vs configured-units mismatch (single-property runs only) —
   // surfaces instead of silently showing inconsistent occupancy.
   const s = data.summary || {};
@@ -1219,6 +1258,8 @@ function buildEnhancedMonthlyReportHtml(data, f, meta = {}) {
     net_income: fmt(f.net),
     units_rows_html: unitsRows,
     units_totals_html: unitsTotals,
+    payment_rows_html: paymentRows,
+    payment_totals_html: paymentTotals,
     work_rows_html: workRows,
     work_totals_html: workTotals,
     generated_date: generatedDate,

@@ -129,10 +129,10 @@ async function main() {
      VALUES ($1, 'ZZ Enhanced A', 6, 'unknown')`,
     [HOUSE_A]
   );
-  // House B: records match configured (2 = 2) → no mismatch warning.
+  // House B: records match configured (3 = 3) → no mismatch warning.
   await query(
     `INSERT INTO houses (paybill_number, house_name, total_units, occupancy_status)
-     VALUES ($1, 'ZZ Enhanced B', 2, 'unknown')`,
+     VALUES ($1, 'ZZ Enhanced B', 3, 'unknown')`,
     [HOUSE_B]
   );
 
@@ -156,6 +156,9 @@ async function main() {
   await mk('ZZEXA-4', HOUSE_A, 'ZZEX Vacant Unit', 6000, 'Vacant', 0, 0, 'A4');
   await mk('ZZEXB-1', HOUSE_B, 'ZZEX B Paid With Deposit', 5000, 'Active', 0, 0, 'B1');
   await mk('ZZEXB-2', HOUSE_B, 'ZZEX B Unpaid', 4000, 'Active', 0, 0, 'B2');
+  // Multi-payment tenant: 12 genuine payments in the period (complete-history
+  // requirement — every receipt/ref/date must be accessible, none hidden).
+  await mk('ZZEXB-3', HOUSE_B, 'ZZEX B Many Payments', 12000, 'Active', 0, 0, 'B3');
 
   // Payments (payment_date must fall inside the report month — the enhanced
   // report selects payments by payment_date, not billing_period).
@@ -174,6 +177,11 @@ async function main() {
   await pay('ZZEXA-2', 4000, 'rent', 'ZZE2', '2026-10-07');
   await pay('ZZEXB-1', 5000, 'deposit', 'ZZE3', '2026-10-08');
   await pay('ZZEXB-1', 5000, 'rent', 'ZZE4', '2026-10-08');
+  // 12 payments of 1,000 each for ZZEXB-3 across the month (10th–21st Oct).
+  for (let i = 1; i <= 12; i++) {
+    const day = String(9 + i).padStart(2, '0');
+    await pay('ZZEXB-3', 1000, 'rent', `ZZM${i}`, `2026-10-${day}`);
+  }
   await store.createPenalty({ tenant_code: 'ZZEXA-2', description: 'ZZEX late fee', amount: 500, invoice_date: '2026-10-10' });
   // The report selects penalties by created_at — backdate into the month.
   await query(`UPDATE penalties SET created_at = '2026-10-10 10:00:00' WHERE tenant_code LIKE 'ZZEX%'`);
@@ -192,9 +200,9 @@ async function main() {
     `1.5 Total = Occupied + Vacant + Booked (${repA.summary.occupied_units}+${repA.summary.vacant_units}+${repA.summary.booked_units}=${repA.summary.total_units})`);
 
   const repB = await store.buildEnhancedMonthlyReport(PERIOD, HOUSE_B);
-  check(repB.summary.occupied_units === 2 && repB.summary.vacant_units === 0 && repB.summary.total_units === 2,
-    `1.6 house B occupancy 2/0/2 got ${repB.summary.occupied_units}/${repB.summary.vacant_units}/${repB.summary.total_units}`);
-  check(Number(repB.summary.configured_units) === 2,
+  check(repB.summary.occupied_units === 3 && repB.summary.vacant_units === 0 && repB.summary.total_units === 3,
+    `1.6 house B occupancy 3/0/3 got ${repB.summary.occupied_units}/${repB.summary.vacant_units}/${repB.summary.total_units}`);
+  check(Number(repB.summary.configured_units) === 3,
     '1.7 house B configured matches records (no warning expected)');
 
   const unitA = (repA.units || []).find((u) => u.unit_number === 'A1');
@@ -212,6 +220,22 @@ async function main() {
   const unitB1 = (repB.units || []).find((u) => u.unit_number === 'B1');
   check(!!unitB1 && Number(unitB1.deposit) === 5000 && Number(unitB1.rent_due) === 5000,
     `1.12 B1 deposit 5000 recorded (deposit col from records) got ${unitB1 && JSON.stringify({ d: unitB1.deposit, due: unitB1.rent_due })}`);
+  // Deposit money is EXCLUDED from rent paid (B1 paid 5000 deposit + 5000 rent;
+  // rent_paid must be the 5000 charge-applied, not 10000).
+  check(!!unitB1 && Number(unitB1.rent_paid) === 5000,
+    `1.12b deposit money excluded from rent paid (B1 rent_paid 5000 not 10000) got ${unitB1 && unitB1.rent_paid}`);
+
+  // Multi-payment tenant B3: all 12 payments present with dates/receipts/refs.
+  const unitB3 = (repB.units || []).find((u) => u.unit_number === 'B3');
+  check(!!unitB3 && unitB3.payment_count === 12,
+    `1.13 B3 retains ALL 12 payments (complete history) got ${unitB3 && unitB3.payment_count}`);
+  check(!!unitB3 && Number(unitB3.rent_paid) === 12000 && Number(unitB3.balance) === 0 && unitB3.status === 'CLEARED',
+    `1.14 B3 12x1000 = 12000 paid, cleared got ${unitB3 && JSON.stringify({ paid: unitB3.rent_paid, bal: unitB3.balance, s: unitB3.status })}`);
+  check(!!unitB3 && unitB3.payments.every((p) => p.receipt_number && p.transaction_ref && p.payment_date),
+    `1.15 B3 every payment has receipt + ref + date got ${unitB3 && unitB3.payments.filter((p) => p.receipt_number && p.transaction_ref && p.payment_date).length}/12`);
+  const b3dates = new Set(unitB3.payments.map((p) => String(p.payment_date).slice(0, 10)));
+  check(b3dates.size === 12,
+    `1.16 B3 payments span 12 distinct original dates (not report date) got ${b3dates.size}`);
 
   // ── 2. Excel: Executive Summary occupancy + formulas + totals ─────────────
   const token = await makeToken();
@@ -303,7 +327,7 @@ async function main() {
       `2.29 column widths auto-fit within [5,41] (${widths.join(',')})`);
   }
 
-  // House B: DYNAMIC per-property ranges (2 rows → SUM(D7:D8))
+  // House B: DYNAMIC per-property ranges (3 rows → SUM(D7:D9))
   const exB = await getBytes(token, `${BASE}/monthly-reports/${PERIOD}/enhanced/excel`, { house_paybill: HOUSE_B });
   check(exB.status === 200, `2.30 house B enhanced Excel returned (HTTP ${exB.status})`);
   const wbB = new ExcelJS.Workbook();
@@ -311,23 +335,65 @@ async function main() {
   const execB = wbB.getWorksheet('1 Executive Summary');
   const mainB = wbB.getWorksheet('Enhanced Monthly Report');
   if (execB) {
-    check(Number(kpiValue(execB, 'Occupied units')) === 2 && Number(kpiValue(execB, 'Vacant units')) === 0,
-      `2.31 exec B occupancy 2/0 got ${kpiValue(execB, 'Occupied units')}/${kpiValue(execB, 'Vacant units')}`);
+    check(Number(kpiValue(execB, 'Occupied units')) === 3 && Number(kpiValue(execB, 'Vacant units')) === 0,
+      `2.31 exec B occupancy 3/0 got ${kpiValue(execB, 'Occupied units')}/${kpiValue(execB, 'Vacant units')}`);
     check(kpiValue(execB, '⚠ Configured units vs records') == null,
       `2.32 exec B has NO mismatch warning (records match configured) got ${kpiValue(execB, '⚠ Configured units vs records')}`);
   }
   if (mainB) {
     const tB = findTotalsRow(mainB);
-    check(!!tB && tB === 9, `2.33 house B totals row right after 2 data rows (row 9) got ${tB}`);
+    check(!!tB && tB === 10, `2.33 house B totals row right after 3 data rows (row 10) got ${tB}`);
     if (tB) {
-      check(formulaOf(mainB.getRow(tB).getCell(4)) === 'SUM(D7:D8)',
-        `2.34 house B deposit totals use DYNAMIC range SUM(D7:D8) got ${formulaOf(mainB.getRow(tB).getCell(4))}`);
+      check(formulaOf(mainB.getRow(tB).getCell(4)) === 'SUM(D7:D9)',
+        `2.34 house B deposit totals use DYNAMIC range SUM(D7:D9) got ${formulaOf(mainB.getRow(tB).getCell(4))}`);
       check(Math.abs(resultOf(mainB.getRow(tB).getCell(4)) - 5000) < 0.01,
         `2.35 house B deposit total from records = 5000 got ${resultOf(mainB.getRow(tB).getCell(4))}`);
     }
     const rB1 = findUnitRow(mainB, 'B1');
     check(rB1 === 7 && formulaOf(mainB.getRow(rB1).getCell(9)) === 'SUM(D7:H7)',
       `2.36 B1 Rent Due formula SUM(D7:H7) got ${rB1 && formulaOf(mainB.getRow(rB1).getCell(9))}`);
+
+    // ── Payment History sheet + drill-down + SUMIFS (complete history) ────
+    const phB = wbB.getWorksheet('Payment History');
+    check(!!phB, `5.1 Payment History worksheet present (${wbB.worksheets.length} sheets)`);
+    if (phB) {
+      // Every fixture payment in period appears (B1:2, B2:0, B3:12 = 14 rows)
+      let phRows = 0, b3Rows = 0, hasAllRefs = true, distinctDates = new Set();
+      phB.eachRow({ includeEmpty: false }, (row, n) => {
+        if (n < 5) return; // skip title/header
+        const unit = String(row.getCell(1).value || '').trim();
+        const ref = String(row.getCell(5).value || '').trim();
+        if (!unit) return;
+        phRows++;
+        if (unit === 'B3') { b3Rows++; if (!ref) hasAllRefs = false; distinctDates.add(String(row.getCell(3).value || '').slice(0, 10)); }
+      });
+      check(phRows === 14, `5.2 Payment History lists all 14 B-house payments got ${phRows}`);
+      check(b3Rows === 12, `5.3 B3 all 12 payments listed got ${b3Rows}`);
+      check(hasAllRefs, '5.4 every B3 payment row carries a transaction reference');
+      check(distinctDates.size === 12, `5.5 B3 payments show 12 distinct original dates got ${distinctDates.size}`);
+      // Charge-applied column (M) sums to the consolidated rent paid
+      let chargeSum = 0;
+      phB.eachRow({ includeEmpty: false }, (row, n) => {
+        if (n < 5) return;
+        if (String(row.getCell(1).value || '').trim() === 'B3') chargeSum += Number(row.getCell(13).value || 0);
+      });
+      check(Math.abs(chargeSum - 12000) < 0.01, `5.6 B3 charge-applied column sums to 12000 got ${chargeSum}`);
+    }
+    // Drill-down hyperlink beside consolidated Rent Paid (col P)
+    const rB3 = findUnitRow(mainB, 'B3');
+    if (rB3) {
+      const linkCell = mainB.getRow(rB3).getCell(16); // P
+      const lv = linkCell.value;
+      check(lv && typeof lv === 'object' && lv.hyperlink && /Payment History/.test(lv.hyperlink),
+        `5.7 B3 Rent Paid has clickable drill-down to Payment History got ${JSON.stringify(lv)}`);
+      check(/12 payment/.test((lv && lv.text) || ''),
+        `5.8 drill-down label shows payment count got ${lv && lv.text}`);
+      // Rent Paid (col J) is a transaction-based SUMIFS over Payment History
+      check(formulaOf(mainB.getRow(rB3).getCell(10)) === `SUMIFS('Payment History'!$M:$M,'Payment History'!$A:$A,$A${rB3})`,
+        `5.9 B3 Rent Paid = SUMIFS over Payment History got ${formulaOf(mainB.getRow(rB3).getCell(10))}`);
+      check(Math.abs(resultOf(mainB.getRow(rB3).getCell(10)) - 12000) < 0.01,
+        `5.10 B3 Rent Paid SUMIFS result 12000 got ${resultOf(mainB.getRow(rB3).getCell(10))}`);
+    }
   }
 
   // All-properties run: totals still reconcile across both houses

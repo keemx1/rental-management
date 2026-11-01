@@ -5796,13 +5796,17 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
   tenantQ += ` ORDER BY t.house_paybill_number, t.unit_label`;
   const tenantRes = await query(tenantQ, tenantParams);
 
-  // 2. All approved payments in the month
+  // 2. All approved payments belonging to this period — by billing_period
+  // (the authoritative "which month does this money settle" tag, captures
+  // advance rent dated in a prior month) OR by payment_date within the month
+  // (legacy rows without billing_period). Complete history, never just latest.
   let payQ = `SELECT p.*, t.name AS tenant_name, t.unit_label, t.house_paybill_number
     FROM payments p JOIN tenants t ON p.tenant_code = t.tenant_code
-    WHERE p.status = 'Approved' AND p.payment_date >= $1 AND p.payment_date < $2`;
-  const payParams = [monthStart, monthEnd];
-  if (housePaybill) { payQ += ` AND t.house_paybill_number = $3`; payParams.push(housePaybill); }
-  payQ += ` ORDER BY t.house_paybill_number, t.unit_label, p.payment_date`;
+    WHERE p.status = 'Approved'
+      AND (p.billing_period = $3 OR (p.payment_date >= $1 AND p.payment_date < $2))`;
+  const payParams = [monthStart, monthEnd, month];
+  if (housePaybill) { payQ += ` AND t.house_paybill_number = $4`; payParams.push(housePaybill); }
+  payQ += ` ORDER BY t.house_paybill_number, t.unit_label, p.payment_date, p.id`;
   const payRes = await query(payQ, payParams);
 
   // 3. All penalties in the month
@@ -5896,23 +5900,91 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     // Rent Due = rent + water + garbage + penalties
     const rentDue = rentAmount + waterDue + garbageCharge + penaltyTotal;
 
-    // Payments this month. Deposit money is reported through the Deposit
-    // column — it is not rent collected and must not offset rent/charges
-    // (it produced phantom OVERPAYMENT/CLEARED statuses).
-    const depositPaid = tenantPayments.filter(p => p.payment_type === 'deposit').reduce((s, p) => s + Number(p.amount || 0), 0);
-    const totalPaid = tenantPayments.filter(p => (p.payment_type || 'rent') !== 'deposit').reduce((s, p) => s + Number(p.amount || 0), 0);
+    // ── Per-payment detail (complete, traceable history) ──────────────────
+    // Every genuine payment for this tenant in the period is retained with its
+    // original date, receipt, reference and allocation snapshot — never just
+    // the latest. This is the authoritative transaction history behind the
+    // consolidated columns (requirement: all receipts/refs accessible).
+    const paymentDetail = tenantPayments.map((p) => {
+      let bd = p.allocation_breakdown;
+      try { if (typeof bd === 'string') bd = JSON.parse(bd); } catch (_) { bd = null; }
+      const n = (v) => Number(v || 0);
+      const allocRent = n(bd && bd.rentSettled);
+      const allocGarbage = n(bd && bd.garbageFeeSettled);
+      const allocWater = n(bd && bd.waterSettled);
+      const allocPenalty = n(bd && bd.penaltySettled);
+      const allocDeposit = n(bd && bd.depositSettled);
+      const allocArrears = n(bd && bd.arrearsSettled);
+      const isDepositType = (p.payment_type || 'rent') === 'deposit';
+      // Charge-applied portion (money that settled rent/charges, not deposit).
+      const chargeAllocated = allocRent + allocGarbage + allocWater + allocPenalty;
+      return {
+        payment_id: p.id,
+        payment_date: p.payment_date || '',
+        receipt_number: p.receipt_number || '',
+        transaction_ref: p.mpesa_reference || p.cheque_number || p.sender_account || '',
+        payment_mode: p.payment_mode || '',
+        amount: Number(p.amount || 0),
+        payment_type: p.payment_type || 'rent',
+        status: p.status || '',
+        billing_period: p.billing_period || '',
+        // Allocation snapshot (how this exact payment was distributed).
+        alloc_rent: allocRent,
+        alloc_garbage: allocGarbage,
+        alloc_water: allocWater,
+        alloc_penalty: allocPenalty,
+        alloc_deposit: isDepositType ? Number(p.amount || 0) : allocDeposit,
+        alloc_arrears: allocArrears,
+        charge_allocated: chargeAllocated,
+        // Arrears value captured at the moment this payment landed — the
+        // earliest one in the period is the TRUE opening balance brought
+        // forward (the tenant.arrears field can be stale / reflect a later
+        // cycle — the B2 "1,500 phantom balance" class).
+        arrears_before: n(bd && bd.arrearsBefore),
+      };
+    });
 
-    // Latest payment for receipt/ref/date
+    // Deposit collected this period (deposit-typed payments + deposit settled
+    // inside rent-typed onboarding payments — both are real deposit money).
+    const depositFromType = tenantPayments
+      .filter((p) => (p.payment_type || 'rent') === 'deposit')
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
+    const depositFromAlloc = paymentDetail
+      .filter((d) => d.payment_type !== 'deposit')
+      .reduce((s, d) => s + d.alloc_deposit, 0);
+    const depositPaid = depositFromType + depositFromAlloc;
+
+    // Money applied to this period's charges (rent + garbage + water +
+    // penalties). This is the consolidated figure that nets against Rent Due
+    // — it EXCLUDES deposit money (which the old payment_type-only filter
+    // wrongly counted as rent, e.g. B2's onboarding deposits).
+    const chargePaidTotal = paymentDetail.reduce((s, d) => s + d.charge_allocated, 0);
+
+    // Opening balance brought forward for THIS period — derived from the
+    // allocation snapshot of the earliest payment (the arrears that actually
+    // existed when the first payment landed). The raw tenant.arrears field can
+    // be stale or reflect a later cycle (B2 phantom-balance class), so we
+    // trust the recorded allocation history. Falls back to the field only
+    // when the tenant has no payments this period (best available figure).
+    let openingArrears = arrears;
+    if (paymentDetail.length > 0) {
+      const earliest = paymentDetail.reduce((a, b) =>
+        (String(a.payment_date || '') <= String(b.payment_date || '') ? a : b));
+      openingArrears = Number(earliest.arrears_before || 0);
+    }
+
+    // Latest payment for the glance columns (full history is in paymentDetail).
     const latestPayment = tenantPayments.length > 0
       ? tenantPayments.reduce((latest, p) => (!latest || p.payment_date > latest.payment_date) ? p : latest, null)
       : null;
 
-    // Balance = arrears + (rent_due - total_paid)
-    const balance = arrears + rentDue - totalPaid;
+    // Balance = opening arrears + (rent_due - charge-paid).
+    const totalPaid = chargePaidTotal;
+    const balance = openingArrears + rentDue - totalPaid;
 
     // Status
     let status;
-    if (balance <= 0 && totalPaid >= rentDue + arrears) {
+    if (balance <= 0 && totalPaid >= rentDue + openingArrears) {
       status = balance < 0 ? 'OVERPAYMENT' : 'CLEARED';
     } else if (totalPaid > 0) {
       status = 'PARTIALLY PAID';
@@ -5923,7 +5995,7 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     // Payment mode from latest payment
     const paymentMode = latestPayment?.payment_mode || '';
 
-    // Receipt and reference
+    // Receipt and reference (latest — preview only; full list via paymentDetail)
     let receiptNo = '';
     let transactionRef = '';
     let paymentDate = '';
@@ -5936,10 +6008,13 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     units.push({
       unit_number: t.unit_label || t.tenant_code, tenant_name: t.name,
       telephone: t.phone_number || '', deposit: depositPaid, water: waterDue,
-      penalty: penaltyTotal, monthly_rent: rentAmount, balance_bf: arrears,
+      penalty: penaltyTotal, monthly_rent: rentAmount, balance_bf: openingArrears,
       rent_due: rentDue, rent_paid: totalPaid, receipt_no: receiptNo,
       transaction_ref: transactionRef, payment_date: paymentDate,
       balance, status, payment_mode: paymentMode,
+      // Complete transaction history for this tenant/period (traceability).
+      payment_count: paymentDetail.length,
+      payments: paymentDetail,
     });
 
     // Status-count key normalisation: the unit row displays 'PARTIALLY PAID'

@@ -41,7 +41,7 @@ Run from the repo root (server must be up on port `3003`):
 | Landlord ledger dashboard | `node tests/test_landlord_ledger.js` | 33 assertions — spec example exact (100k−5k−2k=93k, pay 80k→13k month row, second partial→8k), carry-forward 55.5k, two balances never offset, per-property isolation, agreed day + next due, both statements PDFs, invoice share via WhatsApp pipeline, guards, overview remittance totals |
 | Landlord accounts enhancement | `node tests/test_landlord_accounts.js` | 35 assertions — all 10 acceptance points: rollover-first, MFI invoice + agreed due date, net calc 93k, Pending≠paid (verified-only balances, 403 for non-admin verify), carry-forward once, reconciliation mismatch flagged + finalize gate + reopen, false-payment reversal + restricted audit, statement versions v1/v2, transfer proof/recipient snapshots, dashboard separate totals + overdue + reviews |
 | Central notification bar | `node tests/test_notifications.js` | 28 assertions — emergency activation for critical/overdue, per-priority counts, deep links to exact records, viewing never resolves, dedupe (one Open row), partial payment updates amount only, auto-resolve on clearance, unrelated alerts survive, history with resolution, reopen, critical→review downgrade, read-only vs ledger, operator read access, bar/modal/pulse CSS/polling served |
-| Enhanced monthly report | `node tests/test_enhanced_monthly_report.js` | 65 assertions - Executive Summary occupancy accuracy (occupied = all non-Vacant records; Total = Occupied + Vacant + Booked; configured-vs-records mismatch surfaced, never forced), live Excel formulas (Rent Due =SUM(Dn:Hn), Balance =In-Jn, totals =SUM over the DYNAMIC per-property range), deposit/water totals from unit records, auto-fit layout pass (widths, wrap, A4 landscape), PDF twin endpoint (same data source, landscape, attachment), PDF button + API wiring, Blue House 44/44/0 verified live |
+| Enhanced monthly report | `node tests/test_enhanced_monthly_report.js` | 80 assertions - Executive Summary occupancy accuracy (occupied = all non-Vacant; Total = O+V+Booked; configured-vs-records warning), complete per-payment history (every date/receipt/ref/allocation, never just latest), consolidated Rent Paid as SUMIFS over a Payment History sheet with clickable drill-down, deposit money excluded from rent, dynamic per-property formula ranges, auto-fit layout, PDF twin incl. static payment-history section, system-wide payment audit script, Blue House 44/44/0 + B2 full-history verified live |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -1022,7 +1022,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1077 assertions across 27 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
+Suite totals: **1092 assertions across 27 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -1171,6 +1171,63 @@ Same request (sent three times) completed in full:
   lifecycle sections skip honestly on day 1).
 - **All 27 suites green (1,077 assertions)**. Stamps -> `?v=87`, SW ->
   `gutenberg-v90-irmanage`.
+
+---
+
+### 37. System-wide complete payment history, drill-down & financial reconciliation (backend, builds on v87)
+Follow-on to #36, executed GLOBALLY across all properties (not just Blue House).
+Blue House B2 exposed a system-wide class of issues; the audit below confirms it.
+
+- **Complete payment history (MANDATORY #1)**: `buildEnhancedMonthlyReport` now
+  retrieves and exposes EVERY genuine payment per tenant/period (original
+  payment_date, receipt number, M-Pesa/reference, amount, per-allocation
+  snapshot rent/garbage/water/penalty/deposit/arrears, status, billing_period)
+  — never just the latest. Payment query broadened to
+  `billing_period = month OR payment_date in month` so advance rent dated in a
+  prior month but applied to the period is captured. `unit.payments[]` +
+  `payment_count` added (additive; existing columns unchanged).
+- **Deposit no longer mis-counted as rent (B2 root cause)**: the old filter
+  counted a payment's FULL amount as rent-paid by `payment_type`, so deposit
+  money settled inside rent-typed onboarding payments (B2: 7,000 of 16,000)
+  inflated rent-paid and produced phantom balances. Now rent-paid = the
+  allocation-derived charge-applied portion (rent+garbage+water+penalty
+  settled), and deposit is computed separately (deposit-typed + deposit
+  settled inside rent-typed payments). **B2 corrected live: deposit 7,000
+  (was 0), rent-paid 9,000 charge-applied (was 16,000).**
+- **Balance derived from records, not the stale arrears field**: opening
+  balance-brought-forward now taken from the EARLIEST payment's allocation
+  snapshot (`arrearsBefore`) — the arrears that actually existed when the
+  first payment landed — falling back to the tenant.arrears field only when
+  the tenant has no payments this period. Fixes the B2 "1,500 phantom
+  balance" (field said 9,000 = November's; October's true opening was 0).
+  B2 October now: opening 0 + due 8,500 − paid 9,000 = −500 (honest 500
+  credit from a 7,000→6,500 rent reduction, fully traceable — NOT forced to 0).
+- **Payment History worksheet + clickable drill-down (MANDATORY #2)**: new
+  12th sheet lists every payment (date, receipt, ref, amount, →rent, →garbage,
+  →water, →penalties, →deposit, →arrears, charge-applied, mode, status,
+  billing period). Each tenant row on the Enhanced sheet gains a "Payments
+  (click) →" hyperlink (col P) jumping to their block. Consolidated Rent Paid
+  (col J) is now a live `SUMIFS('Payment History'!$M:$M,'Payment History'!$A:$A,unit)`
+  — transaction-based, grows automatically, excludes deposits (REQUIREMENT #3).
+- **PDF static payment history (REQUIREMENT #9)**: the PDF twin now renders a
+  "Payment History — Every Genuine Transaction" section (same rows/allocation
+  columns as the Excel sheet) so landlords see the full breakdown without
+  Excel; figures always match the workbook.
+- **System-wide read-only audit** (`backend/scripts/audit-payment-integrity.js`,
+  `--month YYYY-MM [--json]`): scans every payment/tenant for missing
+  receipts/refs/dates/billing-periods, duplicate M-Pesa refs & client_txn_ids,
+  deposit-in-rent-payment (B2 class), stale arrears, status-lag, vacant-with-
+  money. **NEVER modifies records** — corrections must follow the authorized
+  workflow. **LIVE 2026-10 RESULT: 412 payments / 302 tenants → 59 findings:
+  33 DEPOSIT_IN_RENT_PAYMENT, 15 STATUS_LAG, 10 STALE_ARREARS, 1 MISSING_RECEIPT**
+  (B2 among them) — confirms the issue is system-wide, now surfaced for
+  management review and corrected at the report layer.
+- `tests/test_enhanced_monthly_report.js` grown to **80 assertions**: adds a
+  12-payment tenant (complete history, 12 distinct dates, all refs), deposit
+  excluded from rent-paid, Payment History sheet completeness, drill-down
+  hyperlink + label, SUMIFS formula + result, dynamic per-property ranges.
+- **All 27 suites green (1,092 assertions)**. Backend-only — stamps unchanged
+  (`?v=87`). No existing workflow altered; report figures only became accurate.
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on

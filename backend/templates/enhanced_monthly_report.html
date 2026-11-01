@@ -38,6 +38,7 @@
     .footer-bar::after { content: ''; position: absolute; top: 3px; left: 30%; right: 0; height: 3px; background: #111; }
     .footer-note { font-size: 8px; color: #777; text-align: center; }
     .empty-note { text-align: center; color: #94a3b8; font-style: italic; padding: 8px; }
+    .hist-note { font-size: 8px; color: #64748b; margin-bottom: 4px; }
     @media print { body { padding: 10px; } .report { page-break-inside: auto; } tr { page-break-inside: avoid; } }
   </style>
 </head>
@@ -96,6 +97,23 @@
     </thead>
     <tbody>{{units_rows_html}}</tbody>
     <tfoot>{{units_totals_html}}</tfoot>
+  </table>
+
+  <div class="sec-title">Payment History &mdash; Every Genuine Transaction</div>
+  <div class="hist-note">Each consolidated Rent Paid figure above is backed by the individual payments below (actual date, receipt, M-Pesa/reference, amount and allocation). Deposit money is shown separately and never counted as rent.</div>
+  <table class="report">
+    <thead>
+      <tr>
+        <th>Unit</th><th>Tenant</th><th>Payment Date</th><th>Receipt No.</th>
+        <th>Transaction Ref</th><th class="num">Amount</th>
+        <th class="num">&rarr; Rent</th><th class="num">&rarr; Garbage</th>
+        <th class="num">&rarr; Water</th><th class="num">&rarr; Penalties</th>
+        <th class="num">&rarr; Deposit</th><th class="num">&rarr; Arrears</th>
+        <th class="num">Charge Applied</th><th>Mode</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>{{payment_rows_html}}</tbody>
+    <tfoot>{{payment_totals_html}}</tfoot>
   </table>
 
   <div class="sec-title">Work &amp; Maintenance Summary</div>
