@@ -1107,6 +1107,13 @@ management-only, nothing modified**.
   SW → `gutenberg-v89-irmanage`.
 
 ---
+- **Server restarts (standing arrangement):** management has granted
+  permission for automated restarts whenever a change requires one. Flow:
+  kill the process on :3003 (watchdog respawns ~15s) — if the process is
+  elevated/session-0 and cannot be killed directly, fall back to an
+  elevated `taskkill` via UAC (`Start-Process -Verb RunAs`; the operator
+  approves the prompt once). Manual equivalent: `restart-server.bat` as
+  administrator.
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
