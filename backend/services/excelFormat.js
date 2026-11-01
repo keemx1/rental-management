@@ -17,7 +17,7 @@
  */
 function formatWorksheet(ws, opts = {}) {
   const {
-    minColWidth = 6,
+    minColWidth = 8,
     maxColWidth = 30,
     defaultFontSize = 10,
     headerRowNum = null,
@@ -192,10 +192,12 @@ function autoRowHeightFn(row, ws) {
     const lines = Math.ceil(cellText.length / charsPerLine);
     maxLines = Math.max(maxLines, lines);
   });
-  // Readable row height: ~15pt per wrapped line (font-9 text is ~12pt tall;
-  // 13pt left no breathing room and squeezed multi-line cells). Never clip.
-  const minHeight = 16;
-  const lineHeight = 15;
+  // Readable row height: ~16pt per wrapped line (font-9 text is ~12pt tall;
+  // 13pt left no breathing room and squeezed multi-line cells). Base floor of
+  // 20pt gives single-line rows comfortable padding matching header height so
+  // every sheet reads evenly — never clip.
+  const minHeight = 20;
+  const lineHeight = 16;
   const calculatedHeight = Math.max(minHeight, maxLines * lineHeight);
   if (!row.height || row.height < calculatedHeight) {
     row.height = calculatedHeight;

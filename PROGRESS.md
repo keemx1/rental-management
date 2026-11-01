@@ -1308,6 +1308,23 @@ rent, and surfaced genuine overpayments as credit. Root causes + fixes:
   OVERPAYMENT with correct credits). `test_enhanced_monthly_report.js` grown to
   **82 assertions** (paid-penalty → CLEARED, no false overpayment). All 27 suites
   green. Backend-only — stamps unchanged.
+
+---
+
+### 41. Even report spacing across ALL sheets (not just the Enhanced sheet)
+User feedback: the Enhanced Monthly Report sheet looked well-spaced but the
+other 11 sheets (Executive Summary, Payment History, Rent Performance,
+Commission, Water, Occupied, Vacant, Work, Arrears, Deposits, Reconciliation)
+had cramped single-line rows and a few very narrow columns.
+
+- Base row height `16 -> 20`pt and per-line `15 -> 16`pt in `autoRowHeightFn`,
+  so single-line data rows now match the 20pt header height on EVERY sheet
+  (multi-line rows grow to 32pt). Minimum column width `6 -> 8` in
+  `formatWorksheet` so no column floors at an unreadable 6.
+- Verified across the live all-properties workbook: every sheet now shows
+  20pt data rows / 32pt wrapped rows and min column width >= 8. All 27 suites
+  green.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
