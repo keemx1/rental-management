@@ -5880,7 +5880,14 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     const waterCharge = Number(t.water_charge_amount || 0);
     const garbageCharge = Number(t.garbage_fee_amount || 0);
     const arrears = Number(t.arrears || 0);
-    const advanceCredit = Number(t.advance_rent_balance || 0) + Number(t.credit_balance || 0);
+    // Advance/credit that may offset the balance: only a LIVE advance counts
+    // (advance_rent_until in the future = genuine prepayment available for
+    // coming months). A past/null advance_rent_until is stale/consumed and must
+    // NOT create a phantom overpayment (B30/B14 class). credit_balance is always
+    // a real credit.
+    const advUntil = t.advance_rent_until ? new Date(t.advance_rent_until) : null;
+    const advanceIsLive = !!(advUntil && isFinite(advUntil.getTime()) && advUntil.getTime() > Date.now());
+    const advanceCredit = (advanceIsLive ? Number(t.advance_rent_balance || 0) : 0) + Number(t.credit_balance || 0);
 
     // Penalties billed THIS period (paid + pending). Rent Due must include every
     // charge raised this period so the paid-vs-due comparison is consistent —
