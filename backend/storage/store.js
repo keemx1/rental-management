@@ -5988,10 +5988,12 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
       const earliest = paymentDetail.reduce((a, b) =>
         (new Date(a.payment_date).getTime() <= new Date(b.payment_date).getTime() ? a : b));
       openingArrears = Number(earliest.arrears_before || 0);
-      // Rent actually billed this period per the allocation engine (prorated /
-      // net of prior payments). Trust it over the current rent_amount so the
-      // report matches the allocation truth (B36/B16 billed 4,000 not 6,000).
-      if (Number(earliest.billed_rent || 0) > 0) billedRent = Number(earliest.billed_rent);
+      // Rent billed for the period = MAX across payments. The earliest snapshot
+      // can be a partial figure (B25 recorded 4,250 then 6,500); the highest is
+      // the full period rent. For single-payment / normal cases MAX == earliest,
+      // so prorated rents (B36/B16) are unchanged.
+      const maxBilled = paymentDetail.reduce((m, d) => Math.max(m, Number(d.billed_rent || 0)), 0);
+      if (maxBilled > 0) billedRent = maxBilled;
       arrearsSettled = paymentDetail.reduce((s, d) => s + Number(d.alloc_arrears || 0), 0);
     }
     // Net arrears remaining after this period's arrears settlements (B21: the
