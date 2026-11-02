@@ -981,10 +981,38 @@ async function approvePaymentOnce(id) {
         remaining = result.remaining;
       }
 
-      // 6) Water charge
-      if (waterChargeShortfall > 0 && remaining > 0) {
-        const settle = Math.min(waterChargeShortfall, remaining);
-        waterChargePaid += settle;
+      // 6) Water charge — flat one-time charge PLUS metered water invoices.
+      // Metered water lives in `water_invoices`/`invoice_register`; before this
+      // it was never settled here, so every payment fell through to rent while
+      // the client's water bill (visible in the parse preview) stayed unpaid.
+      const waterInvoiceRows = (await runOrQuery(run,
+        `SELECT id, wtr_number, GREATEST(COALESCE(total_amount_payable, 0), COALESCE(total_amount, 0)) AS payable
+         FROM water_invoices
+         WHERE tenant_code = $1 AND tenancy_id IS NULL
+           AND status NOT IN ('Paid', 'Void')
+         ORDER BY created_at ASC, id ASC`,
+        [payment.tenant_id]
+      )).rows;
+      const waterInvoiceOutstanding = waterInvoiceRows
+        .reduce((s, w) => s + Number(w.payable || w.total_amount || 0), 0);
+      const totalWaterOwed = waterChargeShortfall + waterInvoiceOutstanding;
+      if (totalWaterOwed > 0 && remaining > 0) {
+        const settle = Math.min(totalWaterOwed, remaining);
+        // Flat one-time water first (legacy field), then metered invoices oldest first.
+        const flatSettled = Math.min(waterChargeShortfall, settle);
+        waterChargePaid += flatSettled;
+        let invoiceSettled = settle - flatSettled;
+        for (const w of waterInvoiceRows) {
+          if (invoiceSettled <= 0) break;
+          const owed = Number(w.payable || w.total_amount || 0);
+          const apply = Math.min(owed, invoiceSettled);
+          if (apply <= 0) continue;
+          await runOrQuery(run,
+            `UPDATE water_invoices SET status = 'Paid', updated_at = NOW() WHERE id = $1`,
+            [w.id]
+          );
+          invoiceSettled -= apply;
+        }
         waterSettled = settle;
         remaining -= settle;
       }
@@ -1030,7 +1058,7 @@ async function approvePaymentOnce(id) {
       const remainingMaintenance = Math.max(0, maintenanceBefore - maintenanceSettled);
       const remainingOther = Math.max(0, otherBefore - otherSettled);
       const remainingGarbage = Math.max(0, garbageFeeShortfall - garbageFeeSettled);
-      const remainingWater = Math.max(0, waterChargeShortfall - waterSettled);
+      const remainingWater = Math.max(0, waterChargeShortfall + waterInvoiceOutstanding - waterSettled);
       const remainingRent = Math.max(0, remainingRentForMonth - rentSettled);
       const remainingDeposit = Math.max(0, depositShortfall - depositSettled);
       const remainingBalance = remainingDeposit + remainingArrears + remainingPenalties + remainingMaintenance + remainingOther + remainingGarbage + remainingWater + remainingRent;
