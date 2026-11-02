@@ -287,8 +287,8 @@ async function main() {
     const ps = mainA.pageSetup || {};
     check(ps.paperSize === 9 && ps.orientation === 'landscape' && ps.fitToPage === true,
       `2.10 Enhanced sheet A4 landscape fit-to-page (${JSON.stringify({ p: ps.paperSize, o: ps.orientation, f: ps.fitToPage })})`);
-    check(ps.printTitlesRow === '1:3',
-      `2.11 Enhanced sheet repeats report title rows 1:3 (got ${ps.printTitlesRow})`);
+    check(ps.printTitlesRow === '1:6',
+      `2.11 Enhanced sheet repeats report title + table header rows 1:6 (got ${ps.printTitlesRow})`);
 
     const rA1 = findUnitRow(mainA, 'A1');
     check(rA1 === 7, `2.12 first data row is row 7 (header layout) got ${rA1}`);

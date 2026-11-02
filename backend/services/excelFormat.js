@@ -15,6 +15,20 @@
  * - Enable print layout (A4, fit-to-width, repeating header rows)
  * - Consistent number formatting for financial figures
  */
+/**
+ * Print-only page width. A sheet whose columns would shrink below ~85% to fit
+ * one page is spread across the number of pages needed to print at a readable
+ * scale instead (Sheet 2 with 16 columns was printing at ~37%). Narrow sheets
+ * stay on one page. Column widths and screen layout are not touched.
+ */
+function printFitWidth(ws, landscape) {
+  const totalWidth = ws.columns.reduce((s, c) => s + (Number(c.width) || 10), 0);
+  const pageCap = landscape ? 120 : 90;          // width units that fit a page at ~100%
+  const onePageMax = pageCap / 0.85;              // widest sheet still readable on one page
+  if (!isFinite(totalWidth) || totalWidth <= onePageMax) return 1;
+  return Math.ceil(totalWidth / pageCap);
+}
+
 function formatWorksheet(ws, opts = {}) {
   const {
     minColWidth = 8,
@@ -98,7 +112,7 @@ function formatWorksheet(ws, opts = {}) {
     paperSize: 9, // A4
     orientation: printLandscape ? 'landscape' : 'portrait',
     fitToPage: true,
-    fitToWidth: 1,
+    fitToWidth: printFitWidth(ws, printLandscape),
     fitToHeight: 0, // unlimited pages
     margins: { left: 0.5, right: 0.5, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
   };

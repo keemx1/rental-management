@@ -57,7 +57,7 @@ function num(v) { return typeof v === 'number' ? v : Number(v || 0); }
 function checkSheetStructure(sheet, label) {
   const ps = sheet.pageSetup || {};
   check(ps.paperSize === 9, `${label}: A4 page setup (paperSize=9), got ${ps.paperSize}`);
-  check(ps.fitToPage === true && ps.fitToWidth === 1, `${label}: fit-to-width print layout`);
+  check(ps.fitToPage === true && ps.fitToWidth >= 1, `${label}: fit-to-width print layout (pages wide=${ps.fitToWidth})`);
   check(ps.orientation === 'landscape' || ps.orientation === 'portrait', `${label}: orientation set (${ps.orientation})`);
 
   const widths = (sheet.columns || []).map((c) => Number(c.width));
@@ -240,7 +240,7 @@ async function main() {
       await checkWorkbook(r.buf, 'Enhanced_Monthly_Report.xlsx', async (wb) => {
         check(wb.worksheets.length >= 10, `Enhanced: all landlord sheets present (${wb.worksheets.length})`);
         const main = wb.getWorksheet('Enhanced Monthly Report');
-        check(main.pageSetup.printTitlesRow === '1:3', `Enhanced: repeating report title rows (got ${main.pageSetup.printTitlesRow})`);
+        check(main.pageSetup.printTitlesRow === '1:6', `Enhanced: repeating report title + table header rows (got ${main.pageSetup.printTitlesRow})`);
         // Money number formats on the unit table (col 7 = monthly rent)
         let moneyFmt = 0;
         main.eachRow({ includeEmpty: false }, (row) => {

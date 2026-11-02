@@ -129,7 +129,7 @@ router.post('/:month/enhanced/excel', async (req, res) => {
     }
 
     const ws = workbook.addWorksheet('Enhanced Monthly Report', {
-      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '1:3' },
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '1:6' },
     });
 
     const lastCol = 'O';
