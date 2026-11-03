@@ -480,9 +480,9 @@ async function main() {
   check(/app\.js\?v=\d+/.test(idx), '4.2 versioned app.js loader served');
   const apiJs = await (await fetch('http://127.0.0.1:3003/js/api.js')).text();
   check(apiJs.includes('downloadEnhancedMonthlyReportPdf'), '4.3 api.js exposes downloadEnhancedMonthlyReportPdf');
-  const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js?v=87')).text();
-  check(appJs.includes('btn-download-enhanced-pdf') && appJs.includes('v87'),
-    '4.4 app.js wires the PDF button (v87 served)');
+  const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js')).text();
+  check(appJs.includes('btn-download-enhanced-pdf') && appJs.includes('GEHM_VERSION'),
+    '4.4 app.js wires the PDF button (versioned build served)');
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
   await cleanup();

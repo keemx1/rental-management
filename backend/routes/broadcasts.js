@@ -52,6 +52,22 @@ function verifyTenantPayment(tenant) {
   };
 }
 
+// Template-type classification (permanent rule): payment-based reminders must be
+// filtered by payment status (a fully-paid / advance-covered tenant must never be
+// reminded); general notices reach every active tenant regardless of payment.
+// Matched on the template name - payment prompts (reminder / follow-up / final
+// notice / overdue / balance / penalty / invoice / rent due) vs general notices
+// (emergency / maintenance / security / agreement / increment / update). Bare
+// "rent" is intentionally NOT a payment term so "Rent Increment" stays general.
+function isPaymentReminderTemplate(name) {
+  const n = String(name || '').toLowerCase();
+  const paymentTerms = [
+    'reminder', 'follow-up', 'follow up', 'follow', 'final notice', 'overdue',
+    'balance', 'penalty', 'invoice', 'rent due', 'rent balance', 'overdue rent', 'gentle',
+  ];
+  return paymentTerms.some((t) => n.includes(t));
+}
+
 router.post('/send', async (req, res) => {
   try {
     const { template_id, message_body, target_type, house_id, tenant_id, channel, dry_run } = req.body;
@@ -89,11 +105,15 @@ router.post('/send', async (req, res) => {
     }
 
     let baseBody = message_body;
+    let templateName = 'Default Rent Reminder';
     if (template_id) {
       const tpl = await store.getTemplate(template_id);
       if (!tpl) return res.status(404).json({ error: 'Template not found' });
       baseBody = tpl.body;
+      templateName = tpl.name || templateName;
     }
+    // The selected template decides recipient eligibility (payment filter or not).
+    const isPaymentReminder = isPaymentReminderTemplate(templateName);
 
     let tenants;
     if (target_type === 'tenant') {
@@ -108,17 +128,20 @@ router.post('/send', async (req, res) => {
 
     if (!tenants.length) return res.status(400).json({ error: 'No target clients found' });
 
-    // ── Automatic payment verification + recipient filtering (permanent rule) ──
-    // A tenant whose rent obligation is already fully settled (current month paid
-    // OR covered by advance rent / credits) is EXCLUDED - they must never be
-    // reminded to pay again. Only verified-outstanding tenants are eligible.
-    const verified = tenants.map((t) => ({ tenant: t, fin: verifyTenantPayment(t) }));
-    const eligible = verified.filter((v) => !v.fin.isFullyPaid);
-    const excluded = verified.filter((v) => v.fin.isFullyPaid);
+    // ── Recipient eligibility (permanent rule, decided by the template type) ──
+    // Active tenants only (Vacant excluded). Payment reminders exclude anyone whose
+    // rent obligation is fully settled (paid OR advance-covered) - never remind a
+    // paid tenant. General notices reach every active tenant regardless of payment.
+    const verified = tenants
+      .filter((t) => (t.status || '') !== 'Vacant')
+      .map((t) => ({ tenant: t, fin: verifyTenantPayment(t) }));
+    const eligible = isPaymentReminder ? verified.filter((v) => !v.fin.isFullyPaid) : verified;
+    const excluded = isPaymentReminder ? verified.filter((v) => v.fin.isFullyPaid) : [];
     const summary = {
+      template_type: isPaymentReminder ? 'payment' : 'general',
       total_checked: verified.length,
-      excluded_fully_paid: excluded.filter((v) => !v.fin.advanceCoversRent && v.fin.credits < v.fin.grossDue).length,
-      excluded_advance: excluded.filter((v) => v.fin.advanceCoversRent || v.fin.credits >= v.fin.grossDue).length,
+      excluded_fully_paid: isPaymentReminder ? excluded.filter((v) => !v.fin.advanceCoversRent && v.fin.credits < v.fin.grossDue).length : 0,
+      excluded_advance: isPaymentReminder ? excluded.filter((v) => v.fin.advanceCoversRent || v.fin.credits >= v.fin.grossDue).length : 0,
       included_partial: eligible.filter((v) => v.fin.status === 'Partially Paid').length,
       included_unpaid: eligible.filter((v) => v.fin.status === 'Unpaid').length,
       total_eligible: eligible.length,
@@ -156,11 +179,12 @@ router.post('/send', async (req, res) => {
     let removedOnRecheck = 0;
 
     for (const v of eligible) {
-      // Pre-send recheck: re-verify the payment status right before sending and
-      // drop anyone who has since fully settled (never remind a paid tenant).
+      // Pre-send recheck: re-verify payment status right before sending. For payment
+      // reminders, drop anyone who has since fully settled (never remind a paid
+      // tenant). General notices send to all eligible regardless of payment.
       const freshTenant = (v.tenant.id ? await store.getTenant(v.tenant.id) : null) || v.tenant;
       const fin = verifyTenantPayment(freshTenant);
-      if (fin.isFullyPaid) { removedOnRecheck++; continue; }
+      if (isPaymentReminder && fin.isFullyPaid) { removedOnRecheck++; continue; }
       const tenant = freshTenant;
       const house = tenant?.house_id ? await store.getHouse(tenant.house_id) : null;
       const renderedBody = applyTemplate(baseBody, tenant, house, fin);
