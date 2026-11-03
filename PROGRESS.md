@@ -1475,6 +1475,31 @@ All 27 suites green. Backend + data. Verified live. (audit_log preserves every c
 - EX002 base was 17,700 (audit-confirmed) + Oct 25,200 = 42,900; no explicit expected
   figure was given for EX002/B501/SS7 - flag if different targets are intended.
 
+---
+
+### 47. Payment parse: auto-retrieved invoices now CHARGED in the allocation (BH3 water bug)
+User-reported: when parsing an M-Pesa payment the outstanding invoice (water / any other)
+is auto-retrieved and shown ("settled automatically on approve") but NOT charged in the
+payment's allocation - the confirmation only allocated Garbage + Rent. Example: LAURA
+PAULETTE (BH3), 10,800 payment, retrieved water GEHPM-WTR-202610-000084 (600) but the
+preview allocated only Garbage 200 + Rent 10,000 (the 600 water was retrieved yet never
+charged).
+
+Root cause: the APPROVE side already settles `water_invoices` (store.js approvePayment,
+`totalWaterOwed = waterChargeShortfall + waterInvoiceOutstanding`, a prior fix), but the
+PARSE PREVIEW (`buildPaymentMessage` in routes/payments.js) only allocated the FLAT
+`water_charge_amount` and never the `water_invoices` register rows - so the retrieved
+invoice never appeared as charged.
+
+FIX: `buildPaymentMessage` now allocates `totalWaterOwed = flat water + metered
+water_invoices` (matching the approve side), so the retrieved water is charged in the
+preview's allocation, "Rent Due", and the confirmation message. Added
+`store.getWaterInvoiceOutstanding()` (mirrors the approve-side query) and the parse
+endpoint passes it to the preview. Verified BH3: allocation now
+Garbage=200 + Water=600 (the retrieved invoice) + Rent=10,000 = 10,800.
+
+All 27 suites green. Backend-only.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1540,3 +1565,4 @@ All 27 suites green. Backend + data. Verified live. (audit_log preserves every c
 | 44 | Cream House resolved + cumulative roll-up of future-tagged prepayments | backend |
 | 45 | All 46 report fix.txt cases match (individual per-case corrections) | backend+data |
 | 46 | November 2026 rollover audit + automated rollover engine fix (frozen-arrears + timezone) | backend+data |
+| 47 | Payment parse: auto-retrieved invoices now charged in allocation (BH3 water bug) | backend |

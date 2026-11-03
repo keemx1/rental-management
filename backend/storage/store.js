@@ -2964,6 +2964,19 @@ async function listOutstandingRegisterInvoices(tenantCode, run) {
   return res.rows.map(mapInvoiceRegisterRow);
 }
 
+// Metered-water outstanding on the water_invoices register (unpaid/void-excluded).
+// Mirrors the approve-side query so the parse preview and the actual allocation
+// agree on what water is owed (the auto-retrieved GEHPM-WTR rows).
+async function getWaterInvoiceOutstanding(tenantCode, run) {
+  const res = await runOrQuery(run,
+    `SELECT COALESCE(SUM(GREATEST(COALESCE(total_amount_payable, 0), COALESCE(total_amount, 0))), 0) AS total
+     FROM water_invoices
+     WHERE tenant_code = $1 AND tenancy_id IS NULL
+       AND status NOT IN ('Paid', 'Void')`,
+    [tenantCode]);
+  return Number((res.rows[0] && res.rows[0].total) || 0);
+}
+
 function splitAllocForLinking(allocation, paymentType) {
   const num = (v) => Number(v || 0);
   const get = (k) => (allocation ? num(allocation[k]) : 0);
@@ -9553,6 +9566,7 @@ module.exports = {
   getTenantChargeSummary,
   buildLandlordPack,
   listOutstandingRegisterInvoices,
+  getWaterInvoiceOutstanding,
   applyPaymentToInvoices,
   reverseInvoiceLinks,
 };

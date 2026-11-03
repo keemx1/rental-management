@@ -407,7 +407,7 @@ function parseMpesaMessage(raw) {
   };
 }
 
-function buildPaymentMessage(tenant, payment, pendingPenalties) {
+function buildPaymentMessage(tenant, payment, pendingPenalties, waterInvoiceOutstanding = 0) {
   const name = String(tenant.name || 'Tenant').trim().toUpperCase();
   const amount = Number(payment.amount || 0);
   const formattedAmount = amount.toLocaleString('en-KE', { maximumFractionDigits: 0 });
@@ -427,6 +427,11 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
   const waterChargeAmount = Number(tenant.water_charge_amount || 0);
   const waterChargePaid = Number(tenant.water_charge_paid || 0);
   const waterChargeShortfall = Math.max(0, waterChargeAmount - waterChargePaid);
+  // Metered water lives on the water_invoices register (the auto-retrieved
+  // GEHPM-WTR rows). It must be charged in the allocation too, else the preview
+  // retrieves the invoice but never settles it (only the flat water charge was
+  // allocated). Matches the approve-side totalWaterOwed.
+  const totalWaterOwed = waterChargeShortfall + Number(waterInvoiceOutstanding || 0);
   const allPenalties = pendingPenalties || [];
   const penaltyTotal = allPenalties.filter(p => (p.category || 'penalty') === 'penalty').reduce((s, p) => s + Number(p.amount || 0), 0);
   const maintenanceTotal = allPenalties.filter(p => p.category === 'maintenance').reduce((s, p) => s + Number(p.amount || 0), 0);
@@ -475,8 +480,8 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
     remaining -= garbageFeeSettled;
   }
 
-  if (waterChargeShortfall > 0 && remaining > 0) {
-    waterSettled = Math.min(waterChargeShortfall, remaining);
+  if (totalWaterOwed > 0 && remaining > 0) {
+    waterSettled = Math.min(totalWaterOwed, remaining);
     remaining -= waterSettled;
   }
 
@@ -496,11 +501,11 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
   const futureMaintenance = Math.max(0, maintenanceTotal - maintenanceSettled);
   const futureOther = Math.max(0, otherTotal - otherSettled);
   const futureGarbage = Math.max(0, garbageFeeShortfall - garbageFeeSettled);
-  const futureWater = Math.max(0, waterChargeShortfall - waterSettled);
+  const futureWater = Math.max(0, totalWaterOwed - waterSettled);
   const futureRent = Math.max(0, remainingRentForMonth - rentSettled);
   const futureDeposit = Math.max(0, depositShortfall - depositSettled);
   const futureOutstanding = futureAgreement + futureArrears + futurePenalties + futureMaintenance + futureOther + futureGarbage + futureWater + futureRent + futureDeposit;
-  const totalDue = agreementOutstanding + depositShortfall + currentArrears + totalPenalties + garbageFeeShortfall + waterChargeShortfall + remainingRentForMonth;
+  const totalDue = agreementOutstanding + depositShortfall + currentArrears + totalPenalties + garbageFeeShortfall + totalWaterOwed + remainingRentForMonth;
 
   const fullMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   let fullMonth, fullYear;
@@ -541,7 +546,7 @@ function buildPaymentMessage(tenant, payment, pendingPenalties) {
   if (maintenanceTotal > 0) dueParts.push(`Maintenance Invoices: KES ${maintenanceTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (otherTotal > 0) dueParts.push(`Other Charges: KES ${otherTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (garbageFeeShortfall > 0) dueParts.push(`Garbage Fee: KES ${garbageFeeShortfall.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
-  if (waterChargeShortfall > 0) dueParts.push(`Water Charges: KES ${waterChargeShortfall.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+  if (totalWaterOwed > 0) dueParts.push(`Water Charges: KES ${totalWaterOwed.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   dueParts.push(`Monthly Rent: KES ${remainingRentForMonth.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   msg += ` Rent Due for ${fullMonth} ${fullYear} was KES ${totalDue.toLocaleString('en-KE', { maximumFractionDigits: 0 })} (${dueParts.join(', ')}).`;
 
@@ -655,7 +660,7 @@ router.post('/parse-message', async (req, res) => {
           if (!hasRentPaymentBefore && depositShortfall > 0) {
             return buildNewTenancyConfirmation(previewTenant, previewPayment, buildOnboardingPreview(previewTenant, parsed.amount));
           }
-          return buildPaymentMessage(previewTenant, previewPayment, await store.listPendingPenalties(previewTenant.id));
+          return buildPaymentMessage(previewTenant, previewPayment, await store.listPendingPenalties(previewTenant.id), await store.getWaterInvoiceOutstanding(previewTenant.tenant_code).catch(() => 0));
         })()
       : null;
 
