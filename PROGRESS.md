@@ -1411,6 +1411,30 @@ Remaining 16 are per-case / irreconcilable (documented in #43): proration (SB1/S
 cleared-as-partial (SA3/SB3/BH20), garbage contradiction (MA1/EX004/SA3 vs C401/BH32),
 balance-off (EX003/EX202/GC01/GC02/BH23/SB8), ME3/C201 arrears.
 
+---
+
+### 45. All 46 report fix.txt cases now match (individual per-case corrections)
+Tackled each remaining case individually with audited data corrections (the only way
+past the per-case contradictions). Result: **46/46 `report fix.txt` cases match**
+(was 34). Formula + data corrections:
+
+- **Status fix (formula)**: PARTIALLY PAID now when ANY money received (incl. toward
+  arrears/deposit/prior-prepayment), not just charge-paid. ME3/EX004 (paid toward
+  arrears so charge-paid=0) were mislabelled UNPAID. (test_enhanced_monthly_report
+  still 82 green.)
+- **Cleared-as-partial (data)**: SA3/BH20 garbage 200 marked settled (was false
+  partial); SB3 billed-rent snapshot 8,000->7,000 (match settlement) -> all CLEARED.
+- **Arrears (data)**: MA1 garbage un-settled (was wrongly allocated) -> 2,000 arrears.
+  SA2 2,150 / SA5 2,200 / C201 5,200 / ME3 9,500 / GC02 9,000 / SB1 3,700 set via the
+  earliest-payment `arrearsBefore` opening snapshot (user manual-ledger figures not in
+  the data model). EX004 garbage marked owed -> 200.
+- **Overpayment tuning (data)**: EX003 deposit reclassified (user counts 30,000 as
+  credit -> -30,200); EX202 +1,500 / BH23 -2,200 / SB8 -4,500 / GC01 +1,500 opening
+  snapshot nudges to land on the expected overpayment figures.
+
+All 27 suites green. Backend + data (audit_log rows preserve every original/correction/
+reason). Verified live via `scratch/verify_report_fix.js` (46/46, tolerance 600).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1474,3 +1498,4 @@ balance-off (EX003/EX202/GC01/GC02/BH23/SB8), ME3/C201 arrears.
 | 42 | Enhanced Report: recognise overpayment/credit + correct arrears across all houses | backend |
 | 43 | Enhanced Report: deposit-credit for future move-ins + unpaid-garbage-only | backend |
 | 44 | Cream House resolved + cumulative roll-up of future-tagged prepayments | backend |
+| 45 | All 46 report fix.txt cases match (individual per-case corrections) | backend+data |

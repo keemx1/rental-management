@@ -6105,10 +6105,13 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     const balance = (openingArrears + rentDue) - moneyForCharges;
 
     // Status: negative = genuine overpayment/credit; ~0 = cleared; positive = owing.
+    // PARTIALLY PAID when ANY money was received (even toward arrears/deposit) and a
+    // balance remains; UNPAID only when nothing was received. (ME3/EX004 pay toward
+    // arrears so charge-paid is 0 but they did pay -> PARTIALLY PAID, not UNPAID.)
     let status;
     if (balance < -0.005) status = 'OVERPAYMENT';
     else if (balance <= 0.005) status = 'CLEARED';
-    else if (totalPaid > 0) status = 'PARTIALLY PAID';
+    else if (totalPaid > 0 || totalReceived > 0 || priorCredit > 0) status = 'PARTIALLY PAID';
     else status = 'UNPAID';
 
     // Payment mode from latest payment
