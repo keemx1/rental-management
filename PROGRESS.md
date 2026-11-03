@@ -1500,6 +1500,36 @@ Garbage=200 + Water=600 (the retrieved invoice) + Rent=10,000 = 10,800.
 
 All 27 suites green. Backend-only.
 
+---
+
+### 48. Notification dashboard audit + system-wide financial sync (Nov rollover task)
+Audited all 26 notifications (25 tenant-arrears + 1 failed-sends) after the rollover
+repair. Result: figures now accurate and consistent end-to-end.
+
+- **Figures match tenant accounts exactly**: `amount` = previous arrears (`tenant.arrears`),
+  `balance` = arrears + current unpaid rent. Cross-checked the 25 open tenant-arrears rows
+  against the tenants table - sum 530,580 = ground-truth arrears for those same tenants.
+  ME3 9,500 (was 1,000), Shop 2 179,000, B38 18,000, B501 85,000, EX002 42,900, SS7 22,700
+  all correct. The stale figures were purely the frozen-arrears bug (fixed + repaired in
+  #46) - no separate display bug.
+- **Deep-links correct**: `kind:'tenant'` -> `showView('tenant-dashboard')` for that tenant
+  (opens the right unit + financial breakdown); payments/work_order/whatsapp/landlord
+  links all route correctly.
+- **Auto-resolve correct**: Open rows whose issue clears -> Resolved (viewing never
+  resolves); unresolved stay; history retained. Covered by test_notifications.js (32 green).
+- **System-wide sync**: dashboard / notification / property dashboards / tenant accounts /
+  invoices / reports all derive from the same tenant fields (`arrears`, `rent_amount`,
+  `rent_paid_this_month`) - consistent by construction. Verified the notification aggregate
+  equals the tenant-account ground truth.
+
+All tests green (notification 32, dashboard, house-collection). Data + verification
+(logic unchanged - the repair in #46 made the figures correct). 
+
+## Open items / next (Nov rollover task - final)
+- **Deeper multi-month backfill**: B38-style tenants missing a *prior* month (September)
+  from an earlier cycle; a full "recompute arrears from move-in history" pass would catch
+  those the current Oct-backfill can't. Flagged in #46.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1566,3 +1596,4 @@ All 27 suites green. Backend-only.
 | 45 | All 46 report fix.txt cases match (individual per-case corrections) | backend+data |
 | 46 | November 2026 rollover audit + automated rollover engine fix (frozen-arrears + timezone) | backend+data |
 | 47 | Payment parse: auto-retrieved invoices now charged in allocation (BH3 water bug) | backend |
+| 48 | Notification dashboard audit + system-wide financial sync (Nov rollover) | verification |
