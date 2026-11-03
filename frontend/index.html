@@ -665,6 +665,42 @@
           </div>
         </div>
 
+        <!-- Rent Reminder Broadcast (SMS-only, payment-verified) -->
+        <div class="glass-panel p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-lg font-semibold text-slate-800">Rent Reminder Broadcast (SMS)</h3>
+            <span class="text-xs text-slate-500">Payment-verified &middot; SMS only &middot; never WhatsApp</span>
+          </div>
+          <p class="text-sm text-slate-500 mb-3">
+            Sends a rent reminder via SMS only to tenants with a <strong>verified outstanding balance</strong>.
+            Fully-paid and advance-covered tenants are automatically excluded. A confirmation popup
+            shows the verified recipient list before anything is sent.
+          </p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label class="text-xs text-slate-500">Message template</label>
+              <select id="sms-broadcast-template" class="qc-input mt-1">
+                <option value="">Default rent reminder</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500">Target</label>
+              <select id="sms-broadcast-target" class="qc-input mt-1" onchange="toggleSmsBroadcastHouse()">
+                <option value="all">All tenants</option>
+                <option value="house">Specific house</option>
+              </select>
+            </div>
+          </div>
+          <div id="sms-broadcast-house-wrap" class="mb-3 hidden">
+            <label class="text-xs text-slate-500">House</label>
+            <select id="sms-broadcast-house" class="qc-input mt-1"></select>
+          </div>
+          <div class="flex gap-2 flex-wrap items-center">
+            <button type="button" class="qc-btn qc-btn-primary" onclick="openSmsRentBroadcast()">Review &amp; Send SMS Rent Reminder</button>
+          </div>
+          <p id="sms-broadcast-result" class="text-xs font-mono text-slate-400 mt-2"></p>
+        </div>
+
         <!-- Message History -->
         <div class="glass-panel p-5">
           <div class="flex items-center justify-between mb-3">
@@ -6151,6 +6187,37 @@
     setTimeout(() => { document.body.classList.add('boot-done'); }, 25000);
     document.querySelector('.app-shell')?.classList.add('login-mode');
   </script>
+<!-- SMS Rent Broadcast confirmation popup (payment-verified, SMS-only) -->
+<div id="sms-broadcast-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+  <div class="glass-panel p-5 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-lg font-semibold text-slate-800">Confirm SMS Rent Reminder</h3>
+      <button type="button" class="qc-btn text-sm" onclick="closeSmsBroadcastModal()">Close</button>
+    </div>
+    <p class="text-xs text-slate-500 mb-3">
+      Payment-verified recipients only. Fully-paid and advance-covered tenants are excluded.
+      This sends via <strong>SMS only</strong> (never WhatsApp). Review the recipients below before confirming.
+    </p>
+    <div id="sms-broadcast-summary" class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3 text-sm"></div>
+    <div class="mb-3">
+      <div class="text-xs text-slate-500 mb-1">Eligible recipients (<span id="sms-broadcast-count">0</span>)</div>
+      <div class="overflow-x-auto max-h-64 overflow-y-auto border border-slate-200 rounded">
+        <table class="w-full text-xs">
+          <thead><tr class="text-left text-slate-500 border-b border-slate-200">
+            <th class="p-2">Tenant</th><th class="p-2">Status</th><th class="p-2">Arrears</th>
+            <th class="p-2">Current Rent</th><th class="p-2">Paid</th><th class="p-2">Outstanding</th>
+          </tr></thead>
+          <tbody id="sms-broadcast-recipients"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="flex gap-2 justify-end">
+      <button type="button" class="qc-btn" onclick="closeSmsBroadcastModal()">Cancel</button>
+      <button type="button" class="qc-btn qc-btn-primary" onclick="confirmSmsRentBroadcast()">Confirm &amp; Send SMS</button>
+    </div>
+    <p id="sms-broadcast-send-result" class="text-xs font-mono text-slate-400 mt-2"></p>
+  </div>
+</div>
 </body>
 
 </html>

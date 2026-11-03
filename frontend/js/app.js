@@ -589,6 +589,7 @@ function showView(name) {
     smsLoadStatus();
     smsLoadBalance();
     smsLoadMessages();
+    loadSmsBroadcastOptions();
   }
   if (name === 'invoices') loadInvoicesCenter();
   if (name === 'work-orders') { loadWorkOrders(); loadInspections(); }
@@ -6457,6 +6458,110 @@ document.getElementById('broadcast-form')?.addEventListener('submit', async (e) 
     document.getElementById('broadcast-result').textContent = `Broadcast failed: ${err.message}`;
   }
 });
+
+// ── SMS Rent Reminder Broadcast (payment-verified, SMS-only) ────────────────
+function toggleSmsBroadcastHouse() {
+  const t = document.getElementById('sms-broadcast-target')?.value;
+  document.getElementById('sms-broadcast-house-wrap')?.classList.toggle('hidden', t !== 'house');
+}
+
+async function loadSmsBroadcastOptions() {
+  try {
+    const { templates } = await api.templates();
+    const sel = document.getElementById('sms-broadcast-template');
+    if (sel) {
+      sel.innerHTML = '<option value="">Default rent reminder</option>' +
+        (templates || []).map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+    }
+    const houses = await api.houses();
+    const houseSel = document.getElementById('sms-broadcast-house');
+    if (houseSel) {
+      const list = Array.isArray(houses) ? houses : (houses.houses || houses.rows || []);
+      houseSel.innerHTML = list.map((h) => `<option value="${h.paybill_number || h.id}">${escapeHtml(h.house_name || h.paybill_number)}</option>`).join('');
+    }
+  } catch (_) { /* options are non-critical */ }
+}
+
+const SMS_DEFAULT_RENT_REMINDER = 'Dear {{client_name}}, this is a rent reminder for {{house_name}} ({{house_number}}). Your outstanding balance is KES {{outstanding_balance}} (previous arrears KES {{arrears}}, current rent KES {{current_rent}}, payments received KES {{payments_received}}). Kindly clear the balance. Thank you.';
+
+async function openSmsRentBroadcast() {
+  const resultEl = document.getElementById('sms-broadcast-result');
+  const target = document.getElementById('sms-broadcast-target')?.value || 'all';
+  const houseId = target === 'house' ? (document.getElementById('sms-broadcast-house')?.value || null) : null;
+  const templateId = document.getElementById('sms-broadcast-template')?.value || '';
+  if (target === 'house' && !houseId) { if (resultEl) resultEl.textContent = 'Select a house first.'; return; }
+  if (resultEl) resultEl.textContent = 'Verifying payment status…';
+  try {
+    const payload = {
+      target_type: target,
+      house_id: houseId,
+      template_id: templateId ? Number(templateId) : null,
+      message_body: templateId ? '' : SMS_DEFAULT_RENT_REMINDER,
+      channel: 'sms',
+      dry_run: true,
+    };
+    const preview = await api.sendBroadcast(payload);
+    renderSmsBroadcastPreview(preview, payload);
+    if (resultEl) resultEl.textContent = '';
+  } catch (err) {
+    if (resultEl) resultEl.textContent = `Verification failed: ${err.message}`;
+  }
+}
+
+function renderSmsBroadcastPreview(preview, payload) {
+  window.__smsBroadcastPayload = payload;
+  const s = preview.summary || {};
+  const sumEl = document.getElementById('sms-broadcast-summary');
+  if (sumEl) {
+    sumEl.innerHTML = [
+      ['Total checked', s.total_checked],
+      ['Fully paid (excluded)', s.excluded_fully_paid],
+      ['Advance-covered (excluded)', s.excluded_advance],
+      ['Partially paid (included)', s.included_partial],
+      ['Unpaid (included)', s.included_unpaid],
+      ['Total eligible', s.total_eligible],
+    ].map(([k, v]) => `<div class="p-2 rounded bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">${k}</div><div class="font-semibold">${v ?? 0}</div></div>`).join('');
+  }
+  const countEl = document.getElementById('sms-broadcast-count');
+  if (countEl) countEl.textContent = (preview.recipients || []).length;
+  const tbody = document.getElementById('sms-broadcast-recipients');
+  if (tbody) {
+    tbody.innerHTML = (preview.recipients || []).map((r) => `<tr class="border-b border-slate-100">
+      <td class="p-2">${escapeHtml(r.tenant_name)} (${escapeHtml(r.tenant_code)})</td>
+      <td class="p-2">${escapeHtml(r.status)}</td>
+      <td class="p-2">${Number(r.arrears || 0).toLocaleString('en-KE')}</td>
+      <td class="p-2">${Number(r.current_rent || 0).toLocaleString('en-KE')}</td>
+      <td class="p-2">${Number(r.payments_received || 0).toLocaleString('en-KE')}</td>
+      <td class="p-2 font-semibold">${Number(r.outstanding_balance || 0).toLocaleString('en-KE')}</td>
+    </tr>`).join('') || '<tr><td class="p-2 text-slate-400" colspan="6">No eligible recipients (all fully paid).</td></tr>';
+  }
+  const resEl = document.getElementById('sms-broadcast-send-result');
+  if (resEl) resEl.textContent = '';
+  document.getElementById('sms-broadcast-modal')?.classList.remove('hidden');
+}
+
+function closeSmsBroadcastModal() {
+  document.getElementById('sms-broadcast-modal')?.classList.add('hidden');
+}
+
+async function confirmSmsRentBroadcast() {
+  const payload = window.__smsBroadcastPayload;
+  if (!payload) return;
+  const resEl = document.getElementById('sms-broadcast-send-result');
+  if (resEl) resEl.textContent = 'Sending SMS…';
+  try {
+    const result = await api.sendBroadcast({ ...payload, dry_run: false });
+    const parts = [`SMS broadcast complete. Sent: ${result.sent}, Failed: ${result.failed}`];
+    if (result.removed_on_recheck) parts.push(`Removed on pre-send recheck (since paid): ${result.removed_on_recheck}`);
+    if (result.sms) parts.push(`SMS: ${result.sms.sent} sent, ${result.sms.failed} failed`);
+    if (resEl) resEl.textContent = parts.join(' · ');
+    const out = document.getElementById('sms-broadcast-result');
+    if (out) out.textContent = parts.join(' · ');
+    setTimeout(closeSmsBroadcastModal, 2500);
+  } catch (err) {
+    if (resEl) resEl.textContent = `Send failed: ${err.message}`;
+  }
+}
 
 document.getElementById('btn-sync-historical-payments')?.addEventListener('click', async () => {
   if (!confirm('Run historical payment synchronization? This recomputes every tenant\'s balances from approved payment history and marks all approved payments as fully synced (Approved & Sent).')) return;

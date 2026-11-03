@@ -1530,6 +1530,37 @@ All tests green (notification 32, dashboard, house-collection). Data + verificat
   from an earlier cycle; a full "recompute arrears from move-in history" pass would catch
   those the current Oct-backfill can't. Flagged in #46.
 
+---
+
+### 49. Intelligent tenant broadcasting: automatic payment verification + SMS-only rent reminder
+Enhanced the EXISTING broadcast mechanism (no redesign - templates/workflow preserved)
+with a permanent, system-wide payment-verification rule + an SMS-side rent-reminder
+broadcast button.
+
+- **Automatic payment verification + recipient filtering (permanent rule)**: on every
+  broadcast the system verifies each tenant's full position (arrears carried forward,
+  current rent, payments, advance rent / credits - not just the current month) and
+  EXCLUDES anyone whose rent obligation is already fully settled (paid OR advance-covered).
+  Only verified-outstanding tenants are reminded. Non-negotiable: a fully-paid tenant never
+  receives a reminder.
+- **Accurate message generation**: `applyTemplate` now populates `{{arrears}}`,
+  `{{current_rent}}`, `{{payments_received}}`, `{{outstanding_balance}}` (distinguishes
+  previous arrears / current rent / payments / remaining). Unverified figures never sent.
+- **Pre-send recheck + summary**: right before sending, each recipient is re-verified and
+  anyone who has since fully settled is dropped (`removed_on_recheck`). Broadcast summary:
+  total checked, fully-paid excluded, advance-covered excluded, partial included, unpaid
+  included, total eligible.
+- **Dry-run preview (`dry_run:true`)** returns the verified summary + eligible recipient
+  list WITHOUT sending - the confirmation popup renders this for management review.
+- **SMS-side broadcast button + confirmation popup** (frontend): a "Rent Reminder Broadcast
+  (SMS)" panel in the SMS module - the agent presses it, a confirmation popup shows the
+  verified recipients + summary, and on confirm the rent reminder is sent via **SMS only**
+  (never WhatsApp). Default rent-reminder template + template/target/house selectors.
+
+Preserved: existing broadcast interface, message templates, WhatsApp/SMS/Both channel
+leg, management workflow. All 27 suites green (broadcast 32, message-channels 28).
+Backend (broadcasts.js) + frontend (index.html, app.js).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1597,3 +1628,4 @@ All tests green (notification 32, dashboard, house-collection). Data + verificat
 | 46 | November 2026 rollover audit + automated rollover engine fix (frozen-arrears + timezone) | backend+data |
 | 47 | Payment parse: auto-retrieved invoices now charged in allocation (BH3 water bug) | backend |
 | 48 | Notification dashboard audit + system-wide financial sync (Nov rollover) | verification |
+| 49 | Intelligent tenant broadcasting: payment verification + SMS-only rent reminder | backend+frontend |
