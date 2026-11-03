@@ -1584,6 +1584,19 @@ Three enhancements/fixes:
 All 27 suites green (broadcast 32, message 28, landlord accounts/commissions/ledger
 35/35/33). Backend (broadcasts.js, landlords.js) + frontend (index.html, app.js, api.js).
 
+---
+
+### 51. Fix SMS broadcast target dropdowns not opening (house/tenant pickers)
+The "Specific house" / "Individual tenant" target dropdowns never appeared when selected.
+Cause: app.js is an ES module (`<script type="module">`) so its functions are module-
+scoped and NOT global - the inline `onchange="toggleSmsBroadcastHouse()"` /
+`onclick="openSmsRentBroadcast()"` (and the modal's close/confirm handlers) threw
+"not defined", so the house/tenant picker wrappers never toggled open. FIX: exposed
+`toggleSmsBroadcastHouse`, `openSmsRentBroadcast`, `closeSmsBroadcastModal`,
+`confirmSmsRentBroadcast` on `window` (matching the existing inline-handler pattern,
+e.g. `window.smsSaveSettings`). The house/tenant selectors populate correctly
+(`{ houses }` / `{ tenants }` shapes handled). All 27 suites green. Frontend (app.js).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1653,3 +1666,4 @@ All 27 suites green (broadcast 32, message 28, landlord accounts/commissions/led
 | 48 | Notification dashboard audit + system-wide financial sync (Nov rollover) | verification |
 | 49 | Intelligent tenant broadcasting: payment verification + SMS-only rent reminder | backend+frontend |
 | 50 | SMS broadcast advanced targets + landlord delete + invoice download fix | backend+frontend |
+| 51 | Fix SMS broadcast target dropdowns not opening (window exposure) | frontend |

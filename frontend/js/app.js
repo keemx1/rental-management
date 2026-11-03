@@ -6597,6 +6597,13 @@ async function confirmSmsRentBroadcast() {
   }
 }
 
+// Expose the SMS broadcast handlers for the inline onchange/onclick in index.html
+// (app.js is an ES module - its functions are module-scoped unless put on window).
+window.toggleSmsBroadcastHouse = toggleSmsBroadcastHouse;
+window.openSmsRentBroadcast = openSmsRentBroadcast;
+window.closeSmsBroadcastModal = closeSmsBroadcastModal;
+window.confirmSmsRentBroadcast = confirmSmsRentBroadcast;
+
 document.getElementById('btn-sync-historical-payments')?.addEventListener('click', async () => {
   if (!confirm('Run historical payment synchronization? This recomputes every tenant\'s balances from approved payment history and marks all approved payments as fully synced (Approved & Sent).')) return;
   const btn = document.getElementById('btn-sync-historical-payments');
