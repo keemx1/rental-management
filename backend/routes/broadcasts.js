@@ -54,15 +54,18 @@ function verifyTenantPayment(tenant) {
 
 router.post('/send', async (req, res) => {
   try {
-    const { template_id, message_body, target_type, house_id, channel, dry_run } = req.body;
+    const { template_id, message_body, target_type, house_id, tenant_id, channel, dry_run } = req.body;
     if (!message_body && !template_id) {
       return res.status(400).json({ error: 'message_body or template_id required' });
     }
-    if (!['all', 'house'].includes(target_type)) {
-      return res.status(400).json({ error: 'target_type must be all or house' });
+    if (!['all', 'house', 'tenant'].includes(target_type)) {
+      return res.status(400).json({ error: 'target_type must be all, house, or tenant' });
     }
     if (target_type === 'house' && !house_id) {
       return res.status(400).json({ error: 'house_id required when target_type=house' });
+    }
+    if (target_type === 'tenant' && !tenant_id) {
+      return res.status(400).json({ error: 'tenant_id required when target_type=tenant' });
     }
 
     // Delivery channel: whatsapp (default) | sms | both — same semantics as
@@ -92,10 +95,16 @@ router.post('/send', async (req, res) => {
       baseBody = tpl.body;
     }
 
-    const tenants =
-      target_type === 'house'
-        ? await store.listTenants({ house_id })
-        : await store.listTenants();
+    let tenants;
+    if (target_type === 'tenant') {
+      const single = tenant_id ? await store.getTenant(tenant_id) : null;
+      tenants = single ? [single] : [];
+    } else {
+      tenants =
+        target_type === 'house'
+          ? await store.listTenants({ house_id })
+          : await store.listTenants();
+    }
 
     if (!tenants.length) return res.status(400).json({ error: 'No target clients found' });
 

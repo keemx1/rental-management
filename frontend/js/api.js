@@ -264,6 +264,9 @@ export const api = {
   updateLandlord(id, body) {
     return request(`/landlords/${id}`, { method: 'PUT', body: JSON.stringify(body) });
   },
+  deleteLandlord(id) {
+    return request(`/landlords/${id}`, { method: 'DELETE' });
+  },
   assignLandlordHouse(id, housePaybill) {
     return request(`/landlords/${id}/assign-house`, { method: 'POST', body: JSON.stringify({ house_paybill_number: housePaybill }) });
   },

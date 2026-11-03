@@ -688,12 +688,17 @@
               <select id="sms-broadcast-target" class="qc-input mt-1" onchange="toggleSmsBroadcastHouse()">
                 <option value="all">All tenants</option>
                 <option value="house">Specific house</option>
+                <option value="tenant">Individual tenant</option>
               </select>
             </div>
           </div>
           <div id="sms-broadcast-house-wrap" class="mb-3 hidden">
             <label class="text-xs text-slate-500">House</label>
             <select id="sms-broadcast-house" class="qc-input mt-1"></select>
+          </div>
+          <div id="sms-broadcast-tenant-wrap" class="mb-3 hidden">
+            <label class="text-xs text-slate-500">Tenant</label>
+            <select id="sms-broadcast-tenant" class="qc-input mt-1"></select>
           </div>
           <div class="flex gap-2 flex-wrap items-center">
             <button type="button" class="qc-btn qc-btn-primary" onclick="openSmsRentBroadcast()">Review &amp; Send SMS Rent Reminder</button>

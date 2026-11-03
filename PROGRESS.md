@@ -1561,6 +1561,29 @@ Preserved: existing broadcast interface, message templates, WhatsApp/SMS/Both ch
 leg, management workflow. All 27 suites green (broadcast 32, message-channels 28).
 Backend (broadcasts.js) + frontend (index.html, app.js).
 
+---
+
+### 50. SMS broadcast advanced targets + landlord delete + invoice download fix
+Three enhancements/fixes:
+
+- **SMS broadcast advanced targeting**: the SMS rent-reminder broadcast can now target
+  an individual tenant (in addition to all / a specific house). New `target_type=tenant`
+  + `tenant_id` on the broadcast API; the SMS panel gained an "Individual tenant" option
+  with a tenant picker (house picker already present). Same payment-verified filtering +
+  SMS-only delivery + confirmation popup apply to all three target scopes.
+- **Landlord delete (beside View)**: added a "Delete" button next to "View" in the landlord
+  list, with a confirm dialog. New `DELETE /api/landlords/:id` route: unassigns the
+  landlord's houses (properties preserved, just detached), detaches ledger/financial rows
+  WITHOUT deleting them (payment + invoice history preserved), deletes the landlord, and
+  audit-logs it. `api.deleteLandlord()` added.
+- **Landlord invoice download fix**: clicking Invoice generated the invoice but never
+  downloaded it (the PDF button called `openDocumentViewModal` - view only). Fixed:
+  (a) generation now auto-downloads the PDF, and (b) the "PDF" button downloads via
+  `downloadDocumentFile` (was: only opened a view modal).
+
+All 27 suites green (broadcast 32, message 28, landlord accounts/commissions/ledger
+35/35/33). Backend (broadcasts.js, landlords.js) + frontend (index.html, app.js, api.js).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1629,3 +1652,4 @@ Backend (broadcasts.js) + frontend (index.html, app.js).
 | 47 | Payment parse: auto-retrieved invoices now charged in allocation (BH3 water bug) | backend |
 | 48 | Notification dashboard audit + system-wide financial sync (Nov rollover) | verification |
 | 49 | Intelligent tenant broadcasting: payment verification + SMS-only rent reminder | backend+frontend |
+| 50 | SMS broadcast advanced targets + landlord delete + invoice download fix | backend+frontend |

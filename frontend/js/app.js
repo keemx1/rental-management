@@ -4139,7 +4139,7 @@ async function loadLandlords() {
         <td class="font-mono text-xs">${escapeHtml(l.phone || '—')}</td>
         <td>${(l.properties || []).length}</td>
         <td class="font-mono font-bold ${Number(l.total_outstanding) > 0 ? 'text-amber-400' : 'text-emerald-400'}">${llFmt(l.total_outstanding)}</td>
-        <td class="text-right"><button type="button" class="action-btn !py-1 !px-2 text-xs" data-ll-open="${l.id}">View</button></td>
+        <td class="text-right whitespace-nowrap"><button type="button" class="action-btn !py-1 !px-2 text-xs" data-ll-open="${l.id}">View</button> <button type="button" class="action-btn !py-1 !px-2 text-xs text-rose-400 border-rose-400" data-ll-delete="${l.id}">Delete</button></td>
       </tr>`).join('');
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="5" class="text-center py-5 text-rose-400">${escapeHtml(err.message)}</td></tr>`;
@@ -4147,9 +4147,22 @@ async function loadLandlords() {
 }
 
 document.getElementById('ll-list-tbody')?.addEventListener('click', (e) => {
+  const del = e.target.closest('[data-ll-delete]');
+  if (del) { deleteLandlord(Number(del.dataset.llDelete)); return; }
   const btn = e.target.closest('[data-ll-open]');
   if (btn) openLandlordProfile(Number(btn.dataset.llOpen));
 });
+
+async function deleteLandlord(id) {
+  if (!confirm('Delete this landlord? This removes the landlord record. Assigned properties become unassigned. This cannot be undone.')) return;
+  try {
+    await api.deleteLandlord(id);
+    showToast('Landlord deleted.', 'success');
+    await loadLandlords();
+  } catch (err) {
+    showToast('Delete failed: ' + err.message, 'error');
+  }
+}
 
 async function openLandlordProfile(id, monthOverride) {
   _llState.landlordId = id;
@@ -4468,6 +4481,12 @@ async function generateLandlordInvoiceNow() {
     if (resEl) resEl.textContent = res.regenerated ? '✓ Invoice regenerated (same month refreshed).' : '✓ Invoice generated.';
     const pdfBtn = document.getElementById('btn-ll-invoice-pdf');
     if (pdfBtn && res.document) pdfBtn.classList.remove('hidden');
+    // Auto-download the generated invoice PDF so "click Invoice -> generates ->
+    // downloads" (was: generated but left the file only viewable).
+    if (res.document) {
+      try { await downloadDocumentFile(res.document); if (resEl) resEl.textContent = (res.regenerated ? '✓ Invoice regenerated + downloaded.' : '✓ Invoice generated + downloaded.'); }
+      catch (_) { /* preview still shown; the PDF button remains available */ }
+    }
     await openLandlordProfile(_llState.landlordId, _llState.month);
   } catch (err) {
     if (resEl) resEl.textContent = err.message;
@@ -4626,7 +4645,12 @@ document.getElementById('btn-ll-invoice-close')?.addEventListener('click', () =>
 document.getElementById('btn-ll-invoice-generate')?.addEventListener('click', generateLandlordInvoiceNow);
 document.getElementById('btn-ll-invoice-pdf')?.addEventListener('click', async (e) => {
   e.preventDefault();
-  if (_llState.lastInvoiceDoc) await openDocumentViewModal(_llState.lastInvoiceDoc);
+  // Download the generated invoice PDF (was: only opened a view modal, so the
+  // invoice never actually downloaded).
+  if (_llState.lastInvoiceDoc) {
+    try { await downloadDocumentFile(_llState.lastInvoiceDoc); }
+    catch (err) { showToast('Download failed: ' + err.message, 'error'); }
+  }
 });
 document.getElementById('btn-ll-pay-cancel')?.addEventListener('click', () => document.getElementById('ll-payment-modal')?.classList.add('hidden'));
 document.getElementById('btn-ll-pay-save')?.addEventListener('click', saveCommissionPayment);
@@ -6463,6 +6487,7 @@ document.getElementById('broadcast-form')?.addEventListener('submit', async (e) 
 function toggleSmsBroadcastHouse() {
   const t = document.getElementById('sms-broadcast-target')?.value;
   document.getElementById('sms-broadcast-house-wrap')?.classList.toggle('hidden', t !== 'house');
+  document.getElementById('sms-broadcast-tenant-wrap')?.classList.toggle('hidden', t !== 'tenant');
 }
 
 async function loadSmsBroadcastOptions() {
@@ -6479,6 +6504,12 @@ async function loadSmsBroadcastOptions() {
       const list = Array.isArray(houses) ? houses : (houses.houses || houses.rows || []);
       houseSel.innerHTML = list.map((h) => `<option value="${h.paybill_number || h.id}">${escapeHtml(h.house_name || h.paybill_number)}</option>`).join('');
     }
+    const tenantsRes = await api.tenants();
+    const tenantSel = document.getElementById('sms-broadcast-tenant');
+    if (tenantSel) {
+      const tlist = Array.isArray(tenantsRes) ? tenantsRes : (tenantsRes.tenants || tenantsRes.rows || []);
+      tenantSel.innerHTML = tlist.map((t) => `<option value="${escapeHtml(t.id || t.tenant_code)}">${escapeHtml(t.name)} (${escapeHtml(t.tenant_code || '')})</option>`).join('');
+    }
   } catch (_) { /* options are non-critical */ }
 }
 
@@ -6488,13 +6519,16 @@ async function openSmsRentBroadcast() {
   const resultEl = document.getElementById('sms-broadcast-result');
   const target = document.getElementById('sms-broadcast-target')?.value || 'all';
   const houseId = target === 'house' ? (document.getElementById('sms-broadcast-house')?.value || null) : null;
+  const tenantId = target === 'tenant' ? (document.getElementById('sms-broadcast-tenant')?.value || null) : null;
   const templateId = document.getElementById('sms-broadcast-template')?.value || '';
   if (target === 'house' && !houseId) { if (resultEl) resultEl.textContent = 'Select a house first.'; return; }
+  if (target === 'tenant' && !tenantId) { if (resultEl) resultEl.textContent = 'Select a tenant first.'; return; }
   if (resultEl) resultEl.textContent = 'Verifying payment status…';
   try {
     const payload = {
       target_type: target,
       house_id: houseId,
+      tenant_id: tenantId,
       template_id: templateId ? Number(templateId) : null,
       message_body: templateId ? '' : SMS_DEFAULT_RENT_REMINDER,
       channel: 'sms',

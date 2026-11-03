@@ -111,6 +111,40 @@ router.put('/:id', async (req, res) => {
 });
 
 // ── Property assignment (link/unlink houses) ────────────────────────────────
+router.delete('/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+    const { pool } = require('../config/database');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Unassign houses (properties are preserved, just detached from this landlord).
+      await client.query('UPDATE houses SET landlord_id = NULL WHERE landlord_id = $1', [id]);
+      // Detach ledger/financial rows but NEVER delete them - payment and invoice
+      // history is preserved (only the landlord link is removed).
+      for (const tbl of ['commission_invoices', 'commission_payments', 'landlord_reviews', 'landlord_ledger_finalizations', 'landlord_remittance_payments']) {
+        await client.query(`UPDATE ${tbl} SET landlord_id = NULL WHERE landlord_id = $1`, [id]).catch(() => {});
+      }
+      const del = await client.query('DELETE FROM landlords WHERE id = $1', [id]);
+      await client.query('COMMIT');
+      if (!del.rowCount) return res.status(404).json({ error: 'Landlord not found' });
+      await store.logAudit({
+        actor: req.user?.username, action: 'landlord_deleted',
+        entityType: 'landlord', entityId: String(id), details: {},
+      });
+      res.json({ success: true });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete landlord: ' + err.message });
+  }
+});
+
 router.post('/:id/assign-house', async (req, res) => {
   try {
     const { house_paybill_number } = req.body || {};
