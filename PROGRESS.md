@@ -1386,6 +1386,31 @@ BH11/SB1/SA2/SA5/C201), cleared-as-partial (SA3/SB3/BH20), balance-off (EX202/GC
 GC02/BH23/SB8/EX003), MA1 (garbage already settled in its allocation vs user expecting
 arrears), Cream 121/108 (not found under expected codes).
 
+---
+
+### 44. Cream House resolved + cumulative roll-up of future-tagged prepayments (report fix.txt)
+- **Cream 108/121 FIXED** (were the "NOT FOUND" cases - my check used codes C108/C121
+  but the real tenant_code is 108/121). 108 (Lucy Kamau): 9,000 M-Pesa (ref UJRHHAYB8K,
+  user wrote UJRHHAYB8A) alloc rent 4,500 + overpayment 4,500 -> OVERPAYMENT -4,500.
+  121 (Gift): 2 x 2,750 = rent 5,500 settled -> CLEARED. Both already correct.
+- **Cumulative roll-up** (user chose "trust payment month over tag" then "cumulative
+  roll-up"): future-tagged prepayments received EARLY (a payment made before the report
+  month but tagged for a LATER month - BH11's Aug payment tagged Nov, EX004's Sept
+  payment tagged Nov) now credit the report month. Their rentSettled (prepaid rent) +
+  overpayment (advance) count toward money-for-charges; water/garbage/penalty/deposit
+  excluded (water+garbage netted via their own due/paid fields - including them
+  double-counted BH11's 3,000 water). Verified: **BH11 exact -3,800** (was UNPAID
+  9,000), EX004 30,000 -> 0. No breakage: C401/BH38/BH46/EX006 still exact.
+
+Result: **30/46 `report fix.txt` cases match** (was 25 originally; Cream + BH11 added).
+All 27 suites green. Backend-only - stamps unchanged.
+Note: "trust payment month over tag" (date-only selection) was REJECTED after measuring
+- it would have moved 10+ correct late-Sept-tagged-Oct payments (EX006/C401/MD10/D5/
+EX604/EX801/EX001/C502) out of October and blanked them.
+Remaining 16 are per-case / irreconcilable (documented in #43): proration (SB1/SA2/SA5),
+cleared-as-partial (SA3/SB3/BH20), garbage contradiction (MA1/EX004/SA3 vs C401/BH32),
+balance-off (EX003/EX202/GC01/GC02/BH23/SB8), ME3/C201 arrears.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1448,3 +1473,4 @@ arrears), Cream 121/108 (not found under expected codes).
 | 41 | Even report spacing across ALL sheets (not just the Enhanced sheet) | backend |
 | 42 | Enhanced Report: recognise overpayment/credit + correct arrears across all houses | backend |
 | 43 | Enhanced Report: deposit-credit for future move-ins + unpaid-garbage-only | backend |
+| 44 | Cream House resolved + cumulative roll-up of future-tagged prepayments | backend |

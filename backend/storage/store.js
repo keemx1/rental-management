@@ -5853,6 +5853,34 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
   // double-counts tenants like BH8 whose separate water bill is settled outside
   // the rent due and would inflate their overpayment figure.
 
+  // 3c. Cumulative roll-up — future-tagged prepayments received EARLY. A payment
+  // made BEFORE the report month but tagged for a LATER month (e.g. BH11's Aug
+  // payment tagged Nov, EX004's Sept payment tagged Nov) is an advance that
+  // credits the report month. Its rent/charge allocation + overpayment count
+  // toward this month's money-for-charges. Payments tagged FOR the report month
+  // are already in payRes and are excluded here to avoid double-counting.
+  let preQ = `SELECT p.tenant_code, p.allocation_breakdown
+    FROM payments p JOIN tenants t ON p.tenant_code = t.tenant_code
+    WHERE p.status = 'Approved'
+      AND p.payment_date < $1
+      AND p.billing_period > $2`;
+  const preParams = [monthStart, month];
+  if (housePaybill) { preQ += ` AND t.house_paybill_number = $3`; preParams.push(housePaybill); }
+  const preRes = await query(preQ, preParams);
+  const priorPrepay = {};
+  for (const p of preRes.rows) {
+    let bd = p.allocation_breakdown;
+    try { if (typeof bd === 'string') bd = JSON.parse(bd); } catch (_) { bd = null; }
+    const n = (v) => Number(v || 0);
+    // Rent prepayment + advance (overpayment) credit the report month. Water /
+    // garbage / penalty / deposit are excluded: water+garbage are netted via their
+    // own due/paid fields (including them here double-counts BH11's 3,000 water),
+    // penalty settles a future-month penalty, deposit is a held security. This
+    // makes BH11 land exactly on -3,800 (rent 9,000 prepaid + 3,800 advance).
+    const credit = n(bd && bd.rentSettled) + n(bd && bd.overpayment);
+    priorPrepay[p.tenant_code] = (priorPrepay[p.tenant_code] || 0) + credit;
+  }
+
   // 4. All maintenance charges + work orders in the month
   let mcQ = `SELECT mc.*, wo.wo_number, wo.property_name AS wo_property, wo.technician_name,
     wo.date_requested, wo.date_completed, wo.status AS wo_status,
@@ -6071,7 +6099,8 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     const miD = t.move_in_date ? new Date(t.move_in_date) : null;
     const miMonth = miD ? `${miD.getFullYear()}-${String(miD.getMonth() + 1).padStart(2, '0')}` : null;
     const notYetMovedIn = miMonth && miMonth > month;
-    const moneyForCharges = notYetMovedIn ? totalReceived : (totalReceived - depositPaid);
+    const priorCredit = Number(priorPrepay[t.tenant_code] || 0);
+    const moneyForCharges = (notYetMovedIn ? totalReceived : (totalReceived - depositPaid)) + priorCredit;
     const totalPaid = chargePaidTotal;
     const balance = (openingArrears + rentDue) - moneyForCharges;
 
