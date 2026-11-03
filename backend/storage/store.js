@@ -5914,7 +5914,11 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
 
     const rentAmount = Number(t.rent_amount || 0);
     const waterCharge = Number(t.water_charge_amount || 0);
-    const garbageCharge = Number(t.garbage_fee_amount || 0);
+    // Garbage counted only when UNPAID (user decision): a paid garbage fee is
+    // settled and must not inflate the tenant's owed (BH32/BH1/BH46 paid theirs,
+    // so it is ignored -> their overpayment is exact); an unpaid garbage fee is a
+    // real charge owed (C401/MA1 unpaid 2,000 shows as arrears).
+    const garbageCharge = Math.max(0, Number(t.garbage_fee_amount || 0) - Number(t.garbage_fee_paid || 0));
     const arrears = Number(t.arrears || 0);
     // Advance/credit that may offset the balance: only a LIVE advance counts
     // (advance_rent_until in the future = genuine prepayment available for
@@ -6055,7 +6059,19 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     // being dropped so the tenant looks CLEARED (the "shows 200 / cleared"
     // class across Blue House, Executive, Luxury, Sunrise, Bluegum…).
     const totalReceived = paymentDetail.reduce((s, d) => s + Number(d.amount || 0), 0);
-    const moneyForCharges = totalReceived - depositPaid;
+    // Deposit treatment (user decision): for a tenant who has NOT yet moved in by
+    // the report month (move_in_date >= monthEnd, e.g. BH32/BH1/BH23 = Nov 1 for
+    // the Oct report), the deposit chunk of their advance is CREDIT/overpayment,
+    // not a held security deposit, so it must NOT be subtracted from the money
+    // available for charges (else it swallows the credit -> shows CLEARED). For
+    // tenants already in occupation (BH38/BH46/SS5) the deposit is a refundable
+    // security held aside and is subtracted as before.
+    // Not yet moved in during the report month = move-in month is AFTER the report
+    // month (compare YYYY-MM strings to dodge pg DATE / timezone parsing traps).
+    const miD = t.move_in_date ? new Date(t.move_in_date) : null;
+    const miMonth = miD ? `${miD.getFullYear()}-${String(miD.getMonth() + 1).padStart(2, '0')}` : null;
+    const notYetMovedIn = miMonth && miMonth > month;
+    const moneyForCharges = notYetMovedIn ? totalReceived : (totalReceived - depositPaid);
     const totalPaid = chargePaidTotal;
     const balance = (openingArrears + rentDue) - moneyForCharges;
 

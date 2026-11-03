@@ -1357,6 +1357,35 @@ C401 / EX006 / BH8 / B36 OVERPAYMENT, B19 / B30 CLEARED, B23 / B25 PARTIALLY PAI
 because its advance covers Nov-Jan) - flagged for confirmation. All 27 suites green.
 Backend-only - stamps unchanged.
 
+---
+
+### 43. Enhanced Report: deposit-credit for future move-ins + unpaid-garbage-only (report fix.txt, user-directed)
+Verified the full `report fix.txt` position list (46 cases across Marana/Executive/
+Sunview/Bluegum/Cream/Sunrise/Blue House/Luxury) and applied two user-directed
+balance-calc refinements in `buildEnhancedMonthlyReport`:
+
+- **Deposit credit for future move-ins**: a payment chunk allocated as *deposit* for a
+  tenant who has NOT yet moved in by the report month (move-in month AFTER the report
+  month - BH32/BH1/BH23 = Nov 1) is advance CREDIT, not a held security deposit. So for
+  such tenants the deposit is NOT subtracted from money-for-charges and the credit shows
+  as OVERPAYMENT (was CLEARED 0). Occupied tenants (BH38/BH46/SS5) keep the refundable-
+  deposit subtraction and stay exact. Verified: BH32 -17,200, BH1 -15,200 exact; BH23
+  -13,000 (deposit class). Timezone-safe YYYY-MM string compare (pg DATE/Date trap).
+- **Garbage counted only when UNPAID** (user-directed): a PAID garbage fee no longer
+  inflates owed (BH32/BH1/BH46 paid theirs); an UNPAID one stays a real charge (C401/
+  MA1). Nails BH32 -17,200 and BH1 -15,200 EXACT while keeping C401/EX604/EX801/EX001/
+  BH8/SB12/SS5/B302/B402/C502 exact (their unpaid 200 stays owed). NOTE: user's expected
+  values are internally inconsistent for BH32 vs BH46 (identical paid garbage, opposite
+  expected) - BH46 lands -9,200 (200 off) as the unavoidable trade. "Exclude garbage
+  everywhere" was rejected: it would push 11 exact cases 200 off.
+
+Result: 27/46 `report fix.txt` cases match (was 25), many now exact. Verified live via
+`scratch/verify_report_fix.js`. All 27 suites green. Backend-only - stamps unchanged.
+Remaining (per-case data issues, not one formula fix): arrears-not-shown (ME3/EX004/
+BH11/SB1/SA2/SA5/C201), cleared-as-partial (SA3/SB3/BH20), balance-off (EX202/GC01/
+GC02/BH23/SB8/EX003), MA1 (garbage already settled in its allocation vs user expecting
+arrears), Cream 121/108 (not found under expected codes).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1418,3 +1447,4 @@ Backend-only - stamps unchanged.
 | 40 | Enhanced Report: correct overpayment / arrears / cleared status (B19/B21/B36/B16) | backend |
 | 41 | Even report spacing across ALL sheets (not just the Enhanced sheet) | backend |
 | 42 | Enhanced Report: recognise overpayment/credit + correct arrears across all houses | backend |
+| 43 | Enhanced Report: deposit-credit for future move-ins + unpaid-garbage-only | backend |
