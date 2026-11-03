@@ -6513,7 +6513,7 @@ async function loadSmsBroadcastOptions() {
   } catch (_) { /* options are non-critical */ }
 }
 
-const SMS_DEFAULT_RENT_REMINDER = 'Dear {{client_name}}, this is a rent reminder for {{house_name}} ({{house_number}}). Your outstanding balance is KES {{outstanding_balance}} (previous arrears KES {{arrears}}, current rent KES {{current_rent}}, payments received KES {{payments_received}}). Kindly clear the balance. Thank you.';
+const SMS_DEFAULT_RENT_REMINDER = 'Dear {{client_name}}, this is a rent reminder for {{house_name}} ({{tenant_code}}). Your outstanding balance is KES {{outstanding_balance}} (previous arrears KES {{arrears}}, current rent KES {{current_rent}}, payments received KES {{payments_received}}). Kindly clear the balance. Thank you.';
 
 async function openSmsRentBroadcast() {
   const resultEl = document.getElementById('sms-broadcast-result');
