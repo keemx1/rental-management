@@ -5837,13 +5837,21 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
   payQ += ` ORDER BY t.house_paybill_number, t.unit_label, p.payment_date, p.id`;
   const payRes = await query(payQ, payParams);
 
-  // 3. All penalties in the month
+  // 3. All penalties billed in the month (by invoice/billing date, not insert
+  // time — a penalty invoiced 8 Oct but entered later is still an October
+  // charge and must appear as arrears/owed in the October report).
   let penQ = `SELECT p.*, t.name AS tenant_name, t.unit_label, t.house_paybill_number
     FROM penalties p JOIN tenants t ON p.tenant_code = t.tenant_code
-    WHERE p.created_at >= $1 AND p.created_at < $2`;
+    WHERE (p.invoice_date >= $1 AND p.invoice_date < $2)
+       OR (p.invoice_date IS NULL AND p.created_at >= $1 AND p.created_at < $2)`;
   const penParams = [monthStart, monthEnd];
   if (housePaybill) { penQ += ` AND t.house_paybill_number = $3`; penParams.push(housePaybill); }
   const penRes = await query(penQ, penParams);
+
+  // 3b. NOTE: metered water lives in water_invoices (billed + paid on its own
+  // register) and is intentionally NOT added to the rent balance here — doing so
+  // double-counts tenants like BH8 whose separate water bill is settled outside
+  // the rent due and would inflate their overpayment figure.
 
   // 4. All maintenance charges + work orders in the month
   let mcQ = `SELECT mc.*, wo.wo_number, wo.property_name AS wo_property, wo.technician_name,
@@ -5934,6 +5942,10 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
       if (bd && bd.waterSettled != null) waterSettledThisMonth += Number(bd.waterSettled) || 0;
     }
     const waterStillOwed = Math.max(0, waterCharge - Number(t.water_charge_paid || 0));
+    // Metered water is billed on its own water_invoices register (paid there),
+    // NOT in the rent balance — including it here double-counts BH8-type
+    // tenants whose 2000 water bill is settled separately and would inflate
+    // their rent due (breaking the 18200 overpayment). Flat water only here.
     const waterDue = Math.min(waterCharge, waterSettledThisMonth + waterStillOwed);
 
     // ── Per-payment detail (complete, traceable history) ──────────────────
@@ -6028,7 +6040,8 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
     // arrears was paid, so it must not still show as outstanding).
     const netArrears = Math.max(0, openingArrears - arrearsSettled);
 
-    // Rent Due = billed rent + water + garbage + penalties billed this period.
+    // Rent Due = billed rent + flat water + garbage + penalties billed this period.
+    // (Metered water is billed on its separate water_invoices register.)
     const rentDue = billedRent + waterDue + garbageCharge + penaltyTotal;
 
     // Latest payment for the glance columns (full history is in paymentDetail).
@@ -6036,12 +6049,15 @@ async function buildEnhancedMonthlyReport(month, housePaybill) {
       ? tenantPayments.reduce((latest, p) => (!latest || p.payment_date > latest.payment_date) ? p : latest, null)
       : null;
 
-    // Balance = net arrears + rent due − charge-paid − advance/credit.
-    // Advance/credit (genuine overpayments) offsets the balance so a tenant who
-    // overpaid shows a NEGATIVE balance = available credit (OVERPAYMENT), not a
-    // phantom amount owed (B36/B16).
+    // Balance = (opening arrears + this-period charges) − (money available for
+    // charges). Money beyond charges/deposit/arrears is a genuine OVERPAYMENT /
+    // advance credit and is recognised as such (negative balance), instead of
+    // being dropped so the tenant looks CLEARED (the "shows 200 / cleared"
+    // class across Blue House, Executive, Luxury, Sunrise, Bluegum…).
+    const totalReceived = paymentDetail.reduce((s, d) => s + Number(d.amount || 0), 0);
+    const moneyForCharges = totalReceived - depositPaid;
     const totalPaid = chargePaidTotal;
-    const balance = netArrears + rentDue - totalPaid - advanceCredit;
+    const balance = (openingArrears + rentDue) - moneyForCharges;
 
     // Status: negative = genuine overpayment/credit; ~0 = cleared; positive = owing.
     let status;

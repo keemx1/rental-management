@@ -41,7 +41,7 @@ Run from the repo root (server must be up on port `3003`):
 | Landlord ledger dashboard | `node tests/test_landlord_ledger.js` | 33 assertions — spec example exact (100k−5k−2k=93k, pay 80k→13k month row, second partial→8k), carry-forward 55.5k, two balances never offset, per-property isolation, agreed day + next due, both statements PDFs, invoice share via WhatsApp pipeline, guards, overview remittance totals |
 | Landlord accounts enhancement | `node tests/test_landlord_accounts.js` | 35 assertions — all 10 acceptance points: rollover-first, MFI invoice + agreed due date, net calc 93k, Pending≠paid (verified-only balances, 403 for non-admin verify), carry-forward once, reconciliation mismatch flagged + finalize gate + reopen, false-payment reversal + restricted audit, statement versions v1/v2, transfer proof/recipient snapshots, dashboard separate totals + overdue + reviews |
 | Central notification bar | `node tests/test_notifications.js` | 28 assertions — emergency activation for critical/overdue, per-priority counts, deep links to exact records, viewing never resolves, dedupe (one Open row), partial payment updates amount only, auto-resolve on clearance, unrelated alerts survive, history with resolution, reopen, critical→review downgrade, read-only vs ledger, operator read access, bar/modal/pulse CSS/polling served |
-| Enhanced monthly report | `node tests/test_enhanced_monthly_report.js` | 80 assertions - Executive Summary occupancy accuracy (occupied = all non-Vacant; Total = O+V+Booked; configured-vs-records warning), complete per-payment history (every date/receipt/ref/allocation, never just latest), consolidated Rent Paid as SUMIFS over a Payment History sheet with clickable drill-down, deposit money excluded from rent, dynamic per-property formula ranges, auto-fit layout, PDF twin incl. static payment-history section, system-wide payment audit script, Blue House 44/44/0 + B2 full-history verified live |
+| Enhanced monthly report | `node tests/test_enhanced_monthly_report.js` | 82 assertions - Executive Summary occupancy accuracy (occupied = all non-Vacant; Total = O+V+Booked; configured-vs-records warning), complete per-payment history (every date/receipt/ref/allocation, never just latest), consolidated Rent Paid as SUMIFS over a Payment History sheet with clickable drill-down, deposit money excluded from rent, dynamic per-property formula ranges, auto-fit layout, PDF twin incl. static payment-history section, system-wide payment audit script, overpayment/credit recognised (Balance = arrears+charges - money-for-charges), penalties billed by invoice_date, Blue House 44/44/0 + B2 full-history verified live |
 
 Sample generated reports land in `scratch/report_samples/` (ignored by git).
 
@@ -1325,6 +1325,38 @@ had cramped single-line rows and a few very narrow columns.
   20pt data rows / 32pt wrapped rows and min column width >= 8. All 27 suites
   green.
 
+---
+
+### 42. Enhanced Report: recognise overpayment/credit + correct arrears across all houses (backend, builds on v87)
+User corrections report (`report fix.txt`) listing expected positions for ~40 tenants
+across Marana, Executive, Sunview, Bluegum, Cream, Sunrise, Blue House and Luxury.
+Root causes + fixes (all in `buildEnhancedMonthlyReport`):
+
+- **Overpayment shown as CLEARED / "200" (ME2, C401, EX006, BH8, B36 ...)**:
+  Balance was `netArrears + rentDue - chargePaid - advanceCredit`, which dropped any
+  received money that settled nothing (true overpayment) so the tenant looked CLEARED
+  or showed a phantom 200. Fix: Balance = (opening arrears + this-period charges) -
+  (money available for charges), where money-for-charges = total received - deposit.
+  Anything beyond charges is a genuine OVERPAYMENT (negative balance = credit).
+  Verified: ME2 -17,000, C401 -30,200, EX006 -35,900, BH8 -18,200, B36 -2,500.
+- **Arrears not shown (B23 = 1,300)**: penalties were selected by `created_at`, so a
+  penalty invoiced 8 Oct but entered later missed the October report. Fix: penalties
+  billed by `invoice_date` (fall back to `created_at` when null). Verified: B23
+  PARTIALLY PAID 1,300 (water 1,000 + socket 300).
+- **Metered water must NOT inflate Rent Due (BH8)**: an attempt to fold unpaid
+  `water_invoices` into Rent Due broke BH8 (its 2,000 water bill is settled on its own
+  register, not in the rent balance). Reverted - metered water stays on the
+  `water_invoices` register, out of the rent balance. Verified: BH8 -18,200.
+- **B23 penalties (waterbill 1,000 + socket 300) found deleted** with no DELETE
+  targeting `tenant_code='B23'` anywhere in the codebase; restored (ids 406/407,
+  invoice_date 2026-10-08) with `audit_log` rows. Flagged to user.
+
+Live verification vs `report fix.txt` key cases (9/10 match, ~200 tolerance): ME2 /
+C401 / EX006 / BH8 / B36 OVERPAYMENT, B19 / B30 CLEARED, B23 / B25 PARTIALLY PAID.
+**B21 is a known conflict** (formula shows OVERPAYMENT -19,500; user expects CLEARED
+because its advance covers Nov-Jan) - flagged for confirmation. All 27 suites green.
+Backend-only - stamps unchanged.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1379,3 +1411,10 @@ had cramped single-line rows and a few very narrow columns.
 | 33 | Deposit refund cancellation, deposit restoration, tenancy reinstatement, unit reassignment | v84 |
 | 34 | Financial Mgmt Phase 1: Arrangement A/B, double-entry journals, obligations tracker, monthly report, registers | v85 |
 | 35 | Tenant–Unit integrity audit + water-invoice validation (BH18 root cause fixed) | v86 |
+| 36 | Enhanced Monthly Report: occupancy accuracy, live formulas, PDF twin | v87 |
+| 37 | System-wide complete payment history, drill-down & financial reconciliation | backend |
+| 38 | Report column spacing fix - long tenant names no longer clipped | backend |
+| 39 | Excel row-height fix + system-wide financial reconciliation audit (review mode) | backend |
+| 40 | Enhanced Report: correct overpayment / arrears / cleared status (B19/B21/B36/B16) | backend |
+| 41 | Even report spacing across ALL sheets (not just the Enhanced sheet) | backend |
+| 42 | Enhanced Report: recognise overpayment/credit + correct arrears across all houses | backend |
