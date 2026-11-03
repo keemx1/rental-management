@@ -172,28 +172,34 @@ router.put('/:id', async (req, res) => {
       if (!house) return res.status(404).json({ error: 'House not found' });
     }
 
-    // Opening advance for existing tenants: only seed when none is recorded yet.
-    // Re-seeding is blocked so the advance can never be double-applied.
+    // Advanced Rent (opening_advance_rent) is freely editable like Opening Balance -
+    // administrators may enter, increase, reduce, correct or clear it at any time
+    // (the old "record once then lock" protection is removed). The value commits on
+    // Save and re-seeds the advance pools so the running balance reflects the edit.
     if (req.body.opening_advance_rent !== undefined) {
       const existingTenant = await store.getTenant(req.params.id);
       if (!existingTenant) return res.status(404).json({ error: 'Tenant not found' });
       const currentAdvance = Number(existingTenant.opening_advance_rent || 0);
       const newAdvance = Number(req.body.opening_advance_rent || 0);
-      if (currentAdvance === 0 && newAdvance > 0) {
-        const seeded = await store.seedOpeningAdvance(req.params.id, newAdvance);
-        if (!seeded) return res.status(400).json({ error: 'Failed to apply opening advance rent. Make sure the rent amount is set.' });
+      if (newAdvance !== currentAdvance) {
+        if (newAdvance > 0) {
+          const seeded = await store.seedOpeningAdvance(req.params.id, newAdvance);
+          if (!seeded) return res.status(400).json({ error: 'Failed to apply opening advance rent. Make sure the rent amount is set.' });
+        } else {
+          // Cleared - reset the advance pools so no stale credit remains.
+          await store.updateTenant(req.params.id, { advance_rent_until: null, advance_rent_balance: 0 });
+        }
         patch.opening_advance_rent = newAdvance;
         try {
           await store.logAudit({
             actor: req.user ? req.user.username : 'system',
-            action: 'opening_advance_added',
+            action: 'opening_advance_edited',
             entityType: 'tenant',
             entityId: req.params.id,
-            details: { amount: newAdvance, via: 'edit' },
+            details: { from: currentAdvance, to: newAdvance, via: 'edit' },
           });
         } catch (auditErr) { /* non-fatal */ }
       } else {
-        // Already recorded (or amount cleared) — never modify or re-apply.
         delete patch.opening_advance_rent;
       }
     }

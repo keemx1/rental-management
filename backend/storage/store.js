@@ -4743,6 +4743,16 @@ async function getTenantExitSummary(tenantCode) {
   const rentAmount = Number(tenant.rent_amount || 0);
   const unpaidRent = Math.max(0, rentAmount - Number(tenant.rent_paid_this_month || 0));
   const garbageShortfall = Math.max(0, Number(tenant.garbage_fee_amount || 0) - Number(tenant.garbage_fee_paid || 0));
+  // Water owed = flat water-charge shortfall + unpaid metered water invoices
+  // (water_invoices register). Metered invoices were previously omitted from the
+  // balance, so a tenant with an unpaid water invoice showed a misleading zero.
+  const meteredWaterRes = await query(
+    `SELECT COALESCE(SUM(GREATEST(COALESCE(total_amount_payable, 0), COALESCE(total_amount, 0))), 0) AS total
+     FROM water_invoices WHERE tenant_code = $1 AND tenancy_id IS NULL AND status NOT IN ('Paid', 'Void')`,
+    [tenantCode]
+  ).catch(() => ({ rows: [{ total: 0 }] }));
+  const meteredWater = Number((meteredWaterRes.rows[0] && meteredWaterRes.rows[0].total) || 0);
+  const waterShortfall = Math.max(0, Number(tenant.water_charge_amount || 0) - Number(tenant.water_charge_paid || 0)) + meteredWater;
   const arrears = Number(tenant.arrears || 0);
   const categoryLabels = { penalty: 'Penalty', maintenance: 'Maintenance Charge', other: 'Other Charge' };
   const outstanding = [];
@@ -4759,6 +4769,7 @@ async function getTenantExitSummary(tenantCode) {
     });
   }
   if (garbageShortfall > 0) outstanding.push({ type: 'garbage', category: 'garbage', description: 'Garbage Collection Fee', amount: garbageShortfall });
+  if (waterShortfall > 0) outstanding.push({ type: 'water', category: 'water', description: 'Water Charges', amount: waterShortfall });
   const outstandingTotal = outstanding.reduce((s, i) => s + i.amount, 0);
   const penaltiesTotal = outstanding.filter(i => i.type === 'invoice').reduce((s, i) => s + i.amount, 0);
   return {
@@ -4782,6 +4793,7 @@ async function getTenantExitSummary(tenantCode) {
       arrears,
       unpaid_rent: unpaidRent,
       garbage_fee: garbageShortfall,
+      water_fee: waterShortfall,
       penalties: penaltiesTotal,
       outstanding_total: outstandingTotal,
     },

@@ -1597,6 +1597,33 @@ scoped and NOT global - the inline `onchange="toggleSmsBroadcastHouse()"` /
 e.g. `window.smsSaveSettings`). The house/tenant selectors populate correctly
 (`{ houses }` / `{ tenants }` shapes handled). All 27 suites green. Frontend (app.js).
 
+---
+
+### 52. Advanced Rent editing protection removed + BH8/BH46/EX304 audit + water-in-balance (SYSTEM DIRECTIVE)
+Comprehensive accounting/rollover correction (diagnostic examples EX304, BH8, BH46 extended
+system-wide). Full report in `SYSTEM_AUDIT_2026-11.md`.
+
+- **Advanced Rent editing protection REMOVED (Issue 1)**: two locks froze `opening_advance_rent` -
+  the frontend `readOnly` when > 0 and the backend "re-seeding blocked / never modify or re-apply".
+  Both removed. Advanced Rent now works exactly like Opening Balance: enter / increase / reduce /
+  correct / clear any time (after entry, registration, billing application, or rollover). Commits on
+  Save (never auto-locks on click), stays editable after, clearing resets the advance pools, every
+  change audit-logged (from -> to). Payment protections / overpayment calc / history untouched.
+- **BH8**: traced 16,200 (28 Oct, booked as overpayment, bp=Oct) + 2,000 (31 Oct, overpayment).
+  Verified 16,200 covers NOVEMBER rent 16,000 + garbage 200; 2,000 is the water payment for invoice
+  #194. Origin of the 15,980 = Nov rent 15,780 (unpaid) + garbage 200. Corrected: 16,200 -> Nov rent
+  + garbage (bp Oct->Nov), 2,000 -> water #194 (Paid), counters synced. **Balance 0** (was 15,980).
+- **BH46**: water invoices #209/#210 (1,200 metered) were unpaid but the balance showed 0 - the
+  outstanding calc omitted metered water. Fixed `getTenantExitSummary` to include unpaid
+  `water_invoices` alongside the flat water. **Balance 1,200** (was 0).
+- **EX304**: 400 advance was locked (blocked clearing + unit deletion). Issue 1 unblocks it; the
+  "consumed advance re-appearing after rollover" is a rollover-consumption defect (flagged).
+- **Water-in-balance** (Issue 4 one-source-of-truth): `getTenantExitSummary` now sums flat water
+  shortfall + unpaid metered water invoices. Verified safe (payment/statement/water tests green).
+
+All 27 suites green. Backend (store.js, tenants.js) + frontend (app.js, index.html) + data
+(BH8 corrections, audit-logged) + `SYSTEM_AUDIT_2026-11.md`.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1667,3 +1694,4 @@ e.g. `window.smsSaveSettings`). The house/tenant selectors populate correctly
 | 49 | Intelligent tenant broadcasting: payment verification + SMS-only rent reminder | backend+frontend |
 | 50 | SMS broadcast advanced targets + landlord delete + invoice download fix | backend+frontend |
 | 51 | Fix SMS broadcast target dropdowns not opening (window exposure) | frontend |
+| 52 | Advanced Rent editing protection removed + BH8/BH46/EX304 audit + water-in-balance + system audit report | backend+frontend+data |

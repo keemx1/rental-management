@@ -2093,9 +2093,11 @@ async function openTenantModal(id = null) {
       form.agreement_paid.value = t.agreement_paid || 0;
       const openingAdvance = Number(t.opening_advance_rent || 0);
       form.opening_advance_rent.value = openingAdvance;
-      // An already-recorded opening advance can never be changed or re-applied.
-      form.opening_advance_rent.readOnly = openingAdvance > 0;
-      if (openingAdvanceHint) openingAdvanceHint.classList.toggle('hidden', openingAdvance <= 0);
+      // Advanced Rent is freely editable (like Opening Balance) - administrators
+      // may enter, increase, reduce, correct or clear it at any time. The value
+      // commits only on Save (never auto-locks on click) and stays editable after.
+      form.opening_advance_rent.readOnly = false;
+      if (openingAdvanceHint) openingAdvanceHint.classList.add('hidden');
       form.move_in_date.value = t.move_in_date || '';
       form.rent_due_date.value = String(t.rent_due_date || '').slice(0, 10);
       form.rent_due_time.value = String(t.rent_due_time || '23:59:00').slice(0, 5);
