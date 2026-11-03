@@ -216,13 +216,20 @@ router.post('/send', async (req, res) => {
           status = 'Failed';
           error = 'SMS not configured (save the SMS API token in SMS Settings)';
         } else {
-          try {
-            const to = normalizePhone(tenant.phone_number);
-            const result = await smsService.sendSms({ to, message: renderedBody });
-            smsId = (result && result.data && (result.data.uid || result.data.id)) || null;
-          } catch (err) {
+          const to = normalizePhone(tenant.phone_number);
+          if (!to) {
+            // Malformed / missing phone (e.g. too-short number) - skip the send
+            // and report clearly instead of a confusing gateway rejection.
             status = 'Failed';
-            error = err.message || 'SMS send failed';
+            error = 'Invalid or missing phone number';
+          } else {
+            try {
+              const result = await smsService.sendSms({ to, message: renderedBody });
+              smsId = (result && result.data && (result.data.uid || result.data.id)) || null;
+            } catch (err) {
+              status = 'Failed';
+              error = err.message || 'SMS send failed';
+            }
           }
         }
         tally.sms[status === 'Sent' ? 'sent' : 'failed']++;
