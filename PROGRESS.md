@@ -1435,6 +1435,46 @@ past the per-case contradictions). Result: **46/46 `report fix.txt` cases match*
 All 27 suites green. Backend + data (audit_log rows preserve every original/correction/
 reason). Verified live via `scratch/verify_report_fix.js` (46/46, tolerance 600).
 
+---
+
+### 46. November 2026 rent rollover audit + automated rollover engine fix (CRITICAL)
+System-wide Nov 2026 rollover audit. Root cause found and fixed in the engine:
+
+- **Frozen-arrears rollover bug (the core defect)**: `rolloverBody` skipped arrears
+  accrual ENTIRELY for `arrears_manually_set=true` tenants (old line: "just advance the
+  due date"). So the closing month's unpaid rent/garbage never joined the carried-forward
+  `arrears`, leaving `tenant.arrears` stale (ME3 stuck at 1,000 instead of 9,500) and the
+  notification bar (which reads `tenant.arrears`) showing figures well below reality.
+  FIX: manual-arrears tenants now ACCRUE each closing month's rent+garbage on top of the
+  operator's base (preserve the base, don't freeze + drop new months). Future rollovers
+  self-correct.- **Timezone bug**: `firstOfThisMonth` used `.toISOString()` (UTC) so local Nov 1 became
+  `2026-10-31` in UTC+3, missing month-boundary tenants. Fixed to local-date formatting.
+
+- **Repair (backfill) of the already-rolled data**: the Nov 1 rollover ran with the bug,
+  so October's shortfall was missing from manual tenants. Backfilled October (rent +
+  garbage - Oct settled) into `arrears` for every `arrears_manually_set` tenant + B38's
+  lost September, with full audit_log rows. Verified vs the stated examples:
+  **ME3 = 9,500** (notification now shows 9,500 not 1,000), **Shop 2 = 179,000**,
+  **B38 = 18,000** - all match. B501/EX002/SS7 backfilled to base+October.
+
+All 27 suites green. Backend + data. Verified live. (audit_log preserves every correction.)
+
+## Open items / next (Nov rollover task - remaining scope)
+- **Notification dashboard**: figures now read corrected `tenant.arrears`, but the deep-
+  link targets, auto-resolve/reopen rules and the full 26-notification accuracy sweep
+  still need an end-to-end pass (the `detect()` math reads `tenant.arrears` + current
+  unpaid rent; confirm every alert matches its tenant account and the click-through opens
+  the right unit).
+- **System-wide sync**: confirm dashboard / property dashboards / tenant accounts /
+  invoices / collection summaries / outstanding-rent reports all derive from the same
+  reconciled figures (no divergent caches).
+- **Deeper multi-month backfill**: some tenants (e.g. B38-style) were missing a *prior*
+  month (September) from an earlier cycle, not just October. A full "recompute arrears
+  from move-in history" pass would catch these; the current repair backfills the current
+  rollover's gap.
+- EX002 base was 17,700 (audit-confirmed) + Oct 25,200 = 42,900; no explicit expected
+  figure was given for EX002/B501/SS7 - flag if different targets are intended.
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1499,3 +1539,4 @@ reason). Verified live via `scratch/verify_report_fix.js` (46/46, tolerance 600)
 | 43 | Enhanced Report: deposit-credit for future move-ins + unpaid-garbage-only | backend |
 | 44 | Cream House resolved + cumulative roll-up of future-tagged prepayments | backend |
 | 45 | All 46 report fix.txt cases match (individual per-case corrections) | backend+data |
+| 46 | November 2026 rollover audit + automated rollover engine fix (frozen-arrears + timezone) | backend+data |

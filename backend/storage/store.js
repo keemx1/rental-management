@@ -4491,7 +4491,7 @@ async function rolloverMonth() {
 async function rolloverBody() {
   // Find all active tenants whose rent_due_date is in the past
   const today = new Date();
-  const firstOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+  const firstOfThisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
 
   const overdue = await query(
     `SELECT tenant_code, rent_amount, arrears, rent_due_date::text AS rent_due_date, advance_rent_balance, advance_rent_until,
@@ -4542,9 +4542,26 @@ async function rolloverBody() {
     let monthsRolled = 0;
     const todayISO = today.toISOString().slice(0, 10);
 
-    // If arrears were manually set, skip recalculation — just advance the due date
+    // If arrears were manually set, preserve the operator's base figure but still
+    // ACCRUE each closing month's unpaid rent + garbage into it. (The manual flag
+    // means "don't recompute the prior base", NOT "freeze and drop new months" —
+    // the old skip-left-tenants-stale behaviour left ME3/Shop 2 etc. missing the
+    // closing month's rent, so notifications showed figures well below reality.)
     if (manuallySet) {
       while (dueDate.toISOString().slice(0, 10) < todayISO) {
+        const monthPrefix = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
+        const monthPaid = approvedPayments
+          .filter(p => billingMonthOfPayment(p) === monthPrefix)
+          .reduce((sum, p) => sum + rentDirectedAmount(p), 0);
+        const monthGarbagePaid = approvedPayments
+          .filter(p => billingMonthOfPayment(p) === monthPrefix)
+          .reduce((sum, p) => sum + garbageDirected(p), 0);
+        if (monthPaid < rentAmount) arrears += (rentAmount - monthPaid);
+        if (garbageRate > 0) {
+          const gShort = Math.max(0, garbageRate - monthGarbagePaid);
+          arrears += gShort;
+          garbageRolled += gShort;
+        }
         dueDate.setMonth(dueDate.getMonth() + 1);
         dueDate.setDate(5);
         monthsRolled++;
@@ -4608,12 +4625,12 @@ async function rolloverBody() {
 
       await query(
         `UPDATE tenants SET arrears = $1, rent_due_date = $2, rent_paid_this_month = 0, garbage_fee_paid = 0, status = $6, advance_rent_balance = $4, advance_rent_until = $5, updated_at = NOW()${rentUpdate} WHERE tenant_code = $3`,
-        [manuallySet ? Number(t.arrears || 0) : Math.max(0, arrears), newDueDate, t.tenant_code, advanceRentBalance, newAdvanceUntil, newStatus, ...extraParams]
+        [Math.max(0, arrears), newDueDate, t.tenant_code, advanceRentBalance, newAdvanceUntil, newStatus, ...extraParams]
       );
       results.push({
         tenant_code: t.tenant_code,
         months_missed: monthsRolled,
-        new_arrears: manuallySet ? Number(t.arrears || 0) : Math.max(0, arrears),
+        new_arrears: Math.max(0, arrears),
         manually_preserved: manuallySet,
         new_due_date: newDueDate,
         garbage_rolled: garbageRolled,
