@@ -386,10 +386,18 @@ function parseMpesaMessage(raw) {
     const [, d, mon, y] = dateMatchMon;
     payment_date = `${y}-${monthNames[mon.toLowerCase()]}-${d.padStart(2, '0')}`;
   } else if (dateMatchYYYYSlash) {
-    const [, d, m, y] = dateMatchYYYYSlash;
-    payment_date = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    // M-Pesa uses MM/DD/YYYY but some texts are DD/MM/YYYY - detect the order by
+    // which part can be a month (>12 must be the day). Ambiguous -> MM/DD (M-Pesa).
+    const [, a, b, y] = dateMatchYYYYSlash;
+    const first = Number(a), second = Number(b);
+    const m = (first > 12 && second <= 12) ? b : a;
+    const d = (first > 12 && second <= 12) ? a : b;
+    payment_date = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   } else if (dateMatchYY) {
-    const [, d, m, y2] = dateMatchYY;
+    const [, a, b, y2] = dateMatchYY;
+    const first = Number(a), second = Number(b);
+    const m = (first > 12 && second <= 12) ? b : a;
+    const d = (first > 12 && second <= 12) ? a : b;
     const fullYear = Number(y2) < 100 ? 2000 + Number(y2) : Number(y2);
     payment_date = `${fullYear}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   }

@@ -1655,6 +1655,18 @@ ISO `YYYY-MM-DD` and `MM/DD/YYYY` alike, falls back to null when unparseable, an
 approve returns 200, payment recorded, receipt PDF generated (GEHPM-RCT-202611-003279), WhatsApp
 confirmation sent. All 27 suites green. Backend (payments.js).
 
+---
+
+### 55. Fix M-Pesa date parse (month/day swap) - the true approve-500 root cause
+The approve still failed after #54. Reproduced the PARSE step over HTTP: it returned 200 but with
+`payment_date: "2026-28-10"` - an INVALID date (month 28). Root cause: `parseMpesaMessage` matched
+`10/28/2026` and destructured `[, d, m, y]` (day-first), but M-Pesa uses **MM/DD/YYYY**, so
+`m=28`/`d=10` produced `2026-28-10`. The frontend then carried a broken date into the approve.
+FIX: robust month/day detection - if the first part > 12 it must be the day (DD/MM), if the second
+> 12 it is the day (MM/DD), ambiguous defaults to MM/DD (M-Pesa US). Verified all formats now
+correct: `10/28/2026`->2026-10-28, `28/10/2026`->2026-10-28, ISO, and `5 Oct 2026`->2026-10-05.
+All 27 suites green. Backend (payments.js).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1728,3 +1740,4 @@ confirmation sent. All 27 suites green. Backend (payments.js).
 | 52 | Advanced Rent editing protection removed + BH8/BH46/EX304 audit + water-in-balance + system audit report | backend+frontend+data |
 | 53 | Fix payment-approve 500 (WhatsApp PDF throw) + rollover-consumption fix (auto-seed re-emit) | backend |
 | 54 | Fix payment-approve 500 (Invalid time value date-parse bug) | backend |
+| 55 | Fix M-Pesa date parse (MM/DD vs DD/MM month-day swap -> 2026-28-10) | backend |
