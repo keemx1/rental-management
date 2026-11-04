@@ -788,16 +788,27 @@ router.post('/approve-from-message', async (req, res) => {
       return res.status(404).json({ error: 'Tenant not found' });
     }
 
+    // Parse date safely: the M-Pesa text yields MM/DD/YYYY (or ISO). Concatenating
+    // 'T12:00:00' to a non-ISO string makes an Invalid Date and toISOString() throws
+    // (the 500). Normalise to a real Date, fall back to null when unparseable.
+    const parsedDate = (() => {
+      const raw = req.body?.payment_date || parsed.payment_date;
+      if (!raw) return null;
+      const s = String(raw).trim();
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(s + 'T12:00:00') : new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    })();
+
     const payment = await store.createPayment({
       tenant_id: tenantId,
       amount: parsed.amount,
       mpesa_reference: parsed.mpesa_reference,
       notes: parsed.raw ? `Parsed from message: ${parsed.raw}` : null,
       status: 'Pending',
-      payment_date: req.body?.payment_date || parsed.payment_date || undefined,
+      payment_date: parsedDate ? parsedDate.toISOString().slice(0, 10) : (req.body?.payment_date || parsed.payment_date || undefined),
       payment_mode: 'M-Pesa',
       sender_account: parsed.phone_number || null,
-      payment_datetime: parsed.payment_date ? new Date(parsed.payment_date + 'T12:00:00').toISOString() : null,
+      payment_datetime: parsedDate ? parsedDate.toISOString() : null,
       client_txn_id: clientTxnId,
       source: 'mpesa_parse',
     });
@@ -902,7 +913,7 @@ router.post('/approve-from-message', async (req, res) => {
         if (replay) return res.json(replay);
       } catch (_) {}
     }
-    res.status(500).json({ error: 'Failed to approve payment from message' });
+    res.status(500).json({ error: 'Failed to approve payment from message', detail: err && err.message });
   }
 });
 

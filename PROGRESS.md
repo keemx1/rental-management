@@ -1642,6 +1642,19 @@ All 27 suites green. Backend (store.js, tenants.js) + frontend (app.js, index.ht
 All 27 suites green (payment-delivery 27, receipt/overpayment 18/23, future-activation 44,
 deposit-reinstatement 65, financial-phase1 58). Backend (payments.js, store.js).
 
+---
+
+### 54. Fix payment-approve 500 (Invalid time value - date-parse bug)
+The approve-from-message still 500'd (Stephen Kinyangu, ref UJS8306DG3). Diagnosed by adding
+error detail to the catch + reproducing over HTTP with a signed token. Root cause:
+`new Date(parsed.payment_date + 'T12:00:00').toISOString()` - the M-Pesa date is `10/28/2026`
+(MM/DD/YYYY); concatenating `T12:00:00` makes an unparseable string -> `Invalid Date` ->
+`toISOString()` throws `RangeError: Invalid time value`. FIX: a safe date-normaliser parses
+ISO `YYYY-MM-DD` and `MM/DD/YYYY` alike, falls back to null when unparseable, and feeds both
+`payment_date` (normalised `YYYY-MM-DD`) and `payment_datetime`. Verified end-to-end over HTTP:
+approve returns 200, payment recorded, receipt PDF generated (GEHPM-RCT-202611-003279), WhatsApp
+confirmation sent. All 27 suites green. Backend (payments.js).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1714,3 +1727,4 @@ deposit-reinstatement 65, financial-phase1 58). Backend (payments.js, store.js).
 | 51 | Fix SMS broadcast target dropdowns not opening (window exposure) | frontend |
 | 52 | Advanced Rent editing protection removed + BH8/BH46/EX304 audit + water-in-balance + system audit report | backend+frontend+data |
 | 53 | Fix payment-approve 500 (WhatsApp PDF throw) + rollover-consumption fix (auto-seed re-emit) | backend |
+| 54 | Fix payment-approve 500 (Invalid time value date-parse bug) | backend |
