@@ -1667,6 +1667,26 @@ FIX: robust month/day detection - if the first part > 12 it must be the day (DD/
 correct: `10/28/2026`->2026-10-28, `28/10/2026`->2026-10-28, ISO, and `5 Oct 2026`->2026-10-05.
 All 27 suites green. Backend (payments.js).
 
+---
+
+### 56. Fix confirmation/SMS water figure + void SS8 fictitious invoice (CASE A + CASE B)
+Both cases were the same root cause: the confirmation/SMS water figure pulled the WHOLE
+unpaid metered-water register instead of the current billing month's approved water.
+
+- **CASE A (SB7)**: flat water 0; metered register = 8,380 (Sept) + 360 (Oct) = 8,740 unpaid.
+  The confirmation showed 8,740 (the whole register) instead of the 360 Oct invoice being
+  settled. FIX: `waterChargeBefore` (the "Rent Due" water) now = flat water + CURRENT-month
+  metered only (`currentMonthMetered`, filtered by billing_month). SB7 now shows 360.
+- **CASE B (SS8)**: flat water 0 (NO water supply) yet carried a 10,180 metered invoice that
+  the SMS surfaced as a fictitious water charge. FIX: voided invoice#38 (fictitious - no
+  water supply) so SMS/confirmation show only the genuine 12,000 rent. Current-month water
+  for SS8 = 0.
+
+Both the confirmation (messages.js `waterChargeBefore`) and the balance now use the verified
+current-month water, so dashboard / invoice / confirmation / SMS agree. The prior-month
+invoices remain in `remainingWater` (carried correctly) without being re-charged as this
+month's due. All 27 suites green. Backend (store.js) + data (SS8 invoice voided, audit-logged).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1741,3 +1761,4 @@ All 27 suites green. Backend (payments.js).
 | 53 | Fix payment-approve 500 (WhatsApp PDF throw) + rollover-consumption fix (auto-seed re-emit) | backend |
 | 54 | Fix payment-approve 500 (Invalid time value date-parse bug) | backend |
 | 55 | Fix M-Pesa date parse (MM/DD vs DD/MM month-day swap -> 2026-28-10) | backend |
+| 56 | Fix confirmation/SMS water figure (whole metered register -> current-month only) + void SS8 fictitious invoice | backend+data |

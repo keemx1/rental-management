@@ -986,7 +986,7 @@ async function approvePaymentOnce(id) {
       // it was never settled here, so every payment fell through to rent while
       // the client's water bill (visible in the parse preview) stayed unpaid.
       const waterInvoiceRows = (await runOrQuery(run,
-        `SELECT id, wtr_number, GREATEST(COALESCE(total_amount_payable, 0), COALESCE(total_amount, 0)) AS payable
+        `SELECT id, wtr_number, billing_month, GREATEST(COALESCE(total_amount_payable, 0), COALESCE(total_amount, 0)) AS payable
          FROM water_invoices
          WHERE tenant_code = $1 AND tenancy_id IS NULL
            AND status NOT IN ('Paid', 'Void')
@@ -995,6 +995,16 @@ async function approvePaymentOnce(id) {
       )).rows;
       const waterInvoiceOutstanding = waterInvoiceRows
         .reduce((s, w) => s + Number(w.payable || w.total_amount || 0), 0);
+      // Current-billing-month metered water only (for the "Rent Due" breakdown).
+      // Prior-month invoices are carried in remainingWater, not charged again as
+      // this month's due - otherwise the confirmation shows the whole register
+      // (SB7: 8,740 instead of the 360 Oct invoice; SS8: fictitious 10,180).
+      const billingMonthKey = payment.billing_period
+        || (tenant.rent_due_date ? String(tenant.rent_due_date).slice(0, 7) : null);
+      const currentMonthMetered = billingMonthKey
+        ? waterInvoiceRows.filter((w) => String(w.billing_month).slice(0, 7) === billingMonthKey)
+            .reduce((s, w) => s + Number(w.payable || 0), 0)
+        : 0;
       const totalWaterOwed = waterChargeShortfall + waterInvoiceOutstanding;
       if (totalWaterOwed > 0 && remaining > 0) {
         const settle = Math.min(totalWaterOwed, remaining);
@@ -1068,7 +1078,7 @@ async function approvePaymentOnce(id) {
         depositShortfallBefore: depositShortfall,
         arrearsBefore: Number(tenant.arrears || 0),
         garbageFeeBefore: garbageFeeShortfall,
-        waterChargeBefore: waterChargeShortfall,
+        waterChargeBefore: waterChargeShortfall + currentMonthMetered,
         agreementBefore: Number(tenant.agreement_outstanding || 0),
         rentDue: remainingRentForMonth,
         rentAmount,
