@@ -111,6 +111,40 @@ edits, no manufactured transactions) - see "Open / flagged" below for the correc
 
 ---
 
+## ISSUE 3 (cont.) - PER-TENANT VERIFICATION RESULTS (all 93 accounts)
+
+Verified every account against actual payment allocations + invoices. Corrections applied only
+where evidence supported them (audit-logged). Summary:
+
+- **Pattern 1 - 9 cross-period advances: 0 corrections needed.** Each was verified: the target
+  month's rent is ALREADY SETTLED (rentSettled>0 in the allocation), so the overpayment is a
+  legitimate advance/credit, not a mis-booking. (B21 19,500; A302 1,200; 116 6,000; B35 4,000;
+  ME6 7,000; BH11 3,800; BH46 1,500+7,500; EX001 22,700; EX003 28,700 - all correct advances.)
+  Only BH8 was a true mis-booking (rent never settled) - already fixed.
+- **Pattern 2 - water invoices: 6 corrected, 53 genuine.**
+  *Paid-but-carried-forward (BH8-pattern, re-allocated overpayment->water + marked Paid):*
+  BH38 invoice#207 (400 <- pay#2971), SB12 invoice#188 (180 <- pay#2963).
+  *Zero-amount invoices marked Paid (nothing owed):* BH1#192, BH45#191, BH32#202, SB1#276.
+  *Genuine unpaid (owed, correctly reflected in balances by the water-in-balance fix): 53 invoices.*
+  Note: the "waterSettled" figures on the Bluegum tenants (BH13/BH46/BH43/BH21/BH28/BH5/BH27)
+  cover the FLAT water charge (3,000), not the metered invoices - so those metered invoices are
+  genuinely owed, NOT settled (verified per-tenant to avoid false Paid marks).
+- **Pattern 3 - 40 advance balances: 0 corrections needed.** Each was checked against
+  utilisation (`advance_rent_until` + partial `advance_rent_balance`): all are legitimate
+  future-month prepayments or partial remainders. EX304's 400 was the one stale credit (the
+  auto-seed re-emit bug) - fixed by removing the auto-seed, and its Advanced Rent is now freely
+  editable so the administrator can clear it.
+
+Integrity: no payment/invoice manufactured; no unpaid charge marked Paid without a matching
+payment; no legitimate history deleted. Every correction carries an audit row (previous value,
+corrected value, reason, date, actor).
+
+## Verified balances (examples)
+- BH8 = 0 (rent 16,000 + garbage 200 + water 2,000 all settled), BH46 = 1,200 (unpaid metered
+  water only), EX304 = 40,000 (Vacant unit charges; 400 advance now editable/clearable).
+
+---
+
 ## ISSUE 4 — One source of financial truth
 
 The outstanding-balance calculation (`getTenantExitSummary`) is the single source and now reflects:
