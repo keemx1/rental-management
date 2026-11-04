@@ -80,11 +80,34 @@ Advanced Rent directly. The "consumed advance re-appearing" is a rollover-consum
 2. **Metered water invoices omitted from balances**: `water_invoices` were never summed into the
    outstanding balance (only the flat `water_charge_amount`), so unpaid water invoices showed a
    misleading zero (BH46). Fixed in `getTenantExitSummary`.
-3. **Consumed advances re-appearing after rollover** (EX304's 400): the rollover does not always
-   decrement `advance_rent_balance`/`advance_rent_until` when an advance is utilised, so a consumed
-   credit remains available. (Open: fix in `rolloverBody` consumption step.)
+3. **Consumed advances re-appearing after rollover** (EX304's 400): the `reconcileTenant` auto-seed
+   re-seeded `opening_advance_rent` into `advance_rent_balance` whenever the balance hit 0 with no
+   payments, so a utilised advance re-emitted and could not be cleared. FIXED (auto-seed removed).
 4. **Advanced Rent was immutable** — prevented onboarding corrections and cleanup of stale credits
    (Issue 1 — fixed).
+
+---
+
+## ISSUE 3 (cont.) — FULL SYSTEM SWEEP (all tenants)
+
+System-wide scan for the three patterns above. Counts (before per-case correction):
+- **Pattern 1 — cross-period advance mis-booking**: 9 genuine payments (bp != payment month AND
+  booked as overpayment): B21 (19,500), A302 (1,200), 116 (6,000), B35 (4,000), ME6 (7,000),
+  BH11 (3,800), BH46 (1,500+7,500), EX001 (22,700), EX003 (28,700). Each needs verification of
+  whether the overpayment is correct (advance for the tagged month) or should settle the target
+  month's rent (BH8-style) - not a blanket fix.
+- **Pattern 2 — unpaid metered water invoices**: 43 tenants hold unpaid `water_invoices`
+  (SA1 11,460 / SA3 11,100 / SS7 10,740 / SA6 10,560 ... BH46 1,200). These are now correctly
+  reflected in the outstanding balance (water-in-balance fix). Each still needs verification
+  whether a payment already settled the invoice (BH8-style: mark Paid) or it is genuinely owed.
+- **Pattern 3 — advance / opening-advance balances**: 41 tenants hold an advance or opening advance
+  (D1 30,000 / C102 15,000 / BH45 14,200 ... ). Most are legitimate future-month prepayments; the
+  risk is a stale consumed credit (EX304-style). The auto-seed fix prevents re-emission going
+  forward; existing balances need review against utilisation history.
+
+These three groups are the complete population of accounts potentially affected by the systemic
+weaknesses. Corrections must be verified per-tenant against actual payments/invoices (no blanket
+edits, no manufactured transactions) - see "Open / flagged" below for the correction plan.
 
 ---
 
