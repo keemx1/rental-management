@@ -4448,6 +4448,13 @@ async function rolloverMonth() {
       return { skipped: true, reason: 'already_running' };
     }
 
+    // ── Stage 1: BEFORE rollover - verify every tenant's closing position ──
+    let preValidation = { flagged: [] };
+    try {
+      const financialValidator = require('../services/financialValidator');
+      preValidation = await financialValidator.flagIssues(await financialValidator.validatePreRollover(), 'pre-rollover-check');
+    } catch (err) { console.error('[Rollover] pre-rollover validation failed:', err.message); }
+
     const results = await rolloverBody();
 
     // Reconcile all active tenants after rollover to ensure correct balances
@@ -4457,6 +4464,13 @@ async function rolloverMonth() {
     } catch (err) {
       console.error('[Rollover] Tenant reconciliation failed:', err.message);
     }
+
+    // ── Stage 2: AFTER rollover - opening balances sane, nothing stale carried ──
+    let postValidation = { flagged: [] };
+    try {
+      const financialValidator = require('../services/financialValidator');
+      postValidation = await financialValidator.flagIssues(await financialValidator.validatePostRollover(), 'post-rollover-check');
+    } catch (err) { console.error('[Rollover] post-rollover validation failed:', err.message); }
 
     // Determine the month being closed (the month before the current one)
     const now = new Date();
@@ -4475,7 +4489,12 @@ async function rolloverMonth() {
     await setAppConfig('last_rollover_month', currentMonth);
     await setAppConfig('last_rollover_at', now.toISOString());
 
-    return { skipped: false, tenants_updated: results.length, details: results, reports_generated: reports.length, closing_month: closingMonth };
+    return {
+      skipped: false, tenants_updated: results.length, details: results,
+      reports_generated: reports.length, closing_month: closingMonth,
+      pre_validation: { checked: preValidation.checked, flagged: (preValidation.flagged || []).length },
+      post_validation: { checked: postValidation.checked, flagged: (postValidation.flagged || []).length },
+    };
   } finally {
     if (acquired) {
       await client.query('SELECT pg_advisory_unlock($1)', [ROLLOVER_LOCK_KEY]).catch(() => {});

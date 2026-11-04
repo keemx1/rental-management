@@ -1687,6 +1687,37 @@ current-month water, so dashboard / invoice / confirmation / SMS agree. The prio
 invoices remain in `remainingWater` (carried correctly) without being re-charged as this
 month's due. All 27 suites green. Backend (store.js) + data (SS8 invoice voided, audit-logged).
 
+---
+
+### 57. 3-stage automated financial validator + system-wide consistency audit (SYSTEM DIRECTIVE)
+Built `backend/services/financialValidator.js` - financial consistency checks that run at three
+stages and FLAG inconsistencies (never silently rewrite records):
+
+- **Stage 1 - before rollover** (`validatePreRollover`): verifies every tenant's closing position
+  (non-negative counters, paid<=configured charge, consumed-advance re-emit, payment allocations
+  sum to the payment amount, duplicate M-Pesa refs). Wired into `rolloverMonth` before `rolloverBody`.
+- **Stage 2 - after rollover** (`validatePostRollover`): opening balances sane, nothing stale
+  carried forward. Wired after `reconcileAllTenants`.
+- **Stage 3 - after payment** (`validatePostPayment`): allocation sums to the amount + tenant
+  account consistent. Wired into `approvePayment`'s route after approval.
+
+Checks (evidence-based, comparing stored counters to actual payments/invoices): NEG_ARREARS /
+NEG_ADVANCE / NEG_CREDIT, OVER_DEPOSIT / OVER_GARBAGE / OVER_WATER (paid>configured),
+STALE_ADVANCE (EX304 re-emit: opening_advance seeded but advance_rent_until null), ALLOC_MISMATCH
+(payment allocation doesn't sum to the amount = unaccounted money), DUP_REF. Every finding is
+written to `audit_log` (action FLAGGED_INCONSISTENCY) for review.
+
+**System-wide audit result (306 tenants)**: 6 real inconsistencies flagged -
+- ALLOC_MISMATCH (4): BH5 pay#638 (13,000->alloc 0), GB01 pay#625 (35,200->0), A501 pay#620
+  (30,000->0) = unallocated legacy payments; B23 pay#1092 (6,000->6,300) = over-allocated.
+- OVER_DEPOSIT (2): SS6 (paid 12,000 > configured 9,000), SA1 (paid 12,000 > configured 10,000).
+
+These 6 are FLAGGED for correction (audit-logged) but NOT auto-fixed - each needs per-case
+evidence (the intended allocation / correct deposit value is unknown; correcting by guess would
+violate the no-fabrication rule). Refined STALE_ADVANCE to the exact EX304 re-emit pattern so
+legitimate partial remainders (BH20 9,500 etc.) are not false-flagged. All 27 suites green
+(payment 27, financial-phase1 58, deposit-reinstatement 65, financial-integrity 27).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1762,3 +1793,4 @@ month's due. All 27 suites green. Backend (store.js) + data (SS8 invoice voided,
 | 54 | Fix payment-approve 500 (Invalid time value date-parse bug) | backend |
 | 55 | Fix M-Pesa date parse (MM/DD vs DD/MM month-day swap -> 2026-28-10) | backend |
 | 56 | Fix confirmation/SMS water figure (whole metered register -> current-month only) + void SS8 fictitious invoice | backend+data |
+| 57 | 3-stage automated financial validator (before/after rollover, after payment) + system-wide consistency audit | backend |

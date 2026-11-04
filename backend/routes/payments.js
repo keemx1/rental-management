@@ -848,6 +848,15 @@ router.post('/approve-from-message', async (req, res) => {
       return res.status(500).json({ error: 'Failed to approve payment after creating it' });
     }
 
+    // ── Stage 3: AFTER payment approval - flag (never silently fix) any
+    //    allocation / balance inconsistency for correction.
+    let postPayValidation = { flagged: [] };
+    try {
+      const financialValidator = require('../services/financialValidator');
+      postPayValidation = await financialValidator.flagIssues(
+        await financialValidator.validatePostPayment(approved.payment && approved.payment.id || payment.id), 'post-payment-check');
+    } catch (err) { console.error('[Payment] post-payment validation failed:', err.message); }
+
     // Receipt PDF permanence: generation starts immediately (from the final
     // approved data) and runs alongside the text acknowledgement.
     const receiptPromise = ensureReceiptPdf(approved.tenant, approved.payment, approved.allocation);
