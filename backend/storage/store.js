@@ -1370,40 +1370,13 @@ async function reconcileTenant(tenantCode) {
   // (and destroy the until-marker rollover relies on).
   let runningAdvance = Number(tenant.advance_rent_balance || 0);
 
-  // Auto-seed: if opening_advance_rent exists but advance was never seeded
-  // (advance_rent_until is null, balance is 0, no approved payments yet),
-  // seed the advance now so it's available for current/future billing.
+  // Auto-seed REMOVED: it re-seeded `opening_advance_rent` into advance_rent_balance
+  // whenever the balance hit 0 with no payments, so a CONSUMED advance re-appeared
+  // after rollover (EX304's 400) and could not be cleared. Opening advance is now
+  // seeded only at creation/activation, and Advanced Rent is freely editable (Issue 1)
+  // so administrators seed/correct it directly. This keeps consumed credits consumed.
   const openingAdvance = Number(tenant.opening_advance_rent || 0);
-  if (openingAdvance > 0 && !tenant.advance_rent_until && runningAdvance === 0 && allPayments.length === 0) {
-    const rentAmount = Number(tenant.rent_amount || 0);
-    if (rentAmount > 0) {
-      const fullMonths = Math.floor(openingAdvance / rentAmount);
-      const partial = Number((openingAdvance - fullMonths * rentAmount).toFixed(2));
-      const currentMonthStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`;
-      let advanceUntil = null;
-      if (fullMonths > 0 && partial > 0) {
-        // Covers N full months + partial into month N+1
-        // advanceUntil = first day of month N+2 (the first uncovered month)
-        advanceUntil = addMonths(currentMonthStart, fullMonths + 1);
-      } else if (fullMonths > 0) {
-        // Covers exactly N full months
-        advanceUntil = addMonths(currentMonthStart, fullMonths);
-      }
-      // partial-only (fullMonths=0): no advanceUntil needed, just runningAdvance
-
-      // Set runningAdvance to the partial remainder only.
-      // Full months are covered by advance_rent_until (isFullyCoveredMonth).
-      // The partial amount is what's left over and needs to be tracked as balance.
-      runningAdvance = partial > 0 ? partial : 0;
-      // Store the seeded advance
-      await query(
-        `UPDATE tenants SET advance_rent_until = $2, advance_rent_balance = $3, updated_at = NOW() WHERE tenant_code = $1`,
-        [tenantCode, advanceUntil, runningAdvance]
-      );
-      tenant.advance_rent_until = advanceUntil;
-      tenant.advance_rent_balance = runningAdvance;
-    }
-  }
+  void openingAdvance;
 
   // Existing arrears from past rollovers — may be stale if advance payments
   // were not properly allocated. We'll recompute them below.

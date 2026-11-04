@@ -1624,6 +1624,24 @@ system-wide). Full report in `SYSTEM_AUDIT_2026-11.md`.
 All 27 suites green. Backend (store.js, tenants.js) + frontend (app.js, index.html) + data
 (BH8 corrections, audit-logged) + `SYSTEM_AUDIT_2026-11.md`.
 
+---
+
+### 53. Fix payment-approve 500 + rollover-consumption fix (auto-seed re-emit)
+- **Payment approval 500 (urgent)**: `POST /api/payments/approve-from-message` threw a 500 and
+  refused to approve. Root cause: `sendReceiptPdf` called `whatsapp.sendDocumentSmart` with no
+  try/catch, so a WhatsApp/transport failure (session disconnected) rejected the route. FIXED:
+  `sendReceiptPdf` now catches and returns an honest per-channel status (matching
+  `sendReceiptAndReport`) - a WhatsApp failure never fails the payment approval itself. Approve
+  now succeeds and reports the real PDF/WhatsApp delivery status.
+- **Rollover-consumption fix (EX304's 400 re-appearing)**: the `reconcileTenant` auto-seed
+  re-seeded `opening_advance_rent` into `advance_rent_balance` whenever the balance hit 0 with no
+  payments, so a CONSUMED advance re-emitted after rollover and could not be cleared. REMOVED the
+  auto-seed - opening advance is seeded only at creation/activation, and Advanced Rent is now
+  freely editable (Issue 1) so admins seed/correct it directly. Consumed credits now stay consumed.
+
+All 27 suites green (payment-delivery 27, receipt/overpayment 18/23, future-activation 44,
+deposit-reinstatement 65, financial-phase1 58). Backend (payments.js, store.js).
+
 ## Open items / next
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
@@ -1695,3 +1713,4 @@ All 27 suites green. Backend (store.js, tenants.js) + frontend (app.js, index.ht
 | 50 | SMS broadcast advanced targets + landlord delete + invoice download fix | backend+frontend |
 | 51 | Fix SMS broadcast target dropdowns not opening (window exposure) | frontend |
 | 52 | Advanced Rent editing protection removed + BH8/BH46/EX304 audit + water-in-balance + system audit report | backend+frontend+data |
+| 53 | Fix payment-approve 500 (WhatsApp PDF throw) + rollover-consumption fix (auto-seed re-emit) | backend |

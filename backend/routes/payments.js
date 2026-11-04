@@ -54,21 +54,27 @@ async function ensureReceiptPdf(tenant, payment, allocation) {
 // per-channel status — a text failure never blocks the PDF attempt, and a
 // text fallback never counts as a delivered PDF.
 async function sendReceiptPdf(tenant, payment, doc, allocation = null) {
-  if (!doc || !doc.file_path || !fs.existsSync(doc.file_path)) {
-    // One fresh attempt (e.g. the first generation timed out) before giving up.
-    if (allocation !== null && allocation !== undefined) {
-      doc = await ensureReceiptPdf(tenant, payment, allocation);
+  try {
+    if (!doc || !doc.file_path || !fs.existsSync(doc.file_path)) {
+      // One fresh attempt (e.g. the first generation timed out) before giving up.
+      if (allocation !== null && allocation !== undefined) {
+        doc = await ensureReceiptPdf(tenant, payment, allocation);
+      }
     }
+    if (!doc || !doc.file_path || !fs.existsSync(doc.file_path)) {
+      return { status: 'Skipped', failureReason: 'no_pdf' };
+    }
+    const caption = `Payment receipt ${payment.receipt_number || ''} — KES ${Number(payment.amount || 0).toLocaleString('en-KE')} (${tenant.name || tenant.tenant_code || ''})`.trim();
+    const r = await whatsapp.sendDocumentSmart(tenant.phone_number, doc.file_path, caption);
+    if (r.status !== 'Sent') {
+      return { status: 'Failed', messageId: r.messageId || null, failureReason: r.failureReason || 'pdf_error' };
+    }
+    return { status: 'Sent', messageId: r.messageId || null };
+  } catch (err) {
+    // A WhatsApp/transport failure must never fail the payment approval itself -
+    // report an honest per-channel status (matches sendReceiptAndReport).
+    return { status: 'Failed', messageId: null, failureReason: (err && err.message) || 'pdf send failed' };
   }
-  if (!doc || !doc.file_path || !fs.existsSync(doc.file_path)) {
-    return { status: 'Skipped', failureReason: 'no_pdf' };
-  }
-  const caption = `Payment receipt ${payment.receipt_number || ''} — KES ${Number(payment.amount || 0).toLocaleString('en-KE')} (${tenant.name || tenant.tenant_code || ''})`.trim();
-  const r = await whatsapp.sendDocumentSmart(tenant.phone_number, doc.file_path, caption);
-  if (r.status !== 'Sent') {
-    return { status: 'Failed', messageId: r.messageId || null, failureReason: r.failureReason || 'pdf_error' };
-  }
-  return { status: 'Sent', messageId: r.messageId || null };
 }
 
 // Send the payment receipt and report the HONEST delivery status.
