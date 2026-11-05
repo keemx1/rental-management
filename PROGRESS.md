@@ -35,6 +35,7 @@ Run from the repo root (server must be up on port `3003`):
 | Pre-Exit Inspection Inventory | `node tests/test_preexit_inspection.js` | 56 assertions — unit lookup + tenancy disambiguation, item CRUD with server-side totals (spec 14,500 example), Draft/Shared/Agreed, PDF with exact disclaimer + no refund figures, one-time transfer into the Exit Invoice (repeat/partial retry safe, finalized refused 409), transferred items locked, tenancy seal + archive visibility, re-let protection |
 | Statement period integration | `node tests/test_statement_period.js` | 55 assertions — 7-row period summary (opening/rent/full garbage/charges/due/payments/balance) with month arithmetic + continuity, period-scoped payment & charge histories (no all-time mixing, no duplicate rows), period empty-states, design/letterhead preserved, route validation + PDF, frontend period selector |
 | Broadcast channel (SMS option) | `node tests/test_broadcast_channel.js` | 32 assertions — whatsapp/sms/both dispatch with per-channel tallies and log rows, SMS-only 400 when unconfigured, both+unconfigured degrades to WhatsApp with per-recipient SMS failures, honest per-recipient failure reasons, whatsapp_message_log untouched by SMS legs, house scoping, frontend selector |
+| Water billing scope (billing source + message totals) | `node tests/test_water_billing_scope.js` | 23 assertions - water owed = WATER-ONLY invoices (legacy bundled rent+utility rows excluded from preview, allocation, exit summary, statement), billed with the cycle whose rent pays them (payment_month/due_month), preview == confirmation == allocation ("Rent Due" shows the month's FULL rent + garbage + water, e.g. 12,380 for rent 12,000 + garbage 200 + water 180), bundled rows never touched by water settling, payment delete reopens the settled invoice + restores the register balance, partial settle never flips Paid |
 | Water invoice water-only scope | `node tests/test_water_invoice_scope.js` | 27 assertions — totals = water bill + WATER arrears only (rent/garbage/other arrears excluded even when supplied), tenant rent never injected, update recomputes water-only, PDF titled WATER BILL INVOICE with no rent/garbage lines + water-only notes, form fields removed, PDF end-to-end |
 | Universal global search | `node tests/test_global_search.js` | 23 assertions — every entity type (tenants, archive, properties, landlords, water/exit invoices, pre-exit forms, payments+M-Pesa with receipt deep links, penalties, work orders, maintenance, mgmt expense invoices, documents, commission invoices/payments), kinds for direct navigation, route + auth, frontend bar |
 | Landlord commissions | `node tests/test_landlord_commissions.js` | 35 assertions — per-property accounts never mixed (300k@5%=15k vs 200k@4%=8k), invoice PDF + numbers, payments to the correct property only, automatic carry-forward (5k→17k−7k→10k→8k), statement ledger with running balance + PDF, regeneration/void, mismatch + unassigned guards, overview split |
@@ -1022,7 +1023,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1092 assertions across 27 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
+Suite totals: **1,122 assertions across 28 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -1823,6 +1824,54 @@ billing records; genuine arrears + advance preserved; every correction audit-log
 
 ---
 
+### 61. Water billing root-cause fix: water-only invoices + full month charges (SYSTEM DIRECTIVE)
+Client report (2026-11-05): water bill amounts wrong in tenant billing AND message generation -
+SS6 showed water 9,481 + rent 9,000 (total 18,681) instead of water 180 + rent 12,000 + garbage 200
+(total 12,380). Fixed at the SOURCE in system logic, not per-tenant:
+
+- **Root cause**: the legacy "MONTHLY RENT & UTILITY" water rows (Sept) bundled rent + garbage +
+  water into one total (SS6 9,300.80 = rent 9,000 + garbage 200 + water 100.80). Water figures
+  summed the WHOLE `water_invoices` register - double-billing rent/garbage (already charged in the
+  rent cycle) and pulling previous billing periods into the current bill.
+- **FIX (billing source)**: `WATER_ONLY_SQL` - only rows with NO rent/garbage/non-water component
+  count as water. Applied in `getWaterInvoiceOutstanding` (parse preview), `approvePayment` step 6
+  (allocation settle), `getTenantExitSummary` (tenant billing total) and the statement's monthly
+  charge rows. Outstanding uses the invoice_register twin's balance so partial settlements are
+  never re-charged in full.
+- **FIX (billing month)**: water billed WITH the month's rent = the invoice DUE that month
+  (`payment_month`/`due_month` - e.g. the Oct consumption invoice due 5 Nov bills with Nov rent).
+  The prior `billing_month` match never fired for real cycle payments. Prior-cycle leftovers stay
+  in `remainingWater`, not re-charged as this month's due.
+- **FIX (message wording)**: "Monthly Rent"/"Garbage Fee" in the Rent Due line show the month's
+  FULL charges (matching the tenant statement ledger), not the remainder after earlier partial
+  payments this month. Preview (`buildPaymentMessage`) and confirmation
+  (`buildPaymentConfirmation`) use identical formulas (verified identical output).
+- **FIX (delete reversal)**: deleting a payment reopens the water invoices it settled and restores
+  the register balance (SB10's 360 stayed "Paid" after payment 5404 was deleted 2026-11-05 15:21).
+- **Partial settle**: a water invoice only flips to Paid when FULLY settled.
+- **Data corrections (16, each audit-logged with previous value / corrected value / reason)**:
+  2 reopen (BH30, SB10 - "Paid" with no supporting payment), 3 relink (BH8 2,000 / BH38 400 /
+  SB12 180 - money WAS collected by exact-match payments #2984/#2971/#2963 but the Invoice Center
+  link was missing), 1 void sync (SA4 row -> Void, twin voided "New tenancy started"), 10 bundled
+  discharges with full settlement evidence (payment allocation exactly covers the bundle total:
+  SA1/SA3/SA7/SB3/SB7/SB9/SB11/SB12/SS4) + SS6's Sept bundle (rent 9,000 + garbage 200 collected
+  via GEHPM-RCT-202610-001366; water 100.80 written off per management - verified outstanding =
+  12,380). Audit tool: `node backend/scripts/audit-water-billing.js [--apply]`.
+- **Verified live**: SS6 preview AND tenant billing both read "Rent Due for November 2026 was
+  KES 12,380 (Garbage Fee: KES 200, Water Charges: KES 180, Monthly Rent: KES 12,000)"; SB10 =
+  10,560 (rent 10,000 + garbage 200 + water 360) - the payment deleted at 15:21 now approves
+  cleanly. Fixture suite `tests/test_water_billing_scope.js` (23 assertions) locks
+  preview == confirmation == allocation.
+- **FLAGGED for management (no silent rewrite)**: 8 open legacy bundled rows without exact
+  settlement evidence (SA4 10,380 / SA6 10,560 / SB5 8,380 / SB6 8,830 / SB8 8,560 /
+  SB8 STAIRS 4,380 / SS1 10,200 / SS7 10,380) - excluded from every billing figure by the logic
+  fix, listed for review; 4 zero-amount invoices (BH1/BH32/BH45/SB1); 2 orphan rows (SB8 540
+  "Finalized" never registered + payment #2522 540 unallocated; SS4 180).
+
+All 28 suites green (1,122 assertions). Backend + data. Stamps unchanged (backend-only).
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -1887,3 +1936,4 @@ billing records; genuine arrears + advance preserved; every correction audit-log
 | 58 | System-wide advance/rent-balance audit: remove unsupported advance (D1 60k) + fix over-allocation (B23) | backend+data |
 | 59 | Per-management allocations (BH5 deposit, GB01 Sept rent, A501 Sept rent) + arrears-recompute finding | data+verification |
 | 60 | Final reconciliation: move-in-optional arrears recompute + end-to-end module agreement | data+verification |
+| 61 | Water billing root-cause fix: water-only invoices, cycle-month matching, full month charges in messages, delete-reversal sync + 16 evidence-based corrections | backend+data |

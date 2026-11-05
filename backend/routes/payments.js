@@ -421,7 +421,7 @@ function parseMpesaMessage(raw) {
   };
 }
 
-function buildPaymentMessage(tenant, payment, pendingPenalties, waterInvoiceOutstanding = 0) {
+function buildPaymentMessage(tenant, payment, pendingPenalties, waterInvoices = []) {
   const name = String(tenant.name || 'Tenant').trim().toUpperCase();
   const amount = Number(payment.amount || 0);
   const formattedAmount = amount.toLocaleString('en-KE', { maximumFractionDigits: 0 });
@@ -442,10 +442,23 @@ function buildPaymentMessage(tenant, payment, pendingPenalties, waterInvoiceOuts
   const waterChargePaid = Number(tenant.water_charge_paid || 0);
   const waterChargeShortfall = Math.max(0, waterChargeAmount - waterChargePaid);
   // Metered water lives on the water_invoices register (the auto-retrieved
-  // GEHPM-WTR rows). It must be charged in the allocation too, else the preview
-  // retrieves the invoice but never settles it (only the flat water charge was
-  // allocated). Matches the approve-side totalWaterOwed.
-  const totalWaterOwed = waterChargeShortfall + Number(waterInvoiceOutstanding || 0);
+  // GEHPM-WTR rows) - WATER-ONLY invoices (legacy bundled rent+utility rows
+  // double-bill rent/garbage and pull previous periods in; excluded). It must be
+  // charged in the allocation too, else the preview retrieves the invoice but
+  // never settles it (only the flat water charge was allocated). Matches the
+  // approve-side totalWaterOwed.
+  const waterRows = Array.isArray(waterInvoices) ? waterInvoices : [];
+  const meteredWaterOutstanding = waterRows.reduce((s, w) => s + Number(w.payable || 0), 0);
+  // Water billed WITH this billing month's rent only (due_month = payment_month,
+  // e.g. the Oct consumption invoice due 5 Nov is billed with the Nov rent).
+  const waterBillingKey = payment.billing_period
+    || (tenant.rent_due_date ? String(tenant.rent_due_date).slice(0, 7) : null);
+  const currentMonthMetered = waterBillingKey
+    ? waterRows.filter((w) => String(w.due_month || w.payment_month || w.billing_month || '').slice(0, 7) === waterBillingKey)
+        .reduce((s, w) => s + Number(w.payable || 0), 0)
+    : 0;
+  const totalWaterOwed = waterChargeShortfall + meteredWaterOutstanding;
+  const currentWaterDue = waterChargeShortfall + currentMonthMetered;
   const allPenalties = pendingPenalties || [];
   const penaltyTotal = allPenalties.filter(p => (p.category || 'penalty') === 'penalty').reduce((s, p) => s + Number(p.amount || 0), 0);
   const maintenanceTotal = allPenalties.filter(p => p.category === 'maintenance').reduce((s, p) => s + Number(p.amount || 0), 0);
@@ -519,7 +532,12 @@ function buildPaymentMessage(tenant, payment, pendingPenalties, waterInvoiceOuts
   const futureRent = Math.max(0, remainingRentForMonth - rentSettled);
   const futureDeposit = Math.max(0, depositShortfall - depositSettled);
   const futureOutstanding = futureAgreement + futureArrears + futurePenalties + futureMaintenance + futureOther + futureGarbage + futureWater + futureRent + futureDeposit;
-  const totalDue = agreementOutstanding + depositShortfall + currentArrears + totalPenalties + garbageFeeShortfall + totalWaterOwed + remainingRentForMonth;
+  // "Rent Due for <month>" = the month's billing at FULL charge amounts
+  // (rent + garbage + the water due with this month's rent) - what the tenant's
+  // statement charges for the month - not what remains after earlier partial
+  // payments this month.
+  const garbageFeeDue = garbageFeeAmount > 0 ? garbageFeeAmount : garbageFeeShortfall;
+  const totalDue = agreementOutstanding + depositShortfall + currentArrears + totalPenalties + garbageFeeDue + currentWaterDue + rentAmount;
 
   const fullMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   let fullMonth, fullYear;
@@ -559,9 +577,9 @@ function buildPaymentMessage(tenant, payment, pendingPenalties, waterInvoiceOuts
   if (penaltyTotal > 0) dueParts.push(`Penalties: KES ${penaltyTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (maintenanceTotal > 0) dueParts.push(`Maintenance Invoices: KES ${maintenanceTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   if (otherTotal > 0) dueParts.push(`Other Charges: KES ${otherTotal.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
-  if (garbageFeeShortfall > 0) dueParts.push(`Garbage Fee: KES ${garbageFeeShortfall.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
-  if (totalWaterOwed > 0) dueParts.push(`Water Charges: KES ${totalWaterOwed.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
-  dueParts.push(`Monthly Rent: KES ${remainingRentForMonth.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+  if (garbageFeeDue > 0) dueParts.push(`Garbage Fee: KES ${garbageFeeDue.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+  if (currentWaterDue > 0) dueParts.push(`Water Charges: KES ${currentWaterDue.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
+  dueParts.push(`Monthly Rent: KES ${rentAmount.toLocaleString('en-KE', { maximumFractionDigits: 0 })}`);
   msg += ` Rent Due for ${fullMonth} ${fullYear} was KES ${totalDue.toLocaleString('en-KE', { maximumFractionDigits: 0 })} (${dueParts.join(', ')}).`;
 
   const allocParts = [];
@@ -674,7 +692,7 @@ router.post('/parse-message', async (req, res) => {
           if (!hasRentPaymentBefore && depositShortfall > 0) {
             return buildNewTenancyConfirmation(previewTenant, previewPayment, buildOnboardingPreview(previewTenant, parsed.amount));
           }
-          return buildPaymentMessage(previewTenant, previewPayment, await store.listPendingPenalties(previewTenant.id), await store.getWaterInvoiceOutstanding(previewTenant.tenant_code).catch(() => 0));
+          return buildPaymentMessage(previewTenant, previewPayment, await store.listPendingPenalties(previewTenant.id), await store.listOutstandingWaterInvoices(previewTenant.tenant_code).catch(() => []));
         })()
       : null;
 

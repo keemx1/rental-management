@@ -985,24 +985,19 @@ async function approvePaymentOnce(id) {
       // Metered water lives in `water_invoices`/`invoice_register`; before this
       // it was never settled here, so every payment fell through to rent while
       // the client's water bill (visible in the parse preview) stayed unpaid.
-      const waterInvoiceRows = (await runOrQuery(run,
-        `SELECT id, wtr_number, billing_month, GREATEST(COALESCE(total_amount_payable, 0), COALESCE(total_amount, 0)) AS payable
-         FROM water_invoices
-         WHERE tenant_code = $1 AND tenancy_id IS NULL
-           AND status NOT IN ('Paid', 'Void')
-         ORDER BY created_at ASC, id ASC`,
-        [payment.tenant_id]
-      )).rows;
+      const waterInvoiceRows = await listOutstandingWaterInvoices(payment.tenant_id, run);
       const waterInvoiceOutstanding = waterInvoiceRows
         .reduce((s, w) => s + Number(w.payable || w.total_amount || 0), 0);
-      // Current-billing-month metered water only (for the "Rent Due" breakdown).
-      // Prior-month invoices are carried in remainingWater, not charged again as
+      // Water billed WITH this billing month's rent only (for the "Rent Due"
+      // breakdown): the invoice due that month (due_month = payment_month, e.g.
+      // the Oct consumption invoice due 5 Nov is billed with the Nov rent).
+      // Prior-cycle invoices are carried in remainingWater, not charged again as
       // this month's due - otherwise the confirmation shows the whole register
       // (SB7: 8,740 instead of the 360 Oct invoice; SS8: fictitious 10,180).
       const billingMonthKey = payment.billing_period
         || (tenant.rent_due_date ? String(tenant.rent_due_date).slice(0, 7) : null);
       const currentMonthMetered = billingMonthKey
-        ? waterInvoiceRows.filter((w) => String(w.billing_month).slice(0, 7) === billingMonthKey)
+        ? waterInvoiceRows.filter((w) => String(w.due_month || w.payment_month || w.billing_month || '').slice(0, 7) === billingMonthKey)
             .reduce((s, w) => s + Number(w.payable || 0), 0)
         : 0;
       const totalWaterOwed = waterChargeShortfall + waterInvoiceOutstanding;
@@ -1017,10 +1012,15 @@ async function approvePaymentOnce(id) {
           const owed = Number(w.payable || w.total_amount || 0);
           const apply = Math.min(owed, invoiceSettled);
           if (apply <= 0) continue;
-          await runOrQuery(run,
-            `UPDATE water_invoices SET status = 'Paid', updated_at = NOW() WHERE id = $1`,
-            [w.id]
-          );
+          // Only a FULLY settled invoice flips to Paid - a partial settle leaves
+          // it open (the remainder stays owed; the register twin carries the
+          // partial amount_paid).
+          if (apply >= owed) {
+            await runOrQuery(run,
+              `UPDATE water_invoices SET status = 'Paid', updated_at = NOW() WHERE id = $1`,
+              [w.id]
+            );
+          }
           invoiceSettled -= apply;
         }
         waterSettled = settle;
@@ -2947,17 +2947,52 @@ async function listOutstandingRegisterInvoices(tenantCode, run) {
   return res.rows.map(mapInvoiceRegisterRow);
 }
 
-// Metered-water outstanding on the water_invoices register (unpaid/void-excluded).
+// WATER-ONLY invoices: rows carrying NO rent/garbage/non-water component. The
+// legacy "MONTHLY RENT & UTILITY" rows bundled rent + garbage + water into one
+// total (notes: "This invoice also includes the applicable rent, garbage fee...")
+// - counting them as water double-bills rent and garbage (which are charged in
+// the rent cycle) and pulls previous billing periods into the current bill
+// (SS6: 9,481 instead of 180; SB7/SB10: 8,740 instead of 360). Those bundled
+// rows are excluded from every water figure; their rent/garbage parts live in
+// the rent cycle and their water parts were carried as "waterbill" charges.
+const WATER_ONLY_SQL = `COALESCE(rent_amount, 0) = 0
+  AND COALESCE(garbage_fee, 0) = 0
+  AND COALESCE(rent_arrears, 0) = 0
+  AND COALESCE(garbage_arrears, 0) = 0
+  AND COALESCE(other_arrears, 0) = 0`;
+
+// Outstanding water-only invoices (unpaid/void-excluded), oldest first.
+// `due_month` = the month whose rent payment settles the invoice
+// (payment_month, falling back to the due date's month).
+async function listOutstandingWaterInvoices(tenantCode, run) {
+  // payable = the invoice_register twin's remaining balance when one exists, so
+  // partial settlements (tracked on the register) are not re-charged in full.
+  const res = await runOrQuery(run,
+    `SELECT w.id, w.wtr_number, w.billing_month, w.payment_month,
+            COALESCE(w.payment_month, to_char(w.due_date, 'YYYY-MM')) AS due_month,
+            CASE WHEN ir.id IS NOT NULL AND COALESCE(ir.voided, false) = false
+                 THEN GREATEST(0, COALESCE(ir.amount, 0) - COALESCE(ir.amount_paid, 0))
+                 WHEN ir.id IS NOT NULL THEN 0
+                 ELSE GREATEST(COALESCE(w.total_amount_payable, 0), COALESCE(w.total_amount, 0))
+            END AS payable
+     FROM water_invoices w
+     LEFT JOIN invoice_register ir
+       ON ir.invoice_number = w.wtr_number AND ir.invoice_type = 'water'
+     WHERE w.tenant_code = $1 AND w.tenancy_id IS NULL
+       AND w.status NOT IN ('Paid', 'Void')
+       AND (ir.id IS NULL OR COALESCE(ir.voided, false) = false)
+       AND ${WATER_ONLY_SQL.replace(/rent_amount/g, 'w.rent_amount').replace(/garbage_fee/g, 'w.garbage_fee').replace(/rent_arrears/g, 'w.rent_arrears').replace(/garbage_arrears/g, 'w.garbage_arrears').replace(/other_arrears/g, 'w.other_arrears')}
+     ORDER BY w.created_at ASC, w.id ASC`,
+    [tenantCode]);
+  return res.rows;
+}
+
+// Metered-water outstanding on the water_invoices register (water-only rows).
 // Mirrors the approve-side query so the parse preview and the actual allocation
 // agree on what water is owed (the auto-retrieved GEHPM-WTR rows).
 async function getWaterInvoiceOutstanding(tenantCode, run) {
-  const res = await runOrQuery(run,
-    `SELECT COALESCE(SUM(GREATEST(COALESCE(total_amount_payable, 0), COALESCE(total_amount, 0))), 0) AS total
-     FROM water_invoices
-     WHERE tenant_code = $1 AND tenancy_id IS NULL
-       AND status NOT IN ('Paid', 'Void')`,
-    [tenantCode]);
-  return Number((res.rows[0] && res.rows[0].total) || 0);
+  const rows = await listOutstandingWaterInvoices(tenantCode, run);
+  return rows.reduce((s, w) => s + Number(w.payable || 0), 0);
 }
 
 function splitAllocForLinking(allocation, paymentType) {
@@ -3043,6 +3078,9 @@ async function applyPaymentToInvoices(payment, allocation, tenant, run) {
 // Exact reversal of the above (called from payment deletion, same tx).
 async function reverseInvoiceLinks(paymentId, run) {
   const res = await runOrQuery(run, `SELECT * FROM invoice_payment_links WHERE payment_id = $1`, [paymentId]);
+  // Captured BEFORE the links are deleted below - the water-status sync matches
+  // on these ids once the link rows are gone.
+  const linkedInvoiceIds = res.rows.map((r) => r.invoice_id).filter((v) => v != null);
   for (const link of res.rows) {
     await runOrQuery(run, `DELETE FROM invoice_payment_links WHERE id = $1`, [link.id]);
     await runOrQuery(run,
@@ -3057,6 +3095,22 @@ async function reverseInvoiceLinks(paymentId, run) {
       `UPDATE invoice_register SET balance_due = COALESCE(amount, 0) - COALESCE(amount_paid, 0) WHERE id = $1`,
       [link.invoice_id]
     );
+  }
+  // Keep the water_invoices register in sync: a settled water invoice flips to
+  // Paid on approval (step 6), so on deletion reopen it when its balance came
+  // back (SB10 GEHPM-WTR-202610-000118 stayed Paid after payment 5404 was
+  // deleted - the tenant then owed 360 water the allocation would never settle).
+  if (linkedInvoiceIds.length) {
+    await runOrQuery(run,
+      `UPDATE water_invoices w
+       SET status = CASE WHEN COALESCE(ir.amount, 0) - COALESCE(ir.amount_paid, 0) > 0 THEN 'Sent' ELSE 'Paid' END,
+           updated_at = NOW()
+       FROM invoice_register ir
+       WHERE ir.invoice_number = w.wtr_number
+         AND ir.invoice_type = 'water'
+         AND ir.id = ANY($1::int[])`,
+      [linkedInvoiceIds]
+    ).catch(() => {});
   }
   return res.rows.length;
 }
@@ -4748,12 +4802,7 @@ async function getTenantExitSummary(tenantCode) {
   // Water owed = flat water-charge shortfall + unpaid metered water invoices
   // (water_invoices register). Metered invoices were previously omitted from the
   // balance, so a tenant with an unpaid water invoice showed a misleading zero.
-  const meteredWaterRes = await query(
-    `SELECT COALESCE(SUM(GREATEST(COALESCE(total_amount_payable, 0), COALESCE(total_amount, 0))), 0) AS total
-     FROM water_invoices WHERE tenant_code = $1 AND tenancy_id IS NULL AND status NOT IN ('Paid', 'Void')`,
-    [tenantCode]
-  ).catch(() => ({ rows: [{ total: 0 }] }));
-  const meteredWater = Number((meteredWaterRes.rows[0] && meteredWaterRes.rows[0].total) || 0);
+  const meteredWater = await getWaterInvoiceOutstanding(tenantCode).catch(() => 0);
   const waterShortfall = Math.max(0, Number(tenant.water_charge_amount || 0) - Number(tenant.water_charge_paid || 0)) + meteredWater;
   const arrears = Number(tenant.arrears || 0);
   const categoryLabels = { penalty: 'Penalty', maintenance: 'Maintenance Charge', other: 'Other Charge' };
@@ -4842,8 +4891,13 @@ async function getTenantStatement(tenantCode, period) {
       ORDER BY COALESCE(invoice_date, created_at) ASC, id ASC`,
     [tenantCode]
   )).rows;
+  // Water-ONLY invoices: the legacy bundled rent+utility rows double-bill
+  // rent and garbage (already charged as rent/garbage below) and pull previous
+  // periods into the month's charges - exclude them (SS6: 9,300.80 "water"
+  // rows that were really Sept rent+garbage+100.80 water).
   const waters = (await query(
     `SELECT * FROM water_invoices WHERE tenant_code = $1 AND tenancy_id IS NULL
+      AND ${WATER_ONLY_SQL}
       ORDER BY billing_month ASC, id ASC`,
     [tenantCode]
   )).rows;
@@ -9581,6 +9635,7 @@ module.exports = {
   buildLandlordPack,
   listOutstandingRegisterInvoices,
   getWaterInvoiceOutstanding,
+  listOutstandingWaterInvoices,
   applyPaymentToInvoices,
   reverseInvoiceLinks,
 };

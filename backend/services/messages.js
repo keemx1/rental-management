@@ -118,6 +118,7 @@ function buildPaymentConfirmation(tenant, payment, allocation) {
 
   const {
     rentDue,
+    rentAmount: rentAmountSnapshot,
     depositShortfallBefore,
     arrearsBefore,
     garbageFeeBefore,
@@ -148,7 +149,13 @@ function buildPaymentConfirmation(tenant, payment, allocation) {
     remainingBalance,
   } = allocation;
 
-  const totalDueBefore = num(depositShortfallBefore) + num(arrearsBefore) + num(penaltyBefore) + num(maintenanceBefore) + num(otherBefore) + num(garbageFeeBefore) + num(waterChargeBefore || 0) + num(rentDue) + num(agreementBefore || 0);
+  // "Rent Due for <month>" = the month's billing at FULL charge amounts (rent +
+  // garbage + water billed with this month's rent), matching the tenant
+  // statement and the parse preview - not what remains after earlier partial
+  // payments this month.
+  const garbageFeeDue = num(tenant.garbage_fee_amount || 0) > 0 ? num(tenant.garbage_fee_amount) : num(garbageFeeBefore);
+  const rentDueFull = num(rentAmountSnapshot || 0) > 0 ? num(rentAmountSnapshot) : num(rentDue);
+  const totalDueBefore = num(depositShortfallBefore) + num(arrearsBefore) + num(penaltyBefore) + num(maintenanceBefore) + num(otherBefore) + garbageFeeDue + num(waterChargeBefore || 0) + rentDueFull + num(agreementBefore || 0);
 
   const dueParts = [];
   if (num(agreementBefore || 0) > 0) dueParts.push(`Agreement Fee: KES ${formatKes(agreementBefore)}`);
@@ -157,9 +164,9 @@ function buildPaymentConfirmation(tenant, payment, allocation) {
   if (num(penaltyBefore) > 0) dueParts.push(`Penalties: KES ${formatKes(penaltyBefore)}`);
   if (num(maintenanceBefore) > 0) dueParts.push(`Maintenance Invoices: KES ${formatKes(maintenanceBefore)}`);
   if (num(otherBefore) > 0) dueParts.push(`Other Charges: KES ${formatKes(otherBefore)}`);
-  if (num(garbageFeeBefore) > 0) dueParts.push(`Garbage Fee: KES ${formatKes(garbageFeeBefore)}`);
+  if (garbageFeeDue > 0) dueParts.push(`Garbage Fee: KES ${formatKes(garbageFeeDue)}`);
   if (num(waterChargeBefore || 0) > 0) dueParts.push(`Water Charges: KES ${formatKes(waterChargeBefore)}`);
-  dueParts.push(`Monthly Rent: KES ${formatKes(rentDue)}`);
+  dueParts.push(`Monthly Rent: KES ${formatKes(rentDueFull)}`);
   msg += ` Rent Due for ${billingMonth} ${billingYear} was KES ${formatKes(totalDueBefore)} (${dueParts.join(', ')}).`;
 
   const allocParts = [];
