@@ -355,7 +355,7 @@ function parseMpesaMessage(raw) {
   const phoneMatch = text.match(/\b(?:254|0)?7\d{8}\b/);
   const tenantCodeMatch = text.match(/\bT\d{3,}\b/i);
   const houseNumberMatch = text.match(/\b(?:house|unit)\s*[:\-]?\s*([A-Za-z0-9\-]+)\b/i);
-  const accountNumberMatch = text.match(/#([A-Z0-9]+)/i);
+  const accountNumberMatch = text.match(/#([A-Z0-9]+(?:-[A-Z0-9]+)*)/i);
 
   // Reference: try known patterns first, then fallback
   let mpesa_reference = null;
@@ -668,7 +668,17 @@ router.post('/parse-message', async (req, res) => {
       paybillNumber: parsed.house_number,
     });
 
-    const suggestedTenant = matches[0] || null;
+    // Tenant selection must be deterministic and use the CORRECT tenant's
+    // active configuration (SB1 class, 2026-11-05): the lookup OR-matches
+    // phone / account code / paybill and used to return the first match by
+    // NAME - a shared sender phone could suggest a different unit and display
+    // THAT unit's rent. An exact account-code match always wins; the name
+    // order is only a fallback for phone-only messages.
+    const codeKey = String(parsed.accountNumber || parsed.tenant_code || '').trim().toUpperCase();
+    const exactMatch = codeKey
+      ? matches.find((m) => String(m.tenant_code || '').trim().toUpperCase() === codeKey)
+      : null;
+    const suggestedTenant = exactMatch || matches[0] || null;
     const payDateStr = parsed.payment_date || new Date().toISOString().slice(0, 10);
     const previewPayment = {
       amount: parsed.amount,

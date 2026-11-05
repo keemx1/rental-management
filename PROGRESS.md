@@ -35,6 +35,7 @@ Run from the repo root (server must be up on port `3003`):
 | Pre-Exit Inspection Inventory | `node tests/test_preexit_inspection.js` | 56 assertions — unit lookup + tenancy disambiguation, item CRUD with server-side totals (spec 14,500 example), Draft/Shared/Agreed, PDF with exact disclaimer + no refund figures, one-time transfer into the Exit Invoice (repeat/partial retry safe, finalized refused 409), transferred items locked, tenancy seal + archive visibility, re-let protection |
 | Statement period integration | `node tests/test_statement_period.js` | 55 assertions — 7-row period summary (opening/rent/full garbage/charges/due/payments/balance) with month arithmetic + continuity, period-scoped payment & charge histories (no all-time mixing, no duplicate rows), period empty-states, design/letterhead preserved, route validation + PDF, frontend period selector |
 | Broadcast channel (SMS option) | `node tests/test_broadcast_channel.js` | 32 assertions — whatsapp/sms/both dispatch with per-channel tallies and log rows, SMS-only 400 when unconfigured, both+unconfigured degrades to WhatsApp with per-recipient SMS failures, honest per-recipient failure reasons, whatsapp_message_log untouched by SMS legs, house scoping, frontend selector |
+| Message tenant-match + rent accuracy (SB1 class) | `node tests/test_message_tenant_match.js` | 6 assertions - exact account-code match wins over a shared sender phone (correct tenant's ACTIVE configuration every time), Rent Due shows the month's FULL configured billing even when part was already paid (9,200 not the 5,500 remainder), identical input -> identical message, confirmation/receipt parity |
 | Transaction truth (D1 class) | `node tests/test_transaction_truth.js` | 10 assertions - phantom rent-paid credit flagged (no genuine transaction), reconciler re-derives from the payment history, previous-cycle payments never settle the new cycle, transaction-backed advance recognised, unsupported advance/coverage flagged, the real payment then settles to zero / PAID with no overpayment |
 | Water billing scope (billing source + message totals) | `node tests/test_water_billing_scope.js` | 23 assertions - water owed = WATER-ONLY invoices (legacy bundled rent+utility rows excluded from preview, allocation, exit summary, statement), billed with the cycle whose rent pays them (payment_month/due_month), preview == confirmation == allocation ("Rent Due" shows the month's FULL rent + garbage + water, e.g. 12,380 for rent 12,000 + garbage 200 + water 180), bundled rows never touched by water settling, payment delete reopens the settled invoice + restores the register balance, partial settle never flips Paid |
 | Water invoice water-only scope | `node tests/test_water_invoice_scope.js` | 27 assertions — totals = water bill + WATER arrears only (rent/garbage/other arrears excluded even when supplied), tenant rent never injected, update recomputes water-only, PDF titled WATER BILL INVOICE with no rent/garbage lines + water-only notes, form fields removed, PDF end-to-end |
@@ -1024,7 +1025,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1,139 assertions across 29 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
+Suite totals: **1,145 assertions across 30 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -1990,6 +1991,38 @@ All 29 suites green (1,139 assertions). Backend (routes/tenants.js) + tests.
 
 ---
 
+### 65. Confirmation figures come from the correct tenant's active configuration (SB1)
+Management reported (SB1, Peter Mwangi Nganga, Sunrise): the November confirmation "reports rent
+due as KES 5,500" though the correct figure is 9,200 (rent 9,000 + garbage 200), and "deleting and
+reprocessing sometimes produces the correct information" - suggesting inconsistent retrieval.
+
+- **Root cause (no cache involved - the generator reads the live tenants row)**: TWO independent
+  causes, both now fixed:
+  1. The message showed the rent REMAINING after an earlier partial payment (9,000 configured
+     3,500 already paid on Nov 1 = the 5,500) instead of the month's rent - the entry #61 fix
+     (Rent Due line = full configured charges) landed BETWEEN the user's two processing attempts
+     (Nov 4 23:05 message showed 5,500; the Nov 5 21:02 reprocess already showed "Rent Due for
+     November 2026 was KES 9,200 (Garbage Fee: 200, Monthly Rent: 9,000)"). That timing is exactly
+     why "deleting and reprocessing produced the correct information".
+  2. The parse preview's suggested tenant came from an OR-match (phone / account code / paybill)
+     ordered BY NAME and taken as the first row - a shared sender phone could surface a DIFFERENT
+     unit and display THAT unit's rent (the "outdated/default rent figure" the report suspected).
+     FIX: an exact account-code match always wins; name order is only the phone-only fallback.
+     Hyphenated unit codes are now captured by the account-number parser too.
+- **System-wide validation (`backend/scripts/audit-message-accuracy.js`, read-only, 307 tenants)**:
+  the rent line always equals the tenant's active configured rent, the garbage line equals the
+  configured fee, settled charges are never re-deducted, unpaid charges are never omitted,
+  generation writes NOTHING (payment count unchanged), and identical input always produces an
+  identical message. ZERO violations.
+- **Tests**: new `tests/test_message_tenant_match.js` (6) locks the correct-tenant selection, the
+  SB1-class full-month rent display (9,200 not the 5,500 remainder), determinism and
+  confirmation/receipt parity. Protected areas untouched (detection, references, approval
+  workflow, allocation priorities, history, templates).
+
+All 30 suites green (1,145 assertions). Backend (payments.js) + tests.
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -2058,3 +2091,4 @@ All 29 suites green (1,139 assertions). Backend (routes/tenants.js) + tests.
 | 62 | Transaction-truth reconciliation: D1 Stephen Kinyangu fix + system-wide phantom credits/date artifacts + 3-stage validator enforcement | backend+data |
 | 63 | Overpayment figure in confirmations/receipts: actual available credit (EX402 400 not 600), utilized credits excluded | backend |
 | 64 | Utilized credits consumed exactly once (B30) + advance-edit propagation rule (manual corrections re-derive all balances) | backend+tests |
+| 65 | Confirmation figures from the correct tenant's active configuration (SB1): exact-code match over shared phones + full-month rent display verified system-wide | backend+tests |
