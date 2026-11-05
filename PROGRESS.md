@@ -1718,7 +1718,41 @@ violate the no-fabrication rule). Refined STALE_ADVANCE to the exact EX304 re-em
 legitimate partial remainders (BH20 9,500 etc.) are not false-flagged. All 27 suites green
 (payment 27, financial-phase1 58, deposit-reinstatement 65, financial-integrity 27).
 
-## Open items / next
+---
+
+### 58. System-wide advance / rent-balance audit + correction (Stephen Kinyangu D1 reference)
+Guiding principle applied: RETAIN what is valid, CORRECT what is wrong, REMOVE what has no
+financial/transactional support. Nothing reset to zero, no legitimate arrears/advance deleted.
+
+- **Unsupported advance rent removed (the reference case)**: Stephen Kinyangu (D1, Sunview) had
+  KES 60,000 `advance_rent_balance` but only ONE real payment (15,000, ref UJ1838R9VC) with
+  `overpayment=0` - no genuine advance exists. The 60,000 was orphaned credit left by earlier
+  parse-test payments (created + approved + deleted). Removed the 60,000 + cleared
+  `advance_rent_until` (audit-logged). System-wide check (advance must be <= opening_advance +
+  payments' overpayment) found D1 was the ONLY tenant with unsupported advance - all other
+  tenants' advances are supported by real payments.
+- **Over-allocated payment fixed**: B23 pay#1092 (6,000) allocation summed to 6,300 (rent 6,000 +
+  maintenance 300). Re-balanced to the standard order (maintenance before rent): maintenance 300 +
+  rent 5,700 = 6,000, remainingRent 300. (Was internally inconsistent: remainingRent 1,300 despite
+  full settlement.)
+- **3 unallocated payments FLAGGED (not auto-fixed)**: BH5 pay#638 (13,000, ref UIN1P7SKLU),
+  GB01 pay#625 (35,200, UI8R55JGCL), A501 pay#620 (30,000, UIMR27HMU6) are real M-Pesa transfers
+  with EMPTY allocations (alloc sums to 0). Re-allocating needs the payment's billing period +
+  intended charge, which is not recoverable from the record (e.g. A501's is a Sept payment but
+  rent_paid_this_month tracks Nov). Correcting by guessing would fabricate the period mapping -
+  flagged to `audit_log` (FLAGGED_INCONSISTENCY) for management to allocate with the real intent.
+
+Integrity: no transaction fabricated; no legitimate arrears/advance deleted; valid receipts,
+transaction codes and payment history preserved; every adjustment audit-logged (previous value,
+corrected value, reason, date, actor).
+
+## Open items / next (system directive - remaining)
+- **3 unallocated payments** (BH5/GB01/A501) need the real billing-period/charge mapping from
+  management before allocation - then the dashboard/payment/rollover/statement reconciliation
+  closes cleanly.
+- **Outstanding rent balances**: the advance side is now fully verified; the arrears side still
+  needs the deeper "recompute from move-in history" pass (flagged in #46) to catch any
+  carried-forward balance lacking a supporting rent obligation.
 
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
   a phone, desktop and laptop; confirm Excel/PDF open read-only without any
@@ -1794,3 +1828,4 @@ legitimate partial remainders (BH20 9,500 etc.) are not false-flagged. All 27 su
 | 55 | Fix M-Pesa date parse (MM/DD vs DD/MM month-day swap -> 2026-28-10) | backend |
 | 56 | Fix confirmation/SMS water figure (whole metered register -> current-month only) + void SS8 fictitious invoice | backend+data |
 | 57 | 3-stage automated financial validator (before/after rollover, after payment) + system-wide consistency audit | backend |
+| 58 | System-wide advance/rent-balance audit: remove unsupported advance (D1 60k) + fix over-allocation (B23) | backend+data |
