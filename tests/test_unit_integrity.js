@@ -123,9 +123,14 @@ async function main() {
     try { await query(`ALTER TABLE water_invoices ENABLE TRIGGER ALL`); } catch (_) {}
   }
 
+  // Cutoff-scoped counts: rows created during the window (live payment traffic
+  // on the shared production DB) must not fail the read-only proof - only rows
+  // the audit itself created/deleted may move these numbers.
+  const cutoff = new Date().toISOString();
   const countsBefore = (await query(
-    `SELECT (SELECT COUNT(*) FROM tenants)::int AS t, (SELECT COUNT(*) FROM payments)::int AS p,
-            (SELECT COUNT(*) FROM water_invoices)::int AS w, (SELECT COUNT(*) FROM houses)::int AS h`
+    `SELECT (SELECT COUNT(*) FROM tenants WHERE created_at <= $1)::int AS t, (SELECT COUNT(*) FROM payments WHERE recorded_at <= $1)::int AS p,
+            (SELECT COUNT(*) FROM water_invoices WHERE created_at <= $1)::int AS w, (SELECT COUNT(*) FROM houses WHERE created_at <= $1)::int AS h`,
+    [cutoff]
   )).rows[0];
 
   const app = express();
@@ -170,8 +175,9 @@ async function main() {
 
     // Read-only proof
     const countsAfter = (await query(
-      `SELECT (SELECT COUNT(*) FROM tenants)::int AS t, (SELECT COUNT(*) FROM payments)::int AS p,
-              (SELECT COUNT(*) FROM water_invoices)::int AS w, (SELECT COUNT(*) FROM houses)::int AS h`
+      `SELECT (SELECT COUNT(*) FROM tenants WHERE created_at <= $1)::int AS t, (SELECT COUNT(*) FROM payments WHERE recorded_at <= $1)::int AS p,
+              (SELECT COUNT(*) FROM water_invoices WHERE created_at <= $1)::int AS w, (SELECT COUNT(*) FROM houses WHERE created_at <= $1)::int AS h`,
+      [cutoff]
     )).rows[0];
     check(JSON.stringify(countsAfter) === JSON.stringify(countsBefore),
       `1b. audit changed NOTHING (${JSON.stringify(countsAfter)})`, countsBefore);

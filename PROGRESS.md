@@ -1024,7 +1024,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1,136 assertions across 29 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
+Suite totals: **1,139 assertions across 29 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -1956,6 +1956,40 @@ All 29 suites green (1,136 assertions). Backend (store.js, messages.js, document
 
 ---
 
+### 64. Utilized credits are consumed exactly once (B30) + advance-edit propagation rule
+Management reported (B30): an overpayment that settled OCTOBER rent was carried by the monthly
+rollover into the Advance Rent slot as though still available; the administrator then removed the
+editing restriction and manually zeroed the slot - yet the dashboard kept recognizing the used
+1,000 (showing it as available credit / phantom rent-paid).
+
+- **What had happened (audit trail preserved)**: the 1,000 was a manually seeded opening advance
+  (Oct 8) that settled October rent (payment #896's snapshot: rentPaidBefore 1,000 + rentSettled
+  6,000 = October's 7,000). The old auto-seed mechanism re-emitted the consumed seed at the
+  November rollover (removed in entry #52), leaving `rent_paid_this_month` 1,000 for November -
+  cleared by the entry #62 transaction-truth pass at 17:54. B30 is verified clean on every surface
+  (dashboard counters, credit consolidation 0/0, exit summary rent 7,000, reconcile
+  outstanding 7,000, no credit-side rows).
+- **SYSTEM RULE enforced (requirement: a manually corrected advance must reflect in ALL underlying
+  calculations)**: the Advanced Rent edit flow (`PUT /api/tenants/:id`) now re-derives the dependent
+  counters (`reconcileTenant`) after every seed/correct/zero - so a correction instantly reaches the
+  tenant dashboard, statement, rollover, arrears and reports. Before this, a zeroed slot left the
+  phantom rent-paid behind (exactly B30's experience).
+- **Rule - one credit, one utilization**: consumption is decremented from the advance pool at each
+  month close (rollover), the consumed-seed auto-re-emit stays removed (#52), and the 3-stage
+  validator flags RENT_PAID_UNSUPPORTED / RENT_PAID_UNDERSTATED / ADVANCE_UNSUPPORTED. System-wide
+  verification (307 tenants + the 38 accounts holding advance slots/pools): no remaining
+  carried-and-deducted-again cases - every remaining pool is a genuine, transaction-supported,
+  UNUSED credit whose first deduction is still ahead; the transaction-truth audit is clean on all
+  counter classes.
+- **Tests**: `test_transaction_truth.js` (10 -> 13) gains the B30 class - editing the Advanced Rent
+  slot through the live route re-derives the phantom rent-paid away on the same edit.
+  `test_unit_integrity.js` hardened against live payment traffic (its read-only proof now
+  cutoff-scopes row counts so concurrent production payments cannot false-fail it).
+
+All 29 suites green (1,139 assertions). Backend (routes/tenants.js) + tests.
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -2023,3 +2057,4 @@ All 29 suites green (1,136 assertions). Backend (store.js, messages.js, document
 | 61 | Water billing root-cause fix: water-only invoices, cycle-month matching, full month charges in messages, delete-reversal sync + 16 evidence-based corrections | backend+data |
 | 62 | Transaction-truth reconciliation: D1 Stephen Kinyangu fix + system-wide phantom credits/date artifacts + 3-stage validator enforcement | backend+data |
 | 63 | Overpayment figure in confirmations/receipts: actual available credit (EX402 400 not 600), utilized credits excluded | backend |
+| 64 | Utilized credits consumed exactly once (B30) + advance-edit propagation rule (manual corrections re-derive all balances) | backend+tests |

@@ -105,6 +105,36 @@ async function cleanup() {
   check(Number(after.rent_paid_this_month) === 10000 && after.status === 'Paid',
     `6c. cycle Paid after entry (paid ${after.rent_paid_this_month}, status ${after.status})`, after);
 
+  // ---- 7. B30 class: a manually corrected Advanced Rent slot must propagate
+  // to every dependent calculation immediately (a utilized credit must never
+  // linger as phantom rent-paid and get deducted again). ----
+  await store.createTenant({
+    tenant_code: 'ZZTT-02', name: 'ZZTT B30', phone_number: '+254700000802',
+    property_name: 'ZZTT House', house_id: HOUSE,
+    rent_amount: 7000, deposit_amount: 7000, deposit_paid: 7000,
+    rent_due_date: '2026-11-05', status: 'Active',
+  });
+  await query(`UPDATE tenants SET rent_paid_this_month = 1000, opening_advance_rent = 1000, advance_rent_balance = 1000, advance_rent_until = '2026-11-01', status = 'Active' WHERE tenant_code = 'ZZTT-02'`);
+  const express = require('express');
+  const jwt = require('jsonwebtoken');
+  const app = express();
+  app.use(express.json());
+  app.use('/api/tenants', require('../backend/routes/tenants'));
+  const srv = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
+  const u2 = (await query(`SELECT id, username, role FROM users WHERE is_active IS DISTINCT FROM false ORDER BY (role = 'admin') DESC, id LIMIT 1`)).rows[0];
+  const token = jwt.sign({ sub: u2.id, username: u2.username, role: u2.role }, process.env.JWT_SECRET, { expiresIn: '10m' });
+  const patchRes = await fetch(`http://127.0.0.1:${srv.address().port}/api/tenants/${encodeURIComponent('ZZTT-02')}`, {
+    method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ opening_advance_rent: 0 }),
+  });
+  check(patchRes.status === 200, `7. advance edit accepted (HTTP ${patchRes.status})`);
+  const edited = (await query(`SELECT rent_paid_this_month, advance_rent_balance, advance_rent_until, opening_advance_rent FROM tenants WHERE tenant_code = 'ZZTT-02'`)).rows[0];
+  check(Number(edited.advance_rent_balance) === 0 && edited.advance_rent_until === null && Number(edited.opening_advance_rent) === 0,
+    '7b. advance slot cleared (B30 manual correction)', edited);
+  check(Number(edited.rent_paid_this_month) === 0,
+    `7c. phantom rent-paid re-derived away on the SAME edit (got ${edited.rent_paid_this_month})`, edited);
+  srv.close();
+
   await cleanup();
   console.log(`\n===============================\nRESULT: ${pass} passed, ${fail} failed`);
   if (failures.length) console.log('FAILURES:\n - ' + failures.join('\n - '));

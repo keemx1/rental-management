@@ -176,6 +176,7 @@ router.put('/:id', async (req, res) => {
     // administrators may enter, increase, reduce, correct or clear it at any time
     // (the old "record once then lock" protection is removed). The value commits on
     // Save and re-seeds the advance pools so the running balance reflects the edit.
+    let advanceEdited = false;
     if (req.body.opening_advance_rent !== undefined) {
       const existingTenant = await store.getTenant(req.params.id);
       if (!existingTenant) return res.status(404).json({ error: 'Tenant not found' });
@@ -199,6 +200,7 @@ router.put('/:id', async (req, res) => {
             details: { from: currentAdvance, to: newAdvance, via: 'edit' },
           });
         } catch (auditErr) { /* non-fatal */ }
+        advanceEdited = true;
       } else {
         delete patch.opening_advance_rent;
       }
@@ -206,6 +208,18 @@ router.put('/:id', async (req, res) => {
 
     const tenant = await store.updateTenant(req.params.id, patch);
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+    // SYSTEM RULE (2026-11-05, B30): once an advance/overpayment is edited -
+    // corrected, removed or adjusted - every dependent calculation must reflect
+    // it immediately. Re-derive rent_paid_this_month / status / balances from
+    // the transaction history so the change reaches the tenant dashboard,
+    // statement, rollover and reports at once (a utilized credit that was
+    // merely hidden in the slot used to linger as phantom rent-paid and get
+    // deducted again).
+    if (advanceEdited) {
+      try {
+        await store.reconcileTenant(req.params.id);
+      } catch (reErr) { /* non-fatal - counters stay as written */ }
+    }
     res.json({ tenant });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update tenant' });
