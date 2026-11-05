@@ -273,9 +273,14 @@ export const api = {
   landlordLedger(id, paybill) {
     return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/ledger`);
   },
-  generateCommissionInvoice(id, paybill, billingMonth) {
+  generateCommissionInvoice(id, paybill, billingMonth, payment = {}) {
     return request(`/landlords/${id}/properties/${encodeURIComponent(paybill)}/commission-invoice`, {
-      method: 'POST', body: JSON.stringify({ billing_month: billingMonth }),
+      method: 'POST', body: JSON.stringify({
+        billing_month: billingMonth,
+        payment_method: payment.payment_method || null,
+        payment_number: payment.payment_number || null,
+        payment_account_name: payment.payment_account_name || null,
+      }),
     });
   },
   recordCommissionPayment(id, paybill, body) {

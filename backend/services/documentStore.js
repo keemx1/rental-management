@@ -2218,7 +2218,14 @@ function buildCommissionInvoiceHtml(invoice, landlord, house) {
     current_amount_payable: fmtK(invoice.total_payable),
     total_outstanding_balance: fmtK(invoice.total_payable),
     payable_class: payableClass,
-    payment_instructions: `Kindly settle this commission via M-PESA Paybill 4086873 (Gutenberg Elite), Account Number: ${landlord?.name || 'LANDLORD'} — quote invoice ${invoice.invoice_number}. Bank transfers are also accepted; contact management for details.`,
+    payment_instructions: (() => {
+      const method = String(invoice.payment_method || '').toLowerCase();
+      const number = invoice.payment_number || '4086873';
+      const account = invoice.payment_account_name || landlord?.name || 'LANDLORD';
+      return method === 'till'
+        ? `Payment Method: Buy Goods Till ${number} (Gutenberg Elite), Account Name: ${account} - quote invoice ${invoice.invoice_number}. Bank transfers are also accepted; contact management for details.`
+        : `Payment Method: M-PESA Paybill ${number} (Gutenberg Elite), Account Number: ${account} - quote invoice ${invoice.invoice_number}. Bank transfers are also accepted; contact management for details.`;
+    })(),
     GEHM_STAMP_LINE: '{{GEHM_STAMP_LINE}}',
     date: new Date(invoice.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
   });

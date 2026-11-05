@@ -122,13 +122,23 @@ router.delete('/:id', async (req, res) => {
       // Unassign houses (properties are preserved, just detached from this landlord).
       await client.query('UPDATE houses SET landlord_id = NULL WHERE landlord_id = $1', [id]);
       // Detach ledger/financial rows but NEVER delete them - payment and invoice
-      // history is preserved (only the landlord link is removed).
-      for (const tbl of ['commission_invoices', 'commission_payments', 'landlord_reviews', 'landlord_ledger_finalizations', 'landlord_remittance_payments']) {
-        await client.query(`UPDATE ${tbl} SET landlord_id = NULL WHERE landlord_id = $1`, [id]).catch(() => {});
+      // history is preserved (only the landlord link is removed). ONLY tables
+      // that actually carry landlord_id are touched (landlord_reviews /
+      // landlord_ledger_finalizations key by house, not landlord) and every
+      // detach must SUCCEED: the old code swallowed failures with .catch(),
+      // which left the Postgres transaction aborted and poisoned every later
+      // statement ("current transaction is aborted" - the delete bug of
+      // 2026-11-06). The columns are nullable (migrate-landlord-invoice-fixes)
+      // precisely so history rows can be detached, never deleted.
+      for (const tbl of ['commission_invoices', 'commission_payments', 'landlord_remittance_payments']) {
+        await client.query(`UPDATE ${tbl} SET landlord_id = NULL WHERE landlord_id = $1`, [id]);
       }
       const del = await client.query('DELETE FROM landlords WHERE id = $1', [id]);
+      if (!del.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Landlord not found' });
+      }
       await client.query('COMMIT');
-      if (!del.rowCount) return res.status(404).json({ error: 'Landlord not found' });
       await store.logAudit({
         actor: req.user?.username, action: 'landlord_deleted',
         entityType: 'landlord', entityId: String(id), details: {},
@@ -196,8 +206,13 @@ router.get('/:id/properties/:paybill/ledger', async (req, res) => {
 
 router.post('/:id/properties/:paybill/commission-invoice', async (req, res) => {
   try {
-    const { billing_month } = req.body || {};
-    const result = await commission.generateCommissionInvoice(req.params.paybill, billing_month, { actor: req.user?.username });
+    const { billing_month, payment_method, payment_number, payment_account_name } = req.body || {};
+    const result = await commission.generateCommissionInvoice(req.params.paybill, billing_month, {
+      actor: req.user?.username,
+      payment_method: payment_method || null,
+      payment_number: payment_number || null,
+      payment_account_name: payment_account_name || null,
+    });
     if (result.error) {
       const status = result.code === 'NOT_FOUND' ? 404
         : result.code === 'NO_LANDLORD' ? 409 : 400;

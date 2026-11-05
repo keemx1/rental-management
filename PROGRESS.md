@@ -35,6 +35,7 @@ Run from the repo root (server must be up on port `3003`):
 | Pre-Exit Inspection Inventory | `node tests/test_preexit_inspection.js` | 56 assertions — unit lookup + tenancy disambiguation, item CRUD with server-side totals (spec 14,500 example), Draft/Shared/Agreed, PDF with exact disclaimer + no refund figures, one-time transfer into the Exit Invoice (repeat/partial retry safe, finalized refused 409), transferred items locked, tenancy seal + archive visibility, re-let protection |
 | Statement period integration | `node tests/test_statement_period.js` | 55 assertions — 7-row period summary (opening/rent/full garbage/charges/due/payments/balance) with month arithmetic + continuity, period-scoped payment & charge histories (no all-time mixing, no duplicate rows), period empty-states, design/letterhead preserved, route validation + PDF, frontend period selector |
 | Broadcast channel (SMS option) | `node tests/test_broadcast_channel.js` | 32 assertions — whatsapp/sms/both dispatch with per-channel tallies and log rows, SMS-only 400 when unconfigured, both+unconfigured degrades to WhatsApp with per-recipient SMS failures, honest per-recipient failure reasons, whatsapp_message_log untouched by SMS legs, house scoping, frontend selector |
+| Landlord delete + invoice payment method | `node tests/test_landlord_delete_invoice.js` | 12 assertions - landlord WITH commission history deletes cleanly (detach-not-delete: invoices preserved with landlord_id NULL, house unassigned, audited), property-less duplicate deletes (the old "current transaction is aborted" case), invoice prints the filled-in payment method (Buy Goods Till / M-PESA Paybill + number + account) instead of a hardcoded block |
 | Message tenant-match + rent accuracy (SB1 class) | `node tests/test_message_tenant_match.js` | 6 assertions - exact account-code match wins over a shared sender phone (correct tenant's ACTIVE configuration every time), Rent Due shows the month's FULL configured billing even when part was already paid (9,200 not the 5,500 remainder), identical input -> identical message, confirmation/receipt parity |
 | Transaction truth (D1 class) | `node tests/test_transaction_truth.js` | 10 assertions - phantom rent-paid credit flagged (no genuine transaction), reconciler re-derives from the payment history, previous-cycle payments never settle the new cycle, transaction-backed advance recognised, unsupported advance/coverage flagged, the real payment then settles to zero / PAID with no overpayment |
 | Water billing scope (billing source + message totals) | `node tests/test_water_billing_scope.js` | 23 assertions - water owed = WATER-ONLY invoices (legacy bundled rent+utility rows excluded from preview, allocation, exit summary, statement), billed with the cycle whose rent pays them (payment_month/due_month), preview == confirmation == allocation ("Rent Due" shows the month's FULL rent + garbage + water, e.g. 12,380 for rent 12,000 + garbage 200 + water 180), bundled rows never touched by water settling, payment delete reopens the settled invoice + restores the register balance, partial settle never flips Paid |
@@ -1025,7 +1026,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1,145 assertions across 30 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
+Suite totals: **1,157 assertions across 31 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -2023,6 +2024,39 @@ All 30 suites green (1,145 assertions). Backend (payments.js) + tests.
 
 ---
 
+### 66. Landlord delete fix + commission invoice payment method + ledger buttons verified
+Management reported (Landlord Commission Ledger): the delete fails with "current transaction is
+aborted, commands ignored until end of transaction block"; the commission invoice should carry a
+payment method (Till or Paybill) filled in at generation instead of the hardcoded Payment
+Instructions block; and every ledger button must work - above all "Share Invoice with Landlord"
+delivering the invoice to the saved landlord WhatsApp number.
+
+- **Delete root cause**: the detach loop updated FIVE tables - two of them
+  (`landlord_reviews`, `landlord_ledger_finalizations`) carry NO landlord_id (they key by house),
+  so the statement errored, the `.catch(() => {})` swallowed it, and the ABORTED Postgres
+  transaction poisoned every later statement (hence the exact error on `DELETE FROM landlords`).
+  On top of that the three real ledgers had NOT NULL landlord_id - the "detach to NULL" could
+  never work. FIX: migration `migrate-landlord-invoice-fixes` makes the three landlord_id columns
+  nullable; the handler now detaches ONLY tables that carry landlord_id, every detach must
+  succeed, the not-found case rolls back BEFORE commit, and financial history is preserved
+  (landlord_id NULL - never deleted). The property-less duplicate landlord now deletes cleanly.
+- **Commission invoice payment method**: the Generate Commission Invoice form now asks for the
+  payment method (M-PESA Paybill / Buy Goods Till) + number + account name, prefilled from the
+  landlord record; it is stored on the invoice and PRINTED on the PDF
+  ("Payment Method: Buy Goods Till 123456 (Gutenberg Elite), Account Name: ... - quote invoice
+  ...") instead of the hardcoded Paybill 4086873 paragraph. Regeneration keeps the stored method;
+  old invoices fall back to the previous default text.
+- **Ledger buttons**: all ten verified end-to-end - Record Commission Payment, Record Landlord
+  Remittance, View Invoice, Download Invoice (PDF), Share Invoice with Landlord, Commission
+  Statement, Remittance Statement, Flag Under Review, Finalize/Reopen Month, Close. Share Invoice
+  sends the generated invoice PDF to the landlord's SAVED phone via the WhatsApp session
+  (normalizePhone 072... -> 254..., honest per-send status - covered by the landlord suites).
+- **Tests**: new `tests/test_landlord_delete_invoice.js` (12) locks the delete semantics and the
+  payment-method rendering. All 31 suites green (1,157 assertions). Stamps: app v89, sw v90 /
+  gutenberg-v91-landlordpay (frontend changed).
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -2092,3 +2126,4 @@ All 30 suites green (1,145 assertions). Backend (payments.js) + tests.
 | 63 | Overpayment figure in confirmations/receipts: actual available credit (EX402 400 not 600), utilized credits excluded | backend |
 | 64 | Utilized credits consumed exactly once (B30) + advance-edit propagation rule (manual corrections re-derive all balances) | backend+tests |
 | 65 | Confirmation figures from the correct tenant's active configuration (SB1): exact-code match over shared phones + full-month rent display verified system-wide | backend+tests |
+| 66 | Landlord delete fix (aborted-transaction bug) + commission invoice Till/Paybill payment method + ledger buttons verified (share via landlord WhatsApp) | backend+frontend+data |

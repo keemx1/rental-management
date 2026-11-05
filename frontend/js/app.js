@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
- const GEHM_VERSION = 'v88';
+ const GEHM_VERSION = 'v89';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -4450,6 +4450,12 @@ function openCommissionInvoiceModal(paybill) {
   modal?.classList.remove('hidden');
   const sub = document.getElementById('ll-invoice-sub');
   if (sub) sub.textContent = `${_llState.overview?.landlord?.name || ''} · ${prop?.house_name || paybill} (${paybill}) · rate ${Number(prop?.rate_percent || 0).toFixed(2)}%`;
+  const methodEl = document.getElementById('ll-invoice-pay-method');
+  const numberEl = document.getElementById('ll-invoice-pay-number');
+  const accountEl = document.getElementById('ll-invoice-pay-account');
+  if (methodEl) methodEl.value = 'paybill';
+  if (numberEl) numberEl.value = _llState.overview?.landlord?.mpesa_number || '';
+  if (accountEl) accountEl.value = _llState.overview?.landlord?.name || '';
   const monthEl = document.getElementById('ll-invoice-month');
   if (monthEl) monthEl.value = _llState.month || new Date().toISOString().slice(0, 7);
   document.getElementById('ll-invoice-preview-box')?.classList.add('hidden');
@@ -4462,10 +4468,17 @@ async function generateLandlordInvoiceNow() {
   if (!_llState.landlordId || !_llState.invoiceCtx) return;
   const month = document.getElementById('ll-invoice-month')?.value;
   if (!month) { showToast('Pick a billing month', 'error'); return; }
+  // Payment method filled in here is printed on the invoice (Till / Paybill +
+  // number + account) - never a hardcoded default.
+  const payment = {
+    payment_method: document.getElementById('ll-invoice-pay-method')?.value || 'paybill',
+    payment_number: (document.getElementById('ll-invoice-pay-number')?.value || '').trim(),
+    payment_account_name: (document.getElementById('ll-invoice-pay-account')?.value || '').trim(),
+  };
   const resEl = document.getElementById('ll-invoice-result');
   if (resEl) resEl.textContent = 'Generating…';
   try {
-    const res = await api.generateCommissionInvoice(_llState.landlordId, _llState.invoiceCtx, month);
+    const res = await api.generateCommissionInvoice(_llState.landlordId, _llState.invoiceCtx, month, payment);
     _llState.lastInvoiceDoc = res.document || null;
     const inv = res.invoice;
     const box = document.getElementById('ll-invoice-preview-box');

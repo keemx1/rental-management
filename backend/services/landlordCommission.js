@@ -444,7 +444,7 @@ async function getLedger(housePaybill, landlordId = null) {
   };
 }
 
-async function generateCommissionInvoice(housePaybill, billingMonth, { actor } = {}) {
+async function generateCommissionInvoice(housePaybill, billingMonth, { actor, payment_method, payment_number, payment_account_name } = {}) {
   const { query } = require('../config/database');
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(billingMonth || ''))) {
     return { error: 'billing_month must be YYYY-MM', code: 'VALIDATION' };
@@ -477,9 +477,14 @@ async function generateCommissionInvoice(housePaybill, billingMonth, { actor } =
       `UPDATE commission_invoices
           SET rent_collected = $1, commission_rate = $2, commission_amount = $3,
               previous_balance = $4, payments_applied = $5, total_payable = $6,
-              due_date = COALESCE($7, due_date), updated_at = NOW()
-        WHERE id = $8 RETURNING *`,
-      [commissionable, rate, commission, balance_before, payments_in_month, totalPayable, dueDate, existing.id]
+              due_date = COALESCE($7, due_date),
+              payment_method = COALESCE($8, payment_method),
+              payment_number = COALESCE($9, payment_number),
+              payment_account_name = COALESCE($10, payment_account_name),
+              updated_at = NOW()
+        WHERE id = $11 RETURNING *`,
+      [commissionable, rate, commission, balance_before, payments_in_month, totalPayable, dueDate,
+        payment_method || null, payment_number || null, payment_account_name || null, existing.id]
     )).rows[0];
   } else {
     const invoiceNumber = await store.generateCommissionInvoiceNumber();
@@ -487,11 +492,12 @@ async function generateCommissionInvoice(housePaybill, billingMonth, { actor } =
       `INSERT INTO commission_invoices
          (invoice_number, landlord_id, house_paybill_number, billing_month, rent_collected,
           commission_rate, commission_amount, previous_balance, payments_applied, total_payable,
-          due_date, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Issued',$12)
+          due_date, status, created_by, payment_method, payment_number, payment_account_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Issued',$12,$13,$14,$15)
        RETURNING *`,
       [invoiceNumber, landlord.id, housePaybill, billingMonth, commissionable,
-        rate, commission, balance_before, payments_in_month, totalPayable, dueDate, actor || null]
+        rate, commission, balance_before, payments_in_month, totalPayable, dueDate, actor || null,
+        payment_method || null, payment_number || null, payment_account_name || null]
     )).rows[0];
   }
 
