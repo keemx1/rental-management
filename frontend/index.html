@@ -5310,15 +5310,18 @@
           <div class="flex items-end gap-3 mb-3">
             <div><label class="form-label">Billing month</label><input type="month" id="ll-invoice-month" class="cyber-input" /></div>
           </div>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
             <div>
               <label class="form-label">Payment method (printed on the invoice)</label>
               <select id="ll-invoice-pay-method" class="cyber-input">
                 <option value="paybill">M-PESA Paybill</option>
                 <option value="till">Buy Goods Till</option>
+                <option value="send_money">M-PESA Send Money</option>
+                <option value="bank">Bank Account</option>
               </select>
             </div>
-            <div><label class="form-label">Paybill / Till number</label><input id="ll-invoice-pay-number" class="cyber-input" placeholder="e.g. 4086873" /></div>
+            <div id="ll-invoice-pay-bank-wrap" class="hidden"><label class="form-label">Bank name</label><input id="ll-invoice-pay-bank" class="cyber-input" placeholder="e.g. Equity Bank" /></div>
+            <div><label class="form-label" id="ll-invoice-pay-number-label">Paybill / Till number</label><input id="ll-invoice-pay-number" class="cyber-input" placeholder="e.g. 4086873" /></div>
             <div><label class="form-label">Account name</label><input id="ll-invoice-pay-account" class="cyber-input" placeholder="Name on the invoice" /></div>
           </div>
           <div id="ll-invoice-preview-box" class="hidden bg-slate-800/50 rounded-lg p-3 text-sm font-mono space-y-1"></div>
@@ -6192,10 +6195,10 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=89"></script>
+  <script type="module" src="/js/app.js?v=90"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=90').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=91').catch(() => {});
     }
     // Safety: never trap the user behind the splash — if the app module
     // hasn't revealed itself within 25s (hung request, slow device),

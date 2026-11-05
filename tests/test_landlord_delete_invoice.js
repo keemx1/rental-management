@@ -103,6 +103,25 @@ async function cleanup() {
     check(html2.includes('M-PESA Paybill 4086873') && html2.includes('Account Number: ZZDL Landlord'),
       '4. paybill method renders as Paybill + account name', html2.slice(0, 400));
 
+    // ---- send money + bank account as the other payment methods ----
+    const inv3 = await call('POST', `/${l.id}/properties/${HOUSE}/commission-invoice`, {
+      billing_month: '2026-11', payment_method: 'send_money', payment_number: '0721492014', payment_account_name: 'ZZDL Landlord',
+    });
+    const row3 = (await query(`SELECT * FROM commission_invoices WHERE id = $1`, [inv3.json.invoice.id])).rows[0];
+    const html3 = buildCommissionInvoiceHtml(row3, landlordRow, houseRow);
+    check(row3.payment_method === 'send_money' && html3.includes('Send Money to 0721492014'),
+      '4b. Send Money method renders the phone number to send to', html3.slice(0, 400));
+
+    const inv4 = await call('POST', `/${l.id}/properties/${HOUSE}/commission-invoice`, {
+      billing_month: '2026-11', payment_method: 'bank', payment_number: '0100 1234 5678',
+      payment_account_name: 'ZZDL Landlord', payment_bank_name: 'Equity Bank',
+    });
+    const row4 = (await query(`SELECT * FROM commission_invoices WHERE id = $1`, [inv4.json.invoice.id])).rows[0];
+    const html4 = buildCommissionInvoiceHtml(row4, landlordRow, houseRow);
+    check(row4.payment_bank_name === 'Equity Bank'
+      && html4.includes('Bank Transfer - Equity Bank') && html4.includes('Account Number: 0100 1234 5678'),
+      '4c. Bank Account method renders bank name + account number', html4.slice(0, 400));
+
     // ---- delete: detach-not-delete (the old "current transaction is aborted") ----
     const del = await call('DELETE', `/${l.id}`);
     check(del.status === 200 && del.json.success, `5. landlord WITH commission history deletes cleanly (HTTP ${del.status})`, del.json);

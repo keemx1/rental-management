@@ -280,6 +280,7 @@ export const api = {
         payment_method: payment.payment_method || null,
         payment_number: payment.payment_number || null,
         payment_account_name: payment.payment_account_name || null,
+        payment_bank_name: payment.payment_bank_name || null,
       }),
     });
   },

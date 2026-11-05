@@ -2220,11 +2220,20 @@ function buildCommissionInvoiceHtml(invoice, landlord, house) {
     payable_class: payableClass,
     payment_instructions: (() => {
       const method = String(invoice.payment_method || '').toLowerCase();
-      const number = invoice.payment_number || '4086873';
+      const number = invoice.payment_number || '';
       const account = invoice.payment_account_name || landlord?.name || 'LANDLORD';
-      return method === 'till'
-        ? `Payment Method: Buy Goods Till ${number} (Gutenberg Elite), Account Name: ${account} - quote invoice ${invoice.invoice_number}. Bank transfers are also accepted; contact management for details.`
-        : `Payment Method: M-PESA Paybill ${number} (Gutenberg Elite), Account Number: ${account} - quote invoice ${invoice.invoice_number}. Bank transfers are also accepted; contact management for details.`;
+      const bank = invoice.payment_bank_name || '';
+      const tail = ` - quote invoice ${invoice.invoice_number}. Bank transfers are also accepted; contact management for details.`;
+      if (method === 'till') {
+        return `Payment Method: Buy Goods Till ${number || '123456'} (Gutenberg Elite), Account Name: ${account}${tail}`;
+      }
+      if (method === 'send_money') {
+        return `Payment Method: M-PESA Send Money to ${number || landlord?.mpesa_number || ''} (${account})${tail}`;
+      }
+      if (method === 'bank') {
+        return `Payment Method: Bank Transfer${bank ? ` - ${bank}` : ''}, Account Number: ${number || landlord?.bank_account || ''}, Account Name: ${account}${tail}`;
+      }
+      return `Payment Method: M-PESA Paybill ${number || '4086873'} (Gutenberg Elite), Account Number: ${account}${tail}`;
     })(),
     GEHM_STAMP_LINE: '{{GEHM_STAMP_LINE}}',
     date: new Date(invoice.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),

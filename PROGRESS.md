@@ -1026,7 +1026,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1,157 assertions across 31 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
+Suite totals: **1,159 assertions across 31 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -2057,6 +2057,29 @@ delivering the invoice to the saved landlord WhatsApp number.
 
 ---
 
+### 67. Commission invoice payment methods: Send Money + Bank Account added
+Management asked for Send Money and Bank Account alongside Paybill / Till when creating the
+commission invoice.
+
+- The Generate Commission Invoice form now offers four payment methods - M-PESA Paybill, Buy
+  Goods Till, M-PESA Send Money, Bank Account - with the fields following the choice (bank name
+  appears for Bank Account; the number label switches between Paybill number / Till number /
+  Send money to (phone) / Bank account number). Each prefills from the landlord record
+  (mpesa_number, bank_name/bank_account, name).
+- The filled-in details are stored on the invoice and printed on the PDF:
+  "Payment Method: Buy Goods Till 123456 (Gutenberg Elite), Account Name: ...",
+  "Payment Method: M-PESA Send Money to 0721492014 (...)",
+  "Payment Method: Bank Transfer - Equity Bank, Account Number: ..., Account Name: ...".
+  Regeneration keeps the stored method; invoices without one fall back to the paybill default.
+- `tests/test_landlord_delete_invoice.js` (12 -> 14) covers the Send Money and Bank Account
+  renderings. Caught en route: the entry #66 SW cache rename broke the two stamp checks
+  (they pin the `gutenberg-v\d+-irmanage` pattern) - restored and re-verified (32/0, 153/0).
+
+All 31 suites green (1,159 assertions). Backend + frontend (stamps: app v90, sw v91 /
+gutenberg-v92-irmanage).
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -2127,3 +2150,4 @@ delivering the invoice to the saved landlord WhatsApp number.
 | 64 | Utilized credits consumed exactly once (B30) + advance-edit propagation rule (manual corrections re-derive all balances) | backend+tests |
 | 65 | Confirmation figures from the correct tenant's active configuration (SB1): exact-code match over shared phones + full-month rent display verified system-wide | backend+tests |
 | 66 | Landlord delete fix (aborted-transaction bug) + commission invoice Till/Paybill payment method + ledger buttons verified (share via landlord WhatsApp) | backend+frontend+data |
+| 67 | Commission invoice payment methods: Send Money + Bank Account (fields follow the method, printed on the invoice) | backend+frontend |

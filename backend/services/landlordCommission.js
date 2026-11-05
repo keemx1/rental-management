@@ -444,7 +444,7 @@ async function getLedger(housePaybill, landlordId = null) {
   };
 }
 
-async function generateCommissionInvoice(housePaybill, billingMonth, { actor, payment_method, payment_number, payment_account_name } = {}) {
+async function generateCommissionInvoice(housePaybill, billingMonth, { actor, payment_method, payment_number, payment_account_name, payment_bank_name } = {}) {
   const { query } = require('../config/database');
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(billingMonth || ''))) {
     return { error: 'billing_month must be YYYY-MM', code: 'VALIDATION' };
@@ -481,10 +481,11 @@ async function generateCommissionInvoice(housePaybill, billingMonth, { actor, pa
               payment_method = COALESCE($8, payment_method),
               payment_number = COALESCE($9, payment_number),
               payment_account_name = COALESCE($10, payment_account_name),
+              payment_bank_name = COALESCE($11, payment_bank_name),
               updated_at = NOW()
-        WHERE id = $11 RETURNING *`,
+        WHERE id = $12 RETURNING *`,
       [commissionable, rate, commission, balance_before, payments_in_month, totalPayable, dueDate,
-        payment_method || null, payment_number || null, payment_account_name || null, existing.id]
+        payment_method || null, payment_number || null, payment_account_name || null, payment_bank_name || null, existing.id]
     )).rows[0];
   } else {
     const invoiceNumber = await store.generateCommissionInvoiceNumber();
@@ -492,12 +493,12 @@ async function generateCommissionInvoice(housePaybill, billingMonth, { actor, pa
       `INSERT INTO commission_invoices
          (invoice_number, landlord_id, house_paybill_number, billing_month, rent_collected,
           commission_rate, commission_amount, previous_balance, payments_applied, total_payable,
-          due_date, status, created_by, payment_method, payment_number, payment_account_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Issued',$12,$13,$14,$15)
+          due_date, status, created_by, payment_method, payment_number, payment_account_name, payment_bank_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Issued',$12,$13,$14,$15,$16)
        RETURNING *`,
       [invoiceNumber, landlord.id, housePaybill, billingMonth, commissionable,
         rate, commission, balance_before, payments_in_month, totalPayable, dueDate, actor || null,
-        payment_method || null, payment_number || null, payment_account_name || null]
+        payment_method || null, payment_number || null, payment_account_name || null, payment_bank_name || null]
     )).rows[0];
   }
 

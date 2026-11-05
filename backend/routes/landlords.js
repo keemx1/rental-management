@@ -206,12 +206,13 @@ router.get('/:id/properties/:paybill/ledger', async (req, res) => {
 
 router.post('/:id/properties/:paybill/commission-invoice', async (req, res) => {
   try {
-    const { billing_month, payment_method, payment_number, payment_account_name } = req.body || {};
+    const { billing_month, payment_method, payment_number, payment_account_name, payment_bank_name } = req.body || {};
     const result = await commission.generateCommissionInvoice(req.params.paybill, billing_month, {
       actor: req.user?.username,
       payment_method: payment_method || null,
       payment_number: payment_number || null,
       payment_account_name: payment_account_name || null,
+      payment_bank_name: payment_bank_name || null,
     });
     if (result.error) {
       const status = result.code === 'NOT_FOUND' ? 404

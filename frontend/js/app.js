@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
- const GEHM_VERSION = 'v89';
+ const GEHM_VERSION = 'v90';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -4453,9 +4453,13 @@ function openCommissionInvoiceModal(paybill) {
   const methodEl = document.getElementById('ll-invoice-pay-method');
   const numberEl = document.getElementById('ll-invoice-pay-number');
   const accountEl = document.getElementById('ll-invoice-pay-account');
+  const bankEl = document.getElementById('ll-invoice-pay-bank');
+  const lld = _llState.overview?.landlord || {};
   if (methodEl) methodEl.value = 'paybill';
-  if (numberEl) numberEl.value = _llState.overview?.landlord?.mpesa_number || '';
-  if (accountEl) accountEl.value = _llState.overview?.landlord?.name || '';
+  if (numberEl) numberEl.value = lld.mpesa_number || '';
+  if (accountEl) accountEl.value = lld.name || '';
+  if (bankEl) bankEl.value = lld.bank_name || lld.bank_account || '';
+  llSyncInvoicePayFields();
   const monthEl = document.getElementById('ll-invoice-month');
   if (monthEl) monthEl.value = _llState.month || new Date().toISOString().slice(0, 7);
   document.getElementById('ll-invoice-preview-box')?.classList.add('hidden');
@@ -4474,6 +4478,7 @@ async function generateLandlordInvoiceNow() {
     payment_method: document.getElementById('ll-invoice-pay-method')?.value || 'paybill',
     payment_number: (document.getElementById('ll-invoice-pay-number')?.value || '').trim(),
     payment_account_name: (document.getElementById('ll-invoice-pay-account')?.value || '').trim(),
+    payment_bank_name: (document.getElementById('ll-invoice-pay-bank')?.value || '').trim(),
   };
   const resEl = document.getElementById('ll-invoice-result');
   if (resEl) resEl.textContent = 'Generating…';
@@ -4656,6 +4661,21 @@ document.getElementById('btn-ll-form-cancel')?.addEventListener('click', () => d
 document.getElementById('btn-ll-form-save')?.addEventListener('click', saveLandlordForm);
 document.getElementById('btn-ll-assign-cancel')?.addEventListener('click', () => document.getElementById('ll-assign-modal')?.classList.add('hidden'));
 document.getElementById('btn-ll-assign-save')?.addEventListener('click', saveAssignProperty);
+// Payment-method fields on the commission invoice: Send Money / Bank Account
+// join Paybill / Till; the bank name field and the number label follow the
+// chosen method. The filled-in details are what the invoice prints.
+function llSyncInvoicePayFields() {
+  const method = document.getElementById('ll-invoice-pay-method')?.value || 'paybill';
+  const bankWrap = document.getElementById('ll-invoice-pay-bank-wrap');
+  const numberLabel = document.getElementById('ll-invoice-pay-number-label');
+  const numberEl = document.getElementById('ll-invoice-pay-number');
+  if (bankWrap) bankWrap.classList.toggle('hidden', method !== 'bank');
+  const labels = { paybill: 'Paybill number', till: 'Till number', send_money: 'Send money to (phone)', bank: 'Bank account number' };
+  const placeholders = { paybill: 'e.g. 4086873', till: 'e.g. 123456', send_money: 'e.g. 0721492014', bank: 'e.g. 0100 1234 5678' };
+  if (numberLabel) numberLabel.textContent = labels[method] || 'Number';
+  if (numberEl) numberEl.placeholder = placeholders[method] || '';
+}
+document.getElementById('ll-invoice-pay-method')?.addEventListener('change', llSyncInvoicePayFields);
 document.getElementById('btn-ll-invoice-close')?.addEventListener('click', () => document.getElementById('ll-invoice-modal')?.classList.add('hidden'));
 document.getElementById('btn-ll-invoice-generate')?.addEventListener('click', generateLandlordInvoiceNow);
 document.getElementById('btn-ll-invoice-pdf')?.addEventListener('click', async (e) => {
