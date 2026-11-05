@@ -54,7 +54,9 @@ async function validateTenantAccount(tenantCode) {
 
   // 4. Payment allocations must sum to the payment amount (no unaccounted money).
   const pays = (await query(
-    `SELECT id, amount, allocation_breakdown FROM payments WHERE tenant_code = $1 AND status = 'Approved'`, [tenantCode])).rows;
+    `SELECT id, amount, payment_type, billing_period, payment_date::text AS payment_date,
+            overpayment_amount, allocation_breakdown
+     FROM payments WHERE tenant_code = $1 AND status = 'Approved'`, [tenantCode])).rows;
   for (const p of pays) {
     const a = alloc(p);
     const sum = num(a.rentSettled) + num(a.garbageFeeSettled) + num(a.waterSettled) + num(a.penaltySettled)
@@ -65,7 +67,48 @@ async function validateTenantAccount(tenantCode) {
     }
   }
 
-  // 5. Duplicate M-Pesa references within the tenant.
+  // 5. Transaction truth (SYSTEM DIRECTIVE 2026-11-05): "No genuine transaction,
+  //    no recognized payment." rent_paid_this_month must be supported by genuine
+  //    transactions for the tenant's CURRENT rent cycle - rent-directed payments
+  //    allocated to the cycle, deposit applications, or a transaction-backed
+  //    advance covering the cycle. Flags the D1 class: a phantom credit left by a
+  //    removed advance's consumption re-emit, or a previous cycle's payment
+  //    carried forward into the new month by a rollover/counter drift.
+  const cycle = (t.rent_due_date || '').slice(0, 7) || new Date().toISOString().slice(0, 7);
+  const cycleKey = (pd) => (/^\d{4}-\d{2}$/.test(String(pd.billing_period || '')) ? String(pd.billing_period) : String(pd.payment_date || '').slice(0, 7));
+  const rentDirected = (pd) => {
+    const a = alloc(pd);
+    return (a.rentSettled !== undefined && a.rentSettled !== null) ? num(a.rentSettled) : num(pd.amount);
+  };
+  const paymentsSupport = pays.filter((pd) => cycleKey(pd) === cycle).reduce((s, pd) => s + rentDirected(pd), 0);
+  const depRow = (await query(
+    `SELECT COALESCE(SUM(amount_applied), 0) AS total FROM deposit_applications
+     WHERE tenant_code = $1 AND billing_period = $2 AND status = 'Active' AND tenancy_id IS NULL`,
+    [tenantCode, cycle])).rows[0];
+  const depositSupport = num(depRow && depRow.total);
+  const advanceBacked = num(t.opening_advance_rent)
+    + pays.reduce((s, pd) => s + num(pd.overpayment_amount), 0)
+    + pays.filter((pd) => pd.payment_type === 'advance_rent').reduce((s, pd) => s + num(pd.amount), 0) > 0;
+  const advPrefix = (t.advance_rent_until || '').slice(0, 7);
+  const advDay = Number((t.advance_rent_until || '').slice(8, 10)) || 1;
+  const advanceCoversRent = !!advPrefix && num(t.rent_amount) > 0
+    && (cycle < advPrefix || (cycle === advPrefix && advDay <= 1));
+  const support = advanceCoversRent
+    ? (advanceBacked ? num(t.rent_amount) : 0)
+    : Math.min(num(t.rent_amount), Math.min(num(t.advance_rent_balance),
+        num(t.rent_amount) + Math.max(0, num(t.garbage_fee_amount) - num(t.garbage_fee_paid)) + Math.max(0, num(t.water_charge_amount) - num(t.water_charge_paid)))
+      + paymentsSupport + depositSupport);
+  if (num(t.rent_paid_this_month) > support + 0.01) {
+    issues.push({ code: 'RENT_PAID_UNSUPPORTED', msg: `rent_paid_this_month ${t.rent_paid_this_month} but only ${support} supported by genuine transactions for cycle ${cycle} (rent-directed payments ${paymentsSupport}, deposit ${depositSupport}, advance ${advanceCoversRent ? (advanceBacked ? 'covers' : 'PHANTOM coverage') : 'none'})` });
+  }
+  if (num(t.rent_paid_this_month) < support - 0.01) {
+    issues.push({ code: 'RENT_PAID_UNDERSTATED', msg: `rent_paid_this_month ${t.rent_paid_this_month} but ${support} is supported by genuine transactions for cycle ${cycle}` });
+  }
+  if ((num(t.advance_rent_balance) > 0 || t.advance_rent_until) && !advanceBacked) {
+    issues.push({ code: 'ADVANCE_UNSUPPORTED', msg: `advance_rent_balance ${t.advance_rent_balance} / until ${t.advance_rent_until} with no supporting transaction (opening ${t.opening_advance_rent}, no overpayment or advance_rent payments)` });
+  }
+
+  // 6. Duplicate M-Pesa references within the tenant.
   const dupRefs = (await query(
     `SELECT mpesa_reference, COUNT(*)::int AS n FROM payments WHERE tenant_code = $1 AND status='Approved' AND mpesa_reference IS NOT NULL GROUP BY mpesa_reference HAVING COUNT(*) > 1`, [tenantCode])).rows;
   for (const d of dupRefs) issues.push({ code: 'DUP_REF', msg: `duplicate mpesa_reference ${d.mpesa_reference} (${d.n} payments)` });

@@ -35,6 +35,7 @@ Run from the repo root (server must be up on port `3003`):
 | Pre-Exit Inspection Inventory | `node tests/test_preexit_inspection.js` | 56 assertions — unit lookup + tenancy disambiguation, item CRUD with server-side totals (spec 14,500 example), Draft/Shared/Agreed, PDF with exact disclaimer + no refund figures, one-time transfer into the Exit Invoice (repeat/partial retry safe, finalized refused 409), transferred items locked, tenancy seal + archive visibility, re-let protection |
 | Statement period integration | `node tests/test_statement_period.js` | 55 assertions — 7-row period summary (opening/rent/full garbage/charges/due/payments/balance) with month arithmetic + continuity, period-scoped payment & charge histories (no all-time mixing, no duplicate rows), period empty-states, design/letterhead preserved, route validation + PDF, frontend period selector |
 | Broadcast channel (SMS option) | `node tests/test_broadcast_channel.js` | 32 assertions — whatsapp/sms/both dispatch with per-channel tallies and log rows, SMS-only 400 when unconfigured, both+unconfigured degrades to WhatsApp with per-recipient SMS failures, honest per-recipient failure reasons, whatsapp_message_log untouched by SMS legs, house scoping, frontend selector |
+| Transaction truth (D1 class) | `node tests/test_transaction_truth.js` | 10 assertions - phantom rent-paid credit flagged (no genuine transaction), reconciler re-derives from the payment history, previous-cycle payments never settle the new cycle, transaction-backed advance recognised, unsupported advance/coverage flagged, the real payment then settles to zero / PAID with no overpayment |
 | Water billing scope (billing source + message totals) | `node tests/test_water_billing_scope.js` | 23 assertions - water owed = WATER-ONLY invoices (legacy bundled rent+utility rows excluded from preview, allocation, exit summary, statement), billed with the cycle whose rent pays them (payment_month/due_month), preview == confirmation == allocation ("Rent Due" shows the month's FULL rent + garbage + water, e.g. 12,380 for rent 12,000 + garbage 200 + water 180), bundled rows never touched by water settling, payment delete reopens the settled invoice + restores the register balance, partial settle never flips Paid |
 | Water invoice water-only scope | `node tests/test_water_invoice_scope.js` | 27 assertions — totals = water bill + WATER arrears only (rent/garbage/other arrears excluded even when supplied), tenant rent never injected, update recomputes water-only, PDF titled WATER BILL INVOICE with no rent/garbage lines + water-only notes, form fields removed, PDF end-to-end |
 | Universal global search | `node tests/test_global_search.js` | 23 assertions — every entity type (tenants, archive, properties, landlords, water/exit invoices, pre-exit forms, payments+M-Pesa with receipt deep links, penalties, work orders, maintenance, mgmt expense invoices, documents, commission invoices/payments), kinds for direct navigation, route + auth, frontend bar |
@@ -1023,7 +1024,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1,122 assertions across 28 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
+Suite totals: **1,132 assertions across 29 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -1872,6 +1873,57 @@ All 28 suites green (1,122 assertions). Backend + data. Stamps unchanged (backen
 
 ---
 
+### 62. Transaction-based reconciliation: D1 (Stephen Kinyangu) + system-wide phantom credits (SYSTEM DIRECTIVE)
+"NO GENUINE TRANSACTION, NO RECOGNIZED PAYMENT." Management reported: after the erroneous 60,000
+record was corrected (entry #58), D1's dashboard still showed November 2026 rent PAID - and the
+real November payment (attempt #5316, ref UJS8306DG3, deleted Nov 4) was misclassified as an
+overpayment. Root cause: the 60,000 advance's CONSUMPTION RE-EMIT survived its removal -
+reconcileTenant had seeded rent_paid_this_month 15,000 for November from the phantom
+advance_rent_until, with NO November transaction behind it.
+
+- **D1 corrected (audit-logged)**: payment #1424 (15,000, ref UJ1838R9VC) confirmed as the
+  1 OCTOBER payment (allocation billing_period 2026-10, rentSettled 15,000 to October - already
+  correct) and its recorded date restored to 2026-10-01 (pre-fix MM/DD parse artifact; source
+  message in notes: "10/01/2026 at 10:00:50"; management: "the payment dated 1st October").
+  Counters re-derived from the payment history: November credit 15,000 -> 0 (unsupported),
+  November rent 15,000 OUTSTANDING, October fully settled, arrears 0 preserved, the 60,000
+  correction PRESERVED (never reintroduced). Verified end-to-end: entering the actual November
+  payment of 15,000 now allocates "Monthly Rent: KES 15,000 ... Your account is fully paid"
+  (balance 0, status PAID) - no overpayment.
+- **System-wide audit** (`backend/scripts/audit-transaction-truth.js [--apply]`, 307 active
+  tenants): rent_paid_this_month must equal what genuine transactions support for the tenant's
+  current rent cycle (rent-directed payments tagged to the cycle + deposit applications +
+  transaction-backed advance coverage). Findings + corrections (each audit-logged with previous
+  value / corrected value / reason):
+  - 4 counter corrections (D1 class): B30 (1,000 -> 0 carried-forward credit), EX304 (40,000 ->
+    800 - November's payment carried into the December cycle; only the 800 advance supports Dec),
+    EX006 (35,500 -> 35,700 - deposit application + 200 advance), SB8 STAIRS (4,000 -> 4,500 -
+    genuine advance covers the cycle at the current rate).
+  - 33 payment-date restorations (pre-fix MM/DD parse artifacts, entry #55): the stored money
+    date contradicted the source M-Pesa text in the payment's own notes, and the source date's
+    reading that aligns with the payment's allocated cycle was taken (e.g. "10/01/2026" ->
+    2026-10-01, "5/11/26" -> 2026-11-05). Receipts, references, amounts and billing allocations
+    untouched - only the recorded money date restored to the original message's date.
+  - FLAGGED for management (no silent rewrite): 11 payments whose money date genuinely differs
+    from the allocated cycle (real advances / late recordings: BH11 #1547, C4 #3828, EX001 #2236,
+    EX201 #1512, B21 #901, C302 #1488, C601 #1489, EX603 #1454, ME6 #1476, EX004 #1479,
+    EX304 #5169) and EX003's 200 credit with no overpayment transaction.
+- **Ongoing enforcement** (directive 4): `financialValidator.js` now checks transaction truth at
+  all three stages (before rollover / after rollover / after payment): RENT_PAID_UNSUPPORTED,
+  RENT_PAID_UNDERSTATED, ADVANCE_UNSUPPORTED - every finding written to audit_log. The rollover
+  contract already satisfies directive 5 (closes the month from its own transactions, resets the
+  new cycle, never carries a payment forward) once phantom credits are gone; reconcileTenant
+  (the documented transaction-truth engine) runs after every approval, deletion and rollover.
+- **Safeguards honoured**: no genuine transaction changed; no receipts/references duplicated;
+  legitimate advance rent untouched (only transaction-backed advances recognised); genuine
+  arrears and the #60 management decisions on retained arrears preserved; only affected accounts
+  corrected.
+
+All 29 suites green (1,132 assertions) incl. new `tests/test_transaction_truth.js` (10).
+Backend + data.
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -1937,3 +1989,4 @@ All 28 suites green (1,122 assertions). Backend + data. Stamps unchanged (backen
 | 59 | Per-management allocations (BH5 deposit, GB01 Sept rent, A501 Sept rent) + arrears-recompute finding | data+verification |
 | 60 | Final reconciliation: move-in-optional arrears recompute + end-to-end module agreement | data+verification |
 | 61 | Water billing root-cause fix: water-only invoices, cycle-month matching, full month charges in messages, delete-reversal sync + 16 evidence-based corrections | backend+data |
+| 62 | Transaction-truth reconciliation: D1 Stephen Kinyangu fix + system-wide phantom credits/date artifacts + 3-stage validator enforcement | backend+data |
