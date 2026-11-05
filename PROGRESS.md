@@ -1754,6 +1754,39 @@ corrected value, reason, date, actor).
   needs the deeper "recompute from move-in history" pass (flagged in #46) to catch any
   carried-forward balance lacking a supporting rent obligation.
 
+---
+
+### 59. Per-management allocations + arrears-recompute finding (system directive)
+Applied the three unallocated payments exactly per management's stated intent (audit-logged):
+- **BH5 pay#638 (13,000)** = SECURITY DEPOSIT -> allocated to deposit account.
+- **GB01 pay#625 (35,200, 8 Sep)** = SEPTEMBER rent 35,000 + garbage 200. Sept+Oct rent both
+  marked paid; Nov rent now due; no advance/overpayment. (garbage_fee_paid synced.)
+- **A501 pay#620 (30,000, 22 Sep)** = SEPTEMBER rent (partial - did not clear the full amount).
+  Outstanding Sept balance carried forward; Oct 10% late penalty 3,500; 300 garbage (Oct+Nov);
+  current rent balance 3,800 maintained.
+
+**Arrears recomputation (billing-month reference) - evaluated but NOT blindly applied.** Built the
+recompute (continuous billing range from created_at, obligation = rent+garbage, first month
+prorated via first_billing_charge, minus payments matched by billing_period + penalties). Verified
+against known-good examples: B38 = 18,000 (2 x 9,000 incl. garbage) matches; ME3's 9,500 needs a
+~6,000 prorated first month not present in `first_billing_charge` (null).
+
+Ran it system-wide (306 tenants): **only 14 match the stored arrears; 292 "differ" with the
+computed value HIGHER than stored** (e.g. B3 computed 6,500 vs stored 0). Root cause: the prior-
+month netting matches payments by `billing_period`, but many payments are tagged with the WRONG
+month (the Nov-tagged-for-Sept issue), so payments are not netted against the months they cover -
+inflating arrears. Per the directive's own safeguard ("do NOT create artificial arrears"), the
+recomputation was NOT applied - it would manufacture arrears on 292 paid-up accounts. Genuine
+arrears preserved. FLAGGED: the billing_period tagging must be reconciled first (the same fix as
+"trust payment month over tag"), after which the recompute nets correctly.
+
+## Open items / next (system directive - remaining)
+- **Billing-period tagging reconciliation** - the root cause blocking the arrears recompute. Once
+  payments are tagged with the month they actually cover, the recompute nets correctly and the
+  final end-to-end reconciliation (dashboard / payment history / rent processing / statements /
+  rollover / advance+arrears reports) closes cleanly.
+- **A501 Oct 3,500 penalty + 300 garbage**: confirmed as management-stated charges; retained.
+
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
   a phone, desktop and laptop; confirm Excel/PDF open read-only without any
   manual formatting. Automated checks cover structure; this confirms look-and-feel.
@@ -1829,3 +1862,4 @@ corrected value, reason, date, actor).
 | 56 | Fix confirmation/SMS water figure (whole metered register -> current-month only) + void SS8 fictitious invoice | backend+data |
 | 57 | 3-stage automated financial validator (before/after rollover, after payment) + system-wide consistency audit | backend |
 | 58 | System-wide advance/rent-balance audit: remove unsupported advance (D1 60k) + fix over-allocation (B23) | backend+data |
+| 59 | Per-management allocations (BH5 deposit, GB01 Sept rent, A501 Sept rent) + arrears-recompute finding | data+verification |
