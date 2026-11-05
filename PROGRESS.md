@@ -1787,6 +1787,29 @@ arrears preserved. FLAGGED: the billing_period tagging must be reconciled first 
   rollover / advance+arrears reports) closes cleanly.
 - **A501 Oct 3,500 penalty + 300 garbage**: confirmed as management-stated charges; retained.
 
+---
+
+### 60. Final reconciliation: move-in-optional arrears recompute + end-to-end module agreement
+Applied management's final clarification (no mandatory move-in dates):
+- **Recomputable set = 1 tenant (SS5)** - the only one with a recorded `first_billing_charge`
+  (5,500 half-month). Its first billing month is the MOVE-IN month (Oct 5), so billing months are
+  Oct-Nov only. Correct recompute = 0 (matches stored) -> RETAINED. (An earlier run that used
+  `created_at` [Aug] as the first month over-counted SS5 to 22,200 - that was an erroneous
+  artificial-arrears creation, REVERTED to stored 0 with audit.)
+- **306 tenants RETAINED** (no `first_billing_charge` recorded): existing verified opening balance +
+  transaction history preserved. No first-month charge invented or estimated, per instruction.
+- **All confirmations hold**: ME3 9,500 genuine (retained), B3 0 (Oct paid / Nov due), GB01 0,
+  A501 0, D1 advance 0 (60,000 removal retained), B23 1,300, BH5 deposit 13,000 (advance 0 - the
+  13,000 is a security deposit, correctly not advance).
+- **End-to-end reconciliation CONSISTENT** (sample: ME3/B38/BH8/BH46/SS5/D1): the exit-summary
+  (single source) arrears + unpaid-rent equal the tenant-account counters, so dashboard, payment
+  history, rent processing, monthly statements, rollover and advance/arrears reports all reflect
+  the same verified balances.
+
+Guiding principle honoured throughout: RETAIN what is valid, CORRECT what is wrong, REMOVE what
+has no support. No balances reset to zero; no legitimate arrears/advance deleted; no invented
+billing records; genuine arrears + advance preserved; every correction audit-logged.
+
 - **Device acceptance pass (human):** open `scratch/report_samples/` samples on
   a phone, desktop and laptop; confirm Excel/PDF open read-only without any
   manual formatting. Automated checks cover structure; this confirms look-and-feel.
@@ -1863,3 +1886,4 @@ arrears preserved. FLAGGED: the billing_period tagging must be reconciled first 
 | 57 | 3-stage automated financial validator (before/after rollover, after payment) + system-wide consistency audit | backend |
 | 58 | System-wide advance/rent-balance audit: remove unsupported advance (D1 60k) + fix over-allocation (B23) | backend+data |
 | 59 | Per-management allocations (BH5 deposit, GB01 Sept rent, A501 Sept rent) + arrears-recompute finding | data+verification |
+| 60 | Final reconciliation: move-in-optional arrears recompute + end-to-end module agreement | data+verification |
