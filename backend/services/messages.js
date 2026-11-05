@@ -317,7 +317,7 @@ async function sendPaymentConfirmation(tenant, payment, allocation) {
   try {
     const store = require('../storage/store');
     const cons = await store.getOverpaymentConsolidation(tenant.tenant_code);
-    body = appendCreditConsolidation(body, cons);
+    body = appendCreditConsolidation(body, cons, payment, allocation);
   } catch (_) {}
   return sendReceiptText(tenant, body, 'Payment Confirmation');
 }
@@ -326,14 +326,23 @@ async function sendPaymentConfirmation(tenant, payment, allocation) {
 // Pure presentation: every figure comes from the original receipts
 // (payments.overpayment_amount) and the recorded allocations
 // (credit_allocations) — nothing is merged, double-counted or invented.
-function appendCreditConsolidation(msg, cons) {
+function appendCreditConsolidation(msg, cons, payment = null, allocation = null) {
   if (!cons || !cons.has_activity || !cons.receipts.length) return msg;
   const fmt = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const currentOverpayment = Number((allocation && allocation.overpayment) ?? payment?.overpayment_amount ?? 0);
+  // Applied vs available (EX402 fix 2026-11-05): the acknowledgement must never
+  // present the lifetime accumulation of receipts as "the overpayment" -
+  // previously utilized credits are excluded from the available balance and the
+  // figures come from the reconciled tenant ledger, never re-accumulated here.
+  const applied = Number(cons.applied_overpaid ?? 0);
+  const available = Number(cons.available_overpaid ?? Math.max(0, Number(cons.total_overpaid || 0) - applied));
   const lines = ['', '', '— OVERPAYMENT & CREDIT SUMMARY —'];
   for (const r of cons.receipts) {
-    lines.push(`Overpayment from receipt ${r.receipt_number || '(no receipt)'}${r.payment_date ? ` dated ${r.payment_date}` : ''}: KES ${fmt(r.overpayment)} (payment KES ${fmt(r.payment_amount)})`);
+    const isCurrent = payment && Number(r.payment_id) === Number(payment.id);
+    lines.push(`Overpayment from receipt ${r.receipt_number || '(no receipt)'}${r.payment_date ? ` dated ${r.payment_date}` : ''}: KES ${fmt(r.overpayment)} (payment KES ${fmt(r.payment_amount)})${isCurrent ? ' - this payment' : ''}`);
   }
-  lines.push(`Total combined credit from receipts: KES ${fmt(cons.total_overpaid)}`);
+  lines.push(`Current transaction overpayment: KES ${fmt(currentOverpayment)}`);
+  lines.push(`Total overpaid across receipts (incl. KES ${fmt(applied)} already applied to rent/charges): KES ${fmt(cons.total_overpaid)}`);
   if (cons.allocations.length) {
     for (const a of cons.allocations) {
       lines.push(`Allocated to ${a.target}${a.reason ? ` (${a.reason})` : ''}: KES ${fmt(a.amount)}${a.applied_at ? ` on ${a.applied_at}` : ''}`);
@@ -343,7 +352,8 @@ function appendCreditConsolidation(msg, cons) {
   if (Number(cons.advance_rent_balance) > 0) {
     lines.push(`Advance rent: KES ${fmt(cons.advance_rent_balance)}${cons.advance_rent_until ? ` (paid up to ${cons.advance_rent_until})` : ''}`);
   }
-  lines.push(`Remaining credit available: KES ${fmt(cons.remaining_credit)}`);
+  lines.push(`Credit balance: KES ${fmt(cons.remaining_credit)}`);
+  lines.push(`Overpayment available (reconciled): KES ${fmt(available)}`);
   return `${msg}\n${lines.join('\n')}`;
 }
 

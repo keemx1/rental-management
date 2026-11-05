@@ -42,8 +42,9 @@ async function cleanup() {
     `DELETE FROM credit_allocations WHERE tenant_code LIKE 'ZZOP-%'`,
     `DELETE FROM payments WHERE tenant_code LIKE 'ZZOP-%'`,
     `DELETE FROM message_logs WHERE tenant_code LIKE 'ZZOP-%'`,
+    `DELETE FROM audit_log WHERE entity_id LIKE 'ZZOP-%' OR details::text LIKE '%ZZOP%'`,
     `DELETE FROM tenants WHERE tenant_code LIKE 'ZZOP-%'`,
-    `DELETE FROM houses WHERE paybill_number = '999982'`,
+    `DELETE FROM houses WHERE paybill_number IN ('999982', '999983')`,
   ]) {
     try { await query(sql, []); } catch (e) { console.error('[cleanup]', e.message); }
   }
@@ -104,12 +105,12 @@ async function main() {
     check(ack.startsWith(base), '5. base acknowledgement untouched');
     check(ack.includes('R-OP-1') && ack.includes('R-OP-2'),
       '5b. previous + new overpayments both named');
-    check(ack.includes('Total combined credit from receipts: KES 10,000.00'),
-      '5c. combined credit line present');
+    check(ack.includes('Total overpaid across receipts (incl. KES 6,000.00 already applied to rent/charges): KES 10,000.00'),
+      '5c. lifetime line clearly labels the utilized portion (never presented as the overpayment)');
     check(ack.includes('Allocated to rent') && ack.includes('Total allocated: KES 6,000.00'),
       '5d. allocation lines present');
-    check(ack.includes('Remaining credit available: KES 4,000.00'),
-      '5e. remaining credit line present');
+    check(ack.includes('Overpayment available (reconciled): KES 4,000.00'),
+      '5e. overpayment available (reconciled) = 4,000 - utilized credits excluded');
     check(ack.includes('Advance rent: KES 5,000.00') && ack.includes('paid up to 2026-12-31'),
       '5f. advance rent line present');
     const quiet = appendCreditConsolidation(base, { has_activity: false, receipts: [] });
@@ -152,6 +153,41 @@ async function main() {
       `8b. BH46: ${bh ? bh.receipts.length : 0} overpaid receipt(s) combined (total ${bh && bh.total_overpaid})`);
 
     // ── 9. Frontend ────────────────────────────────────────────────────────
+    // EX402 regression (2026-11-05): the acknowledgement must show the ACTUAL
+    // overpayment (400) and exclude the previously utilized 200 from the
+    // available balance - never a "combined credit 600" figure.
+    await query(`INSERT INTO houses (paybill_number, house_name, total_units, occupancy_status)
+      VALUES ('999983', 'ZZOP House Two', 2, 'unknown')`);
+    await store.createTenant({
+      tenant_code: 'ZZOP-02', name: 'ZZOP Ex402', phone_number: '+254700001602',
+      property_name: 'ZZOP House Two', house_id: '999983', rent_amount: 27000, deposit_amount: 27000,
+      move_in_date: '2026-09-01', rent_due_date: '2026-11-05', status: 'Active',
+    });
+    const pExA = (await query(
+      `INSERT INTO payments (tenant_code, amount, overpayment_amount, payment_date, status, payment_type, receipt_number, mpesa_reference, billing_period, payment_mode, tenancy_id)
+       VALUES ('ZZOP-02', 27400, 200, '2026-10-05', 'Approved', 'rent', 'R-EX-A', 'MP-R-EX-A', '2026-10', 'M-Pesa', NULL) RETURNING *`
+    )).rows[0];
+    const pExB = (await query(
+      `INSERT INTO payments (tenant_code, amount, overpayment_amount, payment_date, status, payment_type, receipt_number, mpesa_reference, billing_period, payment_mode, tenancy_id)
+       VALUES ('ZZOP-02', 27400, 400, '2026-11-05', 'Approved', 'rent', 'R-EX-B', 'MP-R-EX-B', '2026-11', 'M-Pesa', NULL) RETURNING *`
+    )).rows[0];
+    await query(`UPDATE tenants SET advance_rent_balance = 400, advance_rent_until = '2026-11-30' WHERE tenant_code = 'ZZOP-02'`);
+    await query(
+      `INSERT INTO audit_log (actor, action, entity_type, entity_id, details, created_at)
+       VALUES ('tester', 'overpayment_resolved', 'tenant', 'ZZOP-02', $1, NOW())`,
+      [JSON.stringify({ payment_id: pExA.id, choice: 'advance_rent', overpayment: 200, months: ['2026-11'] })]
+    );
+    const exCons = await store.getOverpaymentConsolidation('ZZOP-02');
+    check(exCons.applied_overpaid === 200 && exCons.available_overpaid === 400,
+      `8b. EX402 class: utilized 200 excluded, available = 400 (got applied ${exCons.applied_overpaid}, available ${exCons.available_overpaid})`, exCons);
+    const exAck = appendCreditConsolidation('BASE', exCons, pExB, { overpayment: 400 });
+    check(exAck.includes('Current transaction overpayment: KES 400.00'),
+      '8c. message shows the ACTUAL overpayment 400', exAck);
+    check(exAck.includes('Overpayment available (reconciled): KES 400.00'),
+      '8d. available balance = 400 (reconciled ledger)', exAck);
+    check(!exAck.includes('Total combined credit from receipts'),
+      '8e. lifetime accumulation is never presented as the credit figure', exAck);
+
     const idx = await (await fetch('http://127.0.0.1:3003/')).text();
     check(idx.includes('id="td-credit-panel"') && idx.includes('OVERPAYMENT_CREDIT')
       && idx.includes('id="td-credit-receipts-tbody"') && idx.includes('placeholder="Search anything"'),

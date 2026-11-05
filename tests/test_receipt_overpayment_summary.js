@@ -74,6 +74,14 @@ async function main() {
     `UPDATE tenants SET credit_balance = 1500, advance_rent_balance = 7500, advance_rent_until = '2026-11-24'
       WHERE tenant_code = $1`, [CODE]
   );
+  // The 7,500 was applied as advance rent for a month that has already been
+  // reached - it is UTILIZED credit and must be excluded from the available
+  // balance (EX402 class, 2026-11-05).
+  await query(
+    `INSERT INTO audit_log (actor, action, entity_type, entity_id, details, created_at)
+     VALUES ('tester', 'overpayment_resolved', 'tenant', $1, $2, NOW())`,
+    [CODE, JSON.stringify({ pending_id: 1, payment_id: payB.id, choice: 'advance_rent', overpayment: 7500, months: ['2026-11'] })]
+  );
   // A quiet tenant with no credit activity at all
   await store.createTenant({
     tenant_code: 'ZZRC-02', name: 'ZZRC Quiet', phone_number: '+254700001702',
@@ -96,12 +104,12 @@ async function main() {
       '2. previous accumulated = 1,500 (spec)');
     check(html.includes('Current transaction overpayment') && (html.match(/KES 7,500/g) || []).length >= 1,
       '2b. current transaction overpayment = 7,500 (spec)');
-    check(html.includes('Total combined overpayment') && html.includes('KES 9,000'),
-      '2c. combined = 9,000 (spec)');
-    check(html.includes('Amount already allocated') && html.includes('KES 7,500'),
-      `2d. allocated shows TRUE consumed amount 7,500 (combined − remaining, no double counting)`);
-    check(html.includes('Remaining available overpayment') && html.includes('KES 1,500'),
-      '2e. remaining available = 1,500');
+    check(html.includes('Overpaid across receipts (incl. already applied)') && html.includes('KES 9,000'),
+      '2c. lifetime overpaid = 9,000, clearly labelled incl. applied (never as "the overpayment")');
+    check(html.includes('Amount already applied to rent/charges') && html.includes('KES 7,500'),
+      `2d. applied shows TRUE consumed amount 7,500 (utilized credits excluded, no double counting)`);
+    check(html.includes('Overpayment available (reconciled)') && html.includes('KES 1,500'),
+      '2e. overpayment available (reconciled) = 1,500');
     check(html.includes('Advance rent coverage') && html.includes('November 2026'),
       '2f. advance-rent coverage date shown (24 November 2026)');
     check(cons.total_overpaid === 9000 && cons.remaining_credit === 1500,

@@ -1024,7 +1024,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1,132 assertions across 29 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
+Suite totals: **1,136 assertions across 29 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -1924,6 +1924,38 @@ Backend + data.
 
 ---
 
+### 63. Overpayment figure in confirmations/receipts: actual available credit, never the accumulation (EX402)
+Management reported (Executive Apartments EX402, Brian Serem): November rent 27,000, payment 27,400,
+actual overpayment 400 - but the payment confirmation displayed an overpayment of 600 ("Total combined
+credit from receipts: KES 600.00") and the receipt PDF showed "Amount already allocated 600 /
+Remaining available 0". Root cause: the message generation ACCUMULATED every receipt's lifetime
+overpayment (200 already utilized for November rent + 400 current) and presented the total as the
+credit, while the "remaining" figure read only credit_balance (ignoring the advance-resident credit).
+
+- **FIX (presentation only - the reconciled EX402 dashboard and its genuine 400 overpayment are
+  untouched)**: `getOverpaymentConsolidation` now computes `applied_overpaid` /`available_overpaid`
+  from the receipts + their resolutions (a receipt's overpayment is APPLIED when its
+  `overpayment_resolved` earmark reached the tenant's current rent cycle, or when its credit was
+  spent via credit_allocations - only resolutions of SURVIVING receipts count). The acknowledgement
+  (`appendCreditConsolidation`) and the receipt PDF (`buildAccumulatedOverpaymentHtml`) now show:
+  "Current transaction overpayment: KES 400.00" (the transaction's actual overpayment), the lifetime
+  figure ONLY as "Overpaid across receipts (incl. KES 200.00 already applied)", and
+  "Overpayment available (reconciled): KES 400.00". Utilized credits are never re-counted; the
+  figures come from the reconciled ledger position at message time - the summary never independently
+  re-accumulates history into a different financial position.
+- **Verified**: EX402 - message + receipt PDF now read 400 (was 600/0). System-wide spot-check of all
+  46 tenants with overpayment receipts confirms the figures are point-in-time consistent with their
+  ledgers (credits legitimately consumed by later rent months move the ledger afterwards - the
+  message is a record of the position at generation).
+- **Tests**: `test_overpayment_summary.js` (23 -> 27) gains the EX402 regression (utilized 200
+  excluded, available 400, no combined-credit line); `test_receipt_overpayment_summary.js` (18) -
+  labels/figures updated to the reconciled semantics (applied 7,500 / available 1,500 unchanged
+  numbers). Dashboard, payment history, ledger and messages now agree.
+
+All 29 suites green (1,136 assertions). Backend (store.js, messages.js, documentStore.js) + tests.
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -1990,3 +2022,4 @@ Backend + data.
 | 60 | Final reconciliation: move-in-optional arrears recompute + end-to-end module agreement | data+verification |
 | 61 | Water billing root-cause fix: water-only invoices, cycle-month matching, full month charges in messages, delete-reversal sync + 16 evidence-based corrections | backend+data |
 | 62 | Transaction-truth reconciliation: D1 Stephen Kinyangu fix + system-wide phantom credits/date artifacts + 3-stage validator enforcement | backend+data |
+| 63 | Overpayment figure in confirmations/receipts: actual available credit (EX402 400 not 600), utilized credits excluded | backend |

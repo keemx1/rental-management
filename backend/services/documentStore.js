@@ -297,9 +297,10 @@ function buildAccumulatedOverpaymentHtml(payment, allocation, creditSummary) {
     const combined = Number(creditSummary.total_overpaid || 0);
     const current = Number(allocation?.overpayment ?? payment?.overpayment_amount ?? 0);
     if (!(combined > 0) && !(current > 0) && !(Number(creditSummary.advance_rent_balance) > 0)) return '';
-    const remaining = Number(creditSummary.remaining_credit || 0);
     const previous = Math.max(0, Math.round((combined - current) * 100) / 100);
-    const allocated = Math.max(0, Math.round((combined - remaining) * 100) / 100);
+    const applied = Number(creditSummary.applied_overpaid ?? 0);
+    const remaining = Number(creditSummary.available_overpaid ?? Math.max(0, combined - applied));
+    const allocated = applied;
     const fmt = (v) => KES(v);
     const advanceLine = Number(creditSummary.advance_rent_balance) > 0
       ? `<tr><td>Advance rent coverage</td><td class="amt">${fmt(creditSummary.advance_rent_balance)}${creditSummary.advance_rent_until ? ` <span class="cov">paid up to ${escDocText(formatDate(creditSummary.advance_rent_until, { monthFull: true }))}</span>` : ''}</td></tr>`
@@ -310,9 +311,9 @@ function buildAccumulatedOverpaymentHtml(payment, allocation, creditSummary) {
         <table class="op-table">
           <tr><td>Previous accumulated overpayment</td><td class="amt">${fmt(previous)}</td></tr>
           <tr><td>Current transaction overpayment</td><td class="amt">${fmt(current)}</td></tr>
-          <tr class="tot"><td>Total combined overpayment</td><td class="amt">${fmt(combined)}</td></tr>
-          <tr><td>Amount already allocated</td><td class="amt">${fmt(allocated)}</td></tr>
-          <tr class="tot"><td>Remaining available overpayment</td><td class="amt">${fmt(remaining)}</td></tr>
+          <tr class="tot"><td>Overpaid across receipts (incl. already applied)</td><td class="amt">${fmt(combined)}</td></tr>
+          <tr><td>Amount already applied to rent/charges</td><td class="amt">${fmt(allocated)}</td></tr>
+          <tr class="tot"><td>Overpayment available (reconciled)</td><td class="amt">${fmt(remaining)}</td></tr>
           ${advanceLine}
         </table>
       </div>`;

@@ -9372,11 +9372,54 @@ async function getOverpaymentConsolidation(tenantCode) {
   const totalAllocated = roundMoney(allocations.reduce((s, a) => s + a.amount, 0));
   const remainingCredit = roundMoney(tenant.credit_balance || 0);
   const advanceRentBalance = roundMoney(tenant.advance_rent_balance || 0);
+
+  // APPLIED vs AVAILABLE overpayment (SYSTEM DIRECTIVE 2026-11-05 - EX402):
+  // the acknowledgement must never present the lifetime accumulation of
+  // receipts as "the overpayment" - previously UTILIZED credits are excluded
+  // and the figure is the credit that is genuinely unused AT MESSAGE TIME.
+  // A receipt's overpayment is APPLIED when its resolution (audit
+  // 'overpayment_resolved') earmarked it to advance-rent months that have
+  // already reached the tenant's current rent cycle, or when its credit has
+  // been spent through credit_allocations. Everything else is still AVAILABLE
+  // credit (genuine, unused, transaction-supported) - including a payment's
+  // own overpayment before its resolution, which is exactly what the
+  // acknowledgement reports as "current transaction overpayment".
+  const cycle = tenant.rent_due_date ? String(tenant.rent_due_date).slice(0, 7) : new Date().toISOString().slice(0, 7);
+  const resolutions = (await query(
+    `SELECT details FROM audit_log
+      WHERE action = 'overpayment_resolved' AND entity_type = 'tenant' AND entity_id = $1`,
+    [tenantCode]
+  )).rows.map((r) => {
+    let d = r.details;
+    try { if (typeof d === 'string') d = JSON.parse(d); } catch (_) { d = null; }
+    return d || {};
+  });
+  const monthsReached = (d) => {
+    if (!Array.isArray(d.months) || !d.months.length) return true; // auto allocation starts at the current month
+    const first = d.months.map((m) => String(m).slice(0, 7)).sort()[0];
+    return first <= cycle;
+  };
+  const resByPayment = {};
+  for (const d of resolutions) { if (d.payment_id != null) resByPayment[String(d.payment_id)] = d; }
+  // Only resolutions of SURVIVING receipts count - an old resolution whose
+  // payment was deleted must never mark a later receipt's credit as applied.
+  let appliedAdvance = 0;
+  for (const r of receipts) {
+    const d = resByPayment[String(r.payment_id)];
+    if (!d || d.choice !== 'advance_rent') continue;
+    if (!monthsReached(d)) continue;
+    appliedAdvance += r.overpayment;
+  }
+  const appliedOverpaid = roundMoney(Math.min(totalOverpaid, appliedAdvance + totalAllocated));
+  const availableOverpaid = roundMoney(Math.max(0, totalOverpaid - appliedOverpaid));
+
   return {
     receipts,
     allocations,
     total_overpaid: totalOverpaid,
     total_allocated: totalAllocated,
+    applied_overpaid: appliedOverpaid,
+    available_overpaid: availableOverpaid,
     remaining_credit: remainingCredit,
     advance_rent_balance: advanceRentBalance,
     advance_rent_until: tenant.advance_rent_until || null,
