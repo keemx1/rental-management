@@ -42,6 +42,19 @@ async function validateTenantAccount(tenantCode) {
   // 2. Paid never exceeds the configured charge (no over-recorded payments).
   if (num(t.deposit_paid) > num(t.deposit_amount)) issues.push({ code: 'OVER_DEPOSIT', msg: `deposit_paid ${t.deposit_paid} > deposit_amount ${t.deposit_amount}` });
   if (num(t.garbage_fee_paid) > num(t.garbage_fee_amount)) issues.push({ code: 'OVER_GARBAGE', msg: `garbage_fee_paid ${t.garbage_fee_paid} > garbage_fee_amount ${t.garbage_fee_amount}` });
+  // 2b. A paid flag must be supported by settlement evidence (SA3 class,
+  // 2026-11-07): garbage_fee_paid with no payment's allocation ever settling
+  // garbage is an unsupported figure - it makes the fee disappear from billing
+  // ("it doesn't pick the garbage fee") and hides the tenant's real arrears.
+  if (num(t.garbage_fee_paid) > 0) {
+    const g = (await query(
+      `SELECT COALESCE(SUM((allocation_breakdown->>'garbageFeeSettled')::numeric), 0) AS s
+         FROM payments WHERE tenant_code = $1 AND status = 'Approved' AND tenancy_id IS NULL`,
+      [tenantCode])).rows[0];
+    if (num(g && g.s) <= 0) {
+      issues.push({ code: 'GARBAGE_PAID_UNSUPPORTED', msg: `garbage_fee_paid ${t.garbage_fee_paid} with NO payment evidence (no allocation ever settled garbage) - fee disappears from billing` });
+    }
+  }
   if (num(t.water_charge_paid) > num(t.water_charge_amount)) issues.push({ code: 'OVER_WATER', msg: `water_charge_paid ${t.water_charge_paid} > water_charge_amount ${t.water_charge_amount}` });
 
   // 3. Stale/re-emitted advance (EX304-pattern): opening_advance_rent was seeded

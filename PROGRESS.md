@@ -2151,6 +2151,33 @@ the rent (leaving rent arrears 400) - instead the system booked 29,600 as overpa
 
 ---
 
+### 71. Unit-by-unit sweep (5/…): SA3 - the 200 garbage fee was never picked up (+ global class fix)
+Management (SA3, Sunrise): due 13,740 = rent 13,000 + water 540 + garbage 200; the tenant paid
+13,540 and must end with a 200 arrear - but parsing "doesn't pick the 200 garbage fee" and the
+message even said "fully paid".
+
+- **Root cause**: garbage_fee_paid was marked 200 with ZERO settlement evidence (no approved
+  payment's allocation ever settled garbage) - so the fee vanished from the allocation while the
+  due line still showed 200 (an inconsistent "13,740 due / 13,540 received / fully paid").
+  Live parse after the fix: "Rent Due for November 2026 was KES 13,740 (Garbage Fee: 200, Water
+  Charges: 540, Monthly Rent: 13,000). Allocated: Garbage Fee 200 and Water Charges 540 and
+  Monthly Rent 12,800. Your remaining balance is KES 200 (Monthly Rent: 200)" - exactly the
+  expected outcome.
+- **Global class fix ("apply it so it doesn't repeat in other units")**: the same unsupported
+  flag was found on BH20 (Bluegum) - corrected the same way (audit-logged each: garbage_fee_paid
+  200 -> 0, fee now charged). New financialValidator check GARBAGE_PAID_UNSUPPORTED (runs at all
+  3 stages) flags any paid-garbage flag without settlement evidence. Verified: 0 remaining across
+  all 66 tenants with garbage_fee_paid > 0, zero false positives.
+- **Flagged for management (charging decision)**: houses where garbage applies on most units but
+  some units lack the fee - Sunrise SS8; Bluegum BH5/BH14/BH18/BH19/BH45/BH35; Executive
+  EX002/EX005/EX006/EX206/EX302/EX703; Luxury C501/A102/A501/A402/B102. Also Blue House
+  (2 units @ 2,000 garbage vs 42 without) and Mariana (1 @ 2,000 vs 47 without) look like
+  configuration anomalies. Adding fees changes what tenants are charged - awaiting your word
+  (A602's "add garbage fee to the houses that apply").
+- All 31 suites green (1,162 assertions). Backend + data.
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -2225,3 +2252,4 @@ the rent (leaving rent arrears 400) - instead the system booked 29,600 as overpa
 | 68 | Unit sweep: B23 reminder lines always sum to the total (Other Charges itemised) + B14 duplicate 500 credit removed (November back to normal 6,500) | backend+frontend+data |
 | 69 | Unit sweep: A602 stale 10% penalty voided (total 73,900 not 80,900) + Garbage Fee visible line in the reminder for houses that apply | backend+frontend+data |
 | 70 | Unit sweep: EX004 last-month payment re-tagged to its own cycle (Nov rent due again: 30,400 due, 30,000 payment leaves rent arrears 400 - no phantom 29,600 overpayment) | data |
+| 71 | Unit sweep: SA3 garbage fee picked up again (200 arrear as expected) + global class fix (BH20) + GARBAGE_PAID_UNSUPPORTED validator check | backend+data |
