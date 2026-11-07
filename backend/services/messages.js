@@ -153,7 +153,11 @@ function buildPaymentConfirmation(tenant, payment, allocation) {
   // garbage + water billed with this month's rent), matching the tenant
   // statement and the parse preview - not what remains after earlier partial
   // payments this month.
-  const garbageFeeDue = num(tenant.garbage_fee_amount || 0) > 0 ? num(tenant.garbage_fee_amount) : num(garbageFeeBefore);
+  // Garbage display (management 2026-11-07): MONTHLY houses show the month's
+  // fee; ONE-TIME houses (2,000) show only what is still outstanding - a paid
+  // one-time fee must never re-appear in later months.
+  const garbageFeeDue = String(tenant.garbage_fee_frequency || 'monthly') === 'one_time'
+    ? num(garbageFeeBefore) : num(tenant.garbage_fee_amount || 0);
   const rentDueFull = num(rentAmountSnapshot || 0) > 0 ? num(rentAmountSnapshot) : num(rentDue);
   const totalDueBefore = num(depositShortfallBefore) + num(arrearsBefore) + num(penaltyBefore) + num(maintenanceBefore) + num(otherBefore) + garbageFeeDue + num(waterChargeBefore || 0) + rentDueFull + num(agreementBefore || 0);
 

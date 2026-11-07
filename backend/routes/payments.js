@@ -536,7 +536,12 @@ function buildPaymentMessage(tenant, payment, pendingPenalties, waterInvoices = 
   // (rent + garbage + the water due with this month's rent) - what the tenant's
   // statement charges for the month - not what remains after earlier partial
   // payments this month.
-  const garbageFeeDue = garbageFeeAmount > 0 ? garbageFeeAmount : garbageFeeShortfall;
+  // Garbage display (management 2026-11-07): MONTHLY houses show the month's
+  // fee (it is billed every month - the SB1 format); ONE-TIME houses
+  // (Mariana/Blue House/Sunview/Cream House, KES 2,000) show only what is still
+  // outstanding - a paid one-time fee must never re-appear in later months.
+  const garbageFeeDue = String(tenant.garbage_fee_frequency || 'monthly') === 'one_time'
+    ? garbageFeeShortfall : garbageFeeAmount;
   const totalDue = agreementOutstanding + depositShortfall + currentArrears + totalPenalties + garbageFeeDue + currentWaterDue + rentAmount;
 
   const fullMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];

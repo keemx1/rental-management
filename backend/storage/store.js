@@ -4565,7 +4565,7 @@ async function rolloverBody() {
   const overdue = await query(
     `SELECT tenant_code, rent_amount, arrears, rent_due_date::text AS rent_due_date, advance_rent_balance, advance_rent_until,
             standard_monthly_rent, first_billing_method, move_in_date::text AS move_in_date, arrears_manually_set,
-            garbage_fee_amount
+            garbage_fee_amount, garbage_fee_frequency
      FROM tenants
      WHERE status != 'Vacant' AND rent_due_date < $1`,
     [firstOfThisMonth]
@@ -4576,7 +4576,11 @@ async function rolloverBody() {
     const manuallySet = t.arrears_manually_set === true;
     let arrears = Number(t.arrears || 0);
     const rentAmount = Number(t.rent_amount || 0);
-    const garbageRate = Number(t.garbage_fee_amount || 0);
+    // ONE-TIME garbage (Mariana/Blue House/Sunview/Cream House: KES 2,000) is
+    // charged ONCE - the monthly rollover must never re-bill it (management
+    // 2026-11-07). Monthly houses accrue unpaid garbage each closing month.
+    const garbageOneTime = String(t.garbage_fee_frequency || 'monthly') === 'one_time';
+    const garbageRate = garbageOneTime ? 0 : Number(t.garbage_fee_amount || 0);
     let garbageRolled = 0;
     let dueDate = new Date(t.rent_due_date + 'T12:00:00');
     let advanceRentBalance = Number(t.advance_rent_balance || 0);
@@ -4693,7 +4697,7 @@ async function rolloverBody() {
       }
 
       await query(
-        `UPDATE tenants SET arrears = $1, rent_due_date = $2, rent_paid_this_month = 0, garbage_fee_paid = 0, status = $6, advance_rent_balance = $4, advance_rent_until = $5, updated_at = NOW()${rentUpdate} WHERE tenant_code = $3`,
+        `UPDATE tenants SET arrears = $1, rent_due_date = $2, rent_paid_this_month = 0,${garbageOneTime ? '' : ' garbage_fee_paid = 0,'} status = $6, advance_rent_balance = $4, advance_rent_until = $5, updated_at = NOW()${rentUpdate} WHERE tenant_code = $3`,
         [Math.max(0, arrears), newDueDate, t.tenant_code, advanceRentBalance, newAdvanceUntil, newStatus, ...extraParams]
       );
       results.push({

@@ -2178,6 +2178,32 @@ message even said "fully paid".
 
 ---
 
+### 72. Garbage fee configuration + one-time semantics (all houses)
+Management (2026-11-07): Mariana House, Blue House, Sunview, Cream House pay a ONE-TIME garbage
+fee of KES 2,000; every other house pays KES 200 MONTHLY; Matangi Junction Shops pays none.
+(The 2,000 values found on some Blue House/Mariana units were correct - not anomalies.)
+
+- **Configuration applied to all 307 active tenants (166 updated, audit-logged each)**:
+  BLUE HOUSE 44 / CREAM HOUSE 21 / MARIANA HOUSE 48 / SUNVIEW 37 @ 2,000 one_time;
+  BLUEGUM 25 / EXECUTIVE 49 / LUXURY 41 / MUGUTHA 4 / SUNRISE 26 @ 200 monthly (the previously
+  missing units - SS8, BH5/14/18/19/35/45, EX002/005/006/206/302/703, C501/A102/A501/A402/B102
+  etc. - now carry the fee); MATANGI 12 @ 0.
+- **ONE-TIME semantics (the rollover would have re-billed 2,000 every month!)**: new
+  `garbage_fee_frequency` column; the monthly rollover never resets garbage_fee_paid nor accrues
+  one-time fees - a paid 2,000 stays paid and never re-bills. Verified with live rollover
+  fixtures (3/3): one-time PAID -> stays paid, no re-bill; monthly paid -> fresh fee next cycle;
+  monthly unpaid -> rolls into arrears exactly once per cycle.
+- **Message display**: payment confirmations show the month's fee for MONTHLY houses (the
+  accepted SB1 format) and only the OUTSTANDING amount for ONE-TIME houses (a paid 2,000 never
+  re-appears in later months); Matangi shows no garbage line at all. Verified live: D1 (Sunview)
+  "Garbage Fee: KSh 2,000", SA3 (Sunrise) "Garbage Fee: KSh 200", MSHOP 6 (Matangi) - no line.
+- **NOTE for management**: the newly configured fees now appear as owed on tenants whose records
+  don't show them paid (e.g. D1 now bills the one-time 2,000). If a tenant already paid the
+  one-time fee outside the system, mark it paid on the tenant record (or tell me which).
+- All 31 suites green (1,162 assertions). Backend + data.
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -2253,3 +2279,4 @@ message even said "fully paid".
 | 69 | Unit sweep: A602 stale 10% penalty voided (total 73,900 not 80,900) + Garbage Fee visible line in the reminder for houses that apply | backend+frontend+data |
 | 70 | Unit sweep: EX004 last-month payment re-tagged to its own cycle (Nov rent due again: 30,400 due, 30,000 payment leaves rent arrears 400 - no phantom 29,600 overpayment) | data |
 | 71 | Unit sweep: SA3 garbage fee picked up again (200 arrear as expected) + global class fix (BH20) + GARBAGE_PAID_UNSUPPORTED validator check | backend+data |
+| 72 | Garbage fee configuration (2,000 one-time for Mariana/Blue House/Sunview/Cream House, 200 monthly elsewhere, none for Matangi) + one-time rollover semantics + message display rules | backend+data |
