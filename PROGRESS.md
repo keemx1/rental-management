@@ -2130,6 +2130,27 @@ garbage 200) - not 80,900 - and the garbage fee must be VISIBLE in the text sent
 
 ---
 
+### 70. Unit-by-unit sweep (4/…): EX004 - last month's 61,500 was paying November's rent
+Management (EX004, GEOFREY MUGAMBI): last month's 61,500 covered rent 30,000 + deposit 30,000 +
+tenants agreement 1,500, remaining arrears 200 (garbage). This month's 30,000 payment must deduct
+the rent (leaving rent arrears 400) - instead the system booked 29,600 as overpayment.
+
+- **Root cause**: payment #1479 (61,500, ref UIP9G79YWE) carried billing_period 2026-11 (the
+  approval derives it from rent_due_date) - so its rent 30,000 settlement counted as NOVEMBER's
+  rent. November then appeared PAID and the real November 30,000 payment (entered and deleted
+  today) found only the 400 garbage due -> 29,600 "overpayment". Its allocation had also put 200
+  to garbage (allocation order) leaving deposit 200 short, while the garbage 200 was owed.
+- **Corrections (audit-logged, history/receipts untouched)**: #1479 re-tagged to its actual cycle
+  2026-10 (management-verified); deposit_paid 29,800 -> 30,000 (the 61,500 covered the deposit);
+  arrears 0 -> 200 (October's garbage = the "remaining arrears of 200", management figure,
+  arrears_manually_set); counters re-derived. Verified live: the due reads 200 + 30,000 + 200 =
+  **30,400** and re-processing the 30,000 (preview, existing allocation order) allocates
+  Arrears 200 + Garbage 200 + Rent 29,600 -> **rent arrears 400** - exactly the expected outcome,
+  zero overpayment. The reminder reads Previous Arrears 200 / Rent 30,000 / Garbage 200 = 30,400.
+- All 31 suites green (1,162 assertions). Data-only corrections - stamps unchanged.
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -2203,3 +2224,4 @@ garbage 200) - not 80,900 - and the garbage fee must be VISIBLE in the text sent
 | 67 | Commission invoice payment methods: Send Money + Bank Account (fields follow the method, printed on the invoice) | backend+frontend |
 | 68 | Unit sweep: B23 reminder lines always sum to the total (Other Charges itemised) + B14 duplicate 500 credit removed (November back to normal 6,500) | backend+frontend+data |
 | 69 | Unit sweep: A602 stale 10% penalty voided (total 73,900 not 80,900) + Garbage Fee visible line in the reminder for houses that apply | backend+frontend+data |
+| 70 | Unit sweep: EX004 last-month payment re-tagged to its own cycle (Nov rent due again: 30,400 due, 30,000 payment leaves rent arrears 400 - no phantom 29,600 overpayment) | data |
