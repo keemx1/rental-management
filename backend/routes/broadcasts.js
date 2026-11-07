@@ -15,7 +15,7 @@ function applyTemplate(body, tenant, house, fin) {
     .replaceAll('{{house_name}}', house?.house_name || tenant.property_name || 'House')
     .replaceAll('{{house_number}}', tenant.unit_label || tenant.tenant_code || '')
     .replaceAll('{{arrears}}', fmtKes(fin?.arrears))
-    .replaceAll('{{current_rent}}', fmtKes(fin?.currentRent))
+    .replaceAll('{{current_rent}}', fmtKes(fin?.rentAmount ?? fin?.currentRent))
     .replaceAll('{{payments_received}}', fmtKes(fin?.paymentsReceived))
     .replaceAll('{{outstanding_balance}}', fmtKes(fin?.outstanding))
     .replaceAll('{{remaining_balance}}', fmtKes(fin?.outstanding))

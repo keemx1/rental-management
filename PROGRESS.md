@@ -1026,7 +1026,7 @@ unpaid and not already processed.
   `?v=84`, SW → `gutenberg-v87-irmanage`.
 
 ---
-Suite totals: **1,159 assertions across 31 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
+Suite totals: **1,162 assertions across 31 suites** (run `node tests\sweep-fixtures.js --apply` afterwards to purge fixture residue from crashed runs).
 
 ### 34. Financial Management Phase 1 — obligations, monthly report, registers (v85)
 First demo slice of the confirmed financial plan (management decision sheet §6):
@@ -2080,6 +2080,34 @@ gutenberg-v92-irmanage).
 
 ---
 
+### 68. Unit-by-unit sweep (2/…): B23 reminder math + B14 double-counted 500
+Management is walking unit by unit to have every account clean before the December rollover
+(reports 100% accurate). First two units:
+
+- **B23 (Hiram Mwangi) - Rent Balance Reminder "calculations don't add up"**: the template's
+  TOTAL came from the reconciled ledger balance (arrears + remaining rent + penalties + garbage +
+  water) while the visible lines only showed arrears / rent / payments - the hidden components
+  (B23's restored waterbill 1,000 + socket 300 = the missing 1,300) made 1,300 + 6,000 - 0 read
+  7,300 but print 8,600. FIX: the reminder now itemises "Other Charges
+  (Penalties/Garbage/Water)" and the TOTAL is computed from the SAME components as the displayed
+  lines - it can never disagree again (template body + seed + the fill in app.js; the broadcast
+  {{current_rent}} now carries the full rent so its parenthetical math closes too). Verified live:
+  B23 reads 0 + 6,000 - 5,700 + 0 = 300 (= its true remaining rent).
+- **B14 (Ian Nixon) - the 500 arrears payment "picked as an overpayment"**: the KES 500 was
+  consumed as remaining rent (payment #1582, receipt GEHPM-RCT-202610-001359, ref UJKIIAZ5PW,
+  allocation rentSettled 500 = October's remaining rent) AND separately booked as an opening
+  advance (audit 2026-10-16 opening_advance_added {amount:500, via:edit}) - the same credit
+  counted twice (October settlement + a phantom November rent-paid). FIX (one credit, one
+  utilization): the duplicate advance (slot + pool + coverage) removed, counters re-derived from
+  the payment history - November now reads the full normal rent 6,500 (verified: reminder
+  0 + 6,500 - 0 + 0 = 6,500). Historical transactions untouched; both steps audit-logged.
+- **Tests**: test_message_tenant_match (6 -> 9) - reminder template itemises Other Charges, the
+  fill computes the total from the displayed components, and the ledger balance equals the
+  reminder's line-sum. All 31 suites green (1,162 assertions). Stamps: app v91, sw v92 /
+  gutenberg-v93-irmanage.
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -2151,3 +2179,4 @@ gutenberg-v92-irmanage).
 | 65 | Confirmation figures from the correct tenant's active configuration (SB1): exact-code match over shared phones + full-month rent display verified system-wide | backend+tests |
 | 66 | Landlord delete fix (aborted-transaction bug) + commission invoice Till/Paybill payment method + ledger buttons verified (share via landlord WhatsApp) | backend+frontend+data |
 | 67 | Commission invoice payment methods: Send Money + Bank Account (fields follow the method, printed on the invoice) | backend+frontend |
+| 68 | Unit sweep: B23 reminder lines always sum to the total (Other Charges itemised) + B14 duplicate 500 credit removed (November back to normal 6,500) | backend+frontend+data |

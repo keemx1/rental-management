@@ -13,7 +13,7 @@ import { stagePhoto, stagedMediaFor, markMediaSynced } from './offline-media.js'
 import { detectWaterAnomaly } from './water-anomaly.js';
 import { prepareAgreementFiles } from './agreement-scan.js';
 
- const GEHM_VERSION = 'v90';
+ const GEHM_VERSION = 'v91';
 try { console.log(`[GEHM] app ${GEHM_VERSION} loaded`); } catch (_) {}
 try {
   const vEl = document.getElementById('gehm-version');
@@ -3220,6 +3220,18 @@ async function openMessageModal(tenantId) {
       const balancePeriod = now.toLocaleString('en-GB', { month: 'long', year: 'numeric' });
       const noticeDate = `${String(now.getDate()).padStart(2, '0')} ${balancePeriod}`;
 
+      // Figures come from the reconciled ledger and the TOTAL is always the
+      // exact sum of the displayed lines (B23 fix 2026-11-06: the total used to
+      // include penalties/garbage/water that had no line - 1,300 + 6,000 - 0
+      // read 7,300 but printed 8,600). Other charges are itemised, and the
+      // total is computed from the same components as the lines.
+      const prevArrears = Number(summary?.arrears ?? t.arrears ?? 0);
+      const rentDueFull = Number(summary?.rent_amount ?? t.rent_amount ?? 0);
+      const paidReceived = Number(summary?.rent_paid_this_month ?? t.rent_paid_this_month ?? 0);
+      const otherCharges = Number(summary?.penalties_outstanding ?? 0)
+        + Number(summary?.garbage_fee_shortfall ?? 0)
+        + Number(summary?.water_charge_shortfall ?? 0);
+      const totalOutstanding = prevArrears + rentDueFull - paidReceived + otherCharges;
       const vars = {
         client_name: t.name || '',
         tenant_code: t.tenant_code || '',
@@ -3230,10 +3242,11 @@ async function openMessageModal(tenantId) {
         unit_number: t.unit_label || t.tenant_code || '',
         notice_date: noticeDate,
         balance_period: balancePeriod,
-        previous_arrears: money(summary?.arrears ?? t.arrears),
-        current_rent_due: money(summary?.rent_amount ?? t.rent_amount),
-        payments_received: money(summary?.rent_paid_this_month ?? t.rent_paid_this_month),
-        total_outstanding_balance: money(summary?.balance),
+        previous_arrears: money(prevArrears),
+        current_rent_due: money(rentDueFull),
+        payments_received: money(paidReceived),
+        other_charges: money(otherCharges),
+        total_outstanding_balance: money(totalOutstanding),
       };
 
       let body = selectedTpl.body;

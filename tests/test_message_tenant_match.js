@@ -55,7 +55,9 @@ async function cleanup() {
   const app = express();
   app.use(express.json());
   app.use('/api/payments', require('../backend/routes/payments'));
+  app.use('/api/tenants', require('../backend/routes/tenants'));
   const srv = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
+  const PORT = srv.address().port;
   const u = (await query(`SELECT id, username, role FROM users WHERE is_active IS DISTINCT FROM false ORDER BY (role = 'admin') DESC, id LIMIT 1`)).rows[0];
   const token = jwt.sign({ sub: u.id, username: u.username, role: u.role }, process.env.JWT_SECRET, { expiresIn: '10m' });
   const parse = async (raw) => {
@@ -93,6 +95,24 @@ async function cleanup() {
     const conf = buildPaymentConfirmation(t, { amount: 9200, mpesa_reference: 'QA99ZZ11AA', billing_period: '2026-11' }, alloc);
     check(conf.includes('Rent Due for November 2026 was KES 9,200') && conf.includes('Monthly Rent: KES 9,000'),
       '6. receipt/confirmation parity: same configured figures', conf);
+
+    // ---- B23 class: every Rent Balance Reminder line sums exactly to the total ----
+    const tplRow = (await query(`SELECT body FROM message_templates WHERE key = 'rent_balance_reminder'`)).rows[0];
+    check(!!tplRow && tplRow.body.includes('{{other_charges}}'),
+      '7. reminder template itemises Other Charges (penalties/garbage/water)', tplRow && tplRow.body.slice(0, 80));
+    const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js')).text();
+    check(appJs.includes('other_charges: money(otherCharges)') && appJs.includes('totalOutstanding = prevArrears + rentDueFull - paidReceived + otherCharges'),
+      '7b. fill computes the total from the SAME components as the displayed lines');
+    // profile summary identity: balance == arrears + remaining rent + penalties + garbage + water
+    const u2 = (await query(`SELECT id, username, role FROM users WHERE role = 'admin' AND is_active IS DISTINCT FROM false ORDER BY id LIMIT 1`)).rows[0];
+    const tk = jwt.sign({ sub: u2.id, username: u2.username, role: u2.role }, process.env.JWT_SECRET, { expiresIn: '10m' });
+    const pr = await fetch(`http://127.0.0.1:${PORT}/api/tenants/${encodeURIComponent('ZZMA-02')}/profile`, { headers: { Authorization: `Bearer ${tk}` } });
+    const pj = await pr.json();
+    const s = pj.summary || {};
+    const identity = Number(s.arrears || 0) + Number(s.rent_amount || 0) - Number(s.rent_paid_this_month || 0)
+      + Number(s.penalties_outstanding || 0) + Number(s.garbage_fee_shortfall || 0) + Number(s.water_charge_shortfall || 0);
+    check(Math.abs(Number(s.balance || 0) - identity) < 0.01,
+      `7c. ledger balance == the reminder's line-sum (${s.balance} vs ${identity})`, s);
   } finally {
     srv.close();
   }
