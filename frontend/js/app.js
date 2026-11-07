@@ -3228,10 +3228,10 @@ async function openMessageModal(tenantId) {
       const prevArrears = Number(summary?.arrears ?? t.arrears ?? 0);
       const rentDueFull = Number(summary?.rent_amount ?? t.rent_amount ?? 0);
       const paidReceived = Number(summary?.rent_paid_this_month ?? t.rent_paid_this_month ?? 0);
+      const garbageFee = Number(summary?.garbage_fee_shortfall ?? 0);
       const otherCharges = Number(summary?.penalties_outstanding ?? 0)
-        + Number(summary?.garbage_fee_shortfall ?? 0)
         + Number(summary?.water_charge_shortfall ?? 0);
-      const totalOutstanding = prevArrears + rentDueFull - paidReceived + otherCharges;
+      const totalOutstanding = prevArrears + rentDueFull - paidReceived + garbageFee + otherCharges;
       const vars = {
         client_name: t.name || '',
         tenant_code: t.tenant_code || '',
@@ -3245,6 +3245,7 @@ async function openMessageModal(tenantId) {
         previous_arrears: money(prevArrears),
         current_rent_due: money(rentDueFull),
         payments_received: money(paidReceived),
+        garbage_fee: money(garbageFee),
         other_charges: money(otherCharges),
         total_outstanding_balance: money(totalOutstanding),
       };
@@ -3253,6 +3254,12 @@ async function openMessageModal(tenantId) {
       for (const [key, val] of Object.entries(vars)) {
         body = body.replaceAll(`{{${key}}}`, val);
       }
+      // Garbage Fee appears for the houses that apply (a garbage fee is
+      // configured); zero-value charge lines are dropped so the tenant reads a
+      // clean, complete list that always sums to the total (A602 fix).
+      const garbageApplies = Number(summary?.garbage_fee_amount ?? t.garbage_fee_amount ?? 0) > 0;
+      if (!garbageApplies) body = body.split('\n').filter((l) => !l.includes('Garbage Fee')).join('\n');
+      if (otherCharges <= 0) body = body.split('\n').filter((l) => !l.includes('Other Charges')).join('\n');
       bodyTextarea.value = body;
     };
     

@@ -2108,6 +2108,28 @@ Management is walking unit by unit to have every account clean before the Decemb
 
 ---
 
+### 69. Unit-by-unit sweep (3/…): A602 total 73,900 + Garbage Fee visible in the message
+Management (A602, William Utho): the total must be 73,900 (arrears 38,700 + rent 35,000 +
+garbage 200) - not 80,900 - and the garbage fee must be VISIBLE in the text sent to the client
+(houses that apply), not added in the background.
+
+- **A602 root cause of the 80,900**: the hidden extra 7,200 = garbage 200 (invisible in the text)
+  + the stale "10%" penalty #49 (7,000, inv GEHPM-INV-202610-000101) - its remainder (3,500 of
+  7,000) already sits inside the management-confirmed arrears 38,700 (35,200 + 3,500, the manual
+  figure), so listing the penalty row again double-billed it. FIX: penalty #49 VOIDED (not
+  deleted - payment history including pay#1573's allocation untouched) with audit; penalties now
+  support a Void state (migration, same pattern as water_invoices). Verified: A602 = 38,700 +
+  35,000 + 200 = 73,900 exactly.
+- **Garbage Fee visibility (all houses)**: the Rent Balance Reminder now carries its own
+  "• Garbage Fee: KSh ..." line - shown for houses where a garbage fee applies (dropped for
+  houses without one) - and "Other Charges (Penalties/Water)" drops when empty. The total is
+  computed from the same components as the displayed lines (the B23 rule). Verified:
+  A602 shows 38,700 + 35,000 + 200 = 73,900 with the fee visible; B23 (no garbage) reads a clean
+  300; SS6 (garbage applies, paid) shows "Garbage Fee: KSh 0".
+- All 31 suites green (1,162 assertions). Stamps: app v92, sw v93 / gutenberg-v94-irmanage.
+
+---
+
 ## Changelog index
 
 | # | Update | App version |
@@ -2180,3 +2202,4 @@ Management is walking unit by unit to have every account clean before the Decemb
 | 66 | Landlord delete fix (aborted-transaction bug) + commission invoice Till/Paybill payment method + ledger buttons verified (share via landlord WhatsApp) | backend+frontend+data |
 | 67 | Commission invoice payment methods: Send Money + Bank Account (fields follow the method, printed on the invoice) | backend+frontend |
 | 68 | Unit sweep: B23 reminder lines always sum to the total (Other Charges itemised) + B14 duplicate 500 credit removed (November back to normal 6,500) | backend+frontend+data |
+| 69 | Unit sweep: A602 stale 10% penalty voided (total 73,900 not 80,900) + Garbage Fee visible line in the reminder for houses that apply | backend+frontend+data |

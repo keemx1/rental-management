@@ -98,10 +98,10 @@ async function cleanup() {
 
     // ---- B23 class: every Rent Balance Reminder line sums exactly to the total ----
     const tplRow = (await query(`SELECT body FROM message_templates WHERE key = 'rent_balance_reminder'`)).rows[0];
-    check(!!tplRow && tplRow.body.includes('{{other_charges}}'),
-      '7. reminder template itemises Other Charges (penalties/garbage/water)', tplRow && tplRow.body.slice(0, 80));
+    check(!!tplRow && tplRow.body.includes('{{garbage_fee}}') && tplRow.body.includes('{{other_charges}}'),
+      '7. reminder itemises Garbage Fee (visible for houses that apply) + Other Charges', tplRow && tplRow.body.slice(0, 80));
     const appJs = await (await fetch('http://127.0.0.1:3003/js/app.js')).text();
-    check(appJs.includes('other_charges: money(otherCharges)') && appJs.includes('totalOutstanding = prevArrears + rentDueFull - paidReceived + otherCharges'),
+    check(appJs.includes('garbage_fee: money(garbageFee)') && appJs.includes('totalOutstanding = prevArrears + rentDueFull - paidReceived + garbageFee + otherCharges'),
       '7b. fill computes the total from the SAME components as the displayed lines');
     // profile summary identity: balance == arrears + remaining rent + penalties + garbage + water
     const u2 = (await query(`SELECT id, username, role FROM users WHERE role = 'admin' AND is_active IS DISTINCT FROM false ORDER BY id LIMIT 1`)).rows[0];
